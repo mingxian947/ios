@@ -62,6 +62,11 @@
 |---|---|---|
 | 17 | [iOS 凭证窃取与擦除分析报告](iOS凭证窃取与擦除分析报告.md) | Keychain/Data Protection/SEP 保护体系、凭证窃取手法、反取证与破坏性擦除 |
 
+### 八、硬件与系统防御
+| # | 文章 | 主题 |
+|---|---|---|
+| 18 | [iOS 硬件与系统防御分析报告](iOS硬件与系统防御分析报告.md) | 安全启动链、Secure Enclave、PAC/PPL/KTRR、AMFI、Data Protection、沙箱与 Lockdown Mode |
+
 ---
 
 ## 核心防护要点（TL;DR）
