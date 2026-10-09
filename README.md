@@ -46,26 +46,27 @@
 | 12 | [漏洞利用套件 Exploit Kit 分析报告](漏洞利用套件ExploitKit分析报告.md) | Exploit Kit 生态、投递与演化 |
 | 13 | [GHOSTBLADE 与锁定模式分析报告](GHOSTBLADE与锁定模式分析报告.md) | GHOSTBLADE 复用泄露链 + Lockdown Mode 防护 |
 | 14 | [iOS 水坑攻击与网页零日漏洞分析报告](iOS_水坑攻击与网页零日漏洞分析报告.md) | 水坑投递 + 网页零日 |
+| 15 | [Coruna 漏洞影响版本分析报告](Coruna漏洞影响版本分析报告.md) | Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析 |
 
 ### 五、越狱专题
 | # | 文章 | 主题 |
 |---|---|---|
-| 15 | [iOS 越狱漏洞分析报告](iOS越狱漏洞分析报告.md) | 越狱类型、漏洞原语与 checkm8 等 |
+| 16 | [iOS 越狱漏洞分析报告](iOS越狱漏洞分析报告.md) | 越狱类型、漏洞原语与 checkm8 等 |
 
 ### 六、载荷与组件
 | # | 文章 | 主题 |
 |---|---|---|
-| 16 | [iOS 恶意载荷与组件分析报告](iOS恶意载荷与组件分析报告.md) | 分层载荷、注入/持久化/C2/窃取/反分析组件与 AI 定制 |
+| 17 | [iOS 恶意载荷与组件分析报告](iOS恶意载荷与组件分析报告.md) | 分层载荷、注入/持久化/C2/窃取/反分析组件与 AI 定制 |
 
 ### 七、凭证窃取与擦除
 | # | 文章 | 主题 |
 |---|---|---|
-| 17 | [iOS 凭证窃取与擦除分析报告](iOS凭证窃取与擦除分析报告.md) | Keychain/Data Protection/SEP 保护体系、凭证窃取手法、反取证与破坏性擦除 |
+| 18 | [iOS 凭证窃取与擦除分析报告](iOS凭证窃取与擦除分析报告.md) | Keychain/Data Protection/SEP 保护体系、凭证窃取手法、反取证与破坏性擦除 |
 
 ### 八、硬件与系统防御
 | # | 文章 | 主题 |
 |---|---|---|
-| 18 | [iOS 硬件与系统防御分析报告](iOS硬件与系统防御分析报告.md) | 安全启动链、Secure Enclave、PAC/PPL/KTRR、AMFI、Data Protection、沙箱与 Lockdown Mode |
+| 19 | [iOS 硬件与系统防御分析报告](iOS硬件与系统防御分析报告.md) | 安全启动链、Secure Enclave、PAC/PPL/KTRR、AMFI、Data Protection、沙箱与 Lockdown Mode |
 
 ---
 
