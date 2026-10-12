@@ -40,6 +40,7 @@
 |---|---|---|
 | 9 | [三角行动 · Secure Enclave · 钥匙串窃取分析报告](三角行动_SecureEnclave_钥匙串窃取分析报告.md) | SEP、Data Protection、Keychain 访问控制及其滥用 |
 | 20 | [iOS 覆盖数据类别分析报告](iOS覆盖数据类别分析报告.md) | 8 大数据类别、Data Protection _classes、Keychain 访问属性与真实案例映射 |
+| 23 | [iOS 数据采集能力分析报告](iOS数据采集能力分析报告.md) | 采集架构、静态/实时/加密资产提取、外传通道、反检测与案例对比 |
 
 ### 四、真实案例与漏洞利用套件
 | # | 文章 | 主题 |
