@@ -29,6 +29,7 @@
 |---|---|---|
 | 3 | [WebKit 远程代码执行分析文章](WebKit_远程代码执行分析文章.md) | 阶段 1 · 初始访问 |
 | 21 | [iOS Safari 浏览器引擎安全分析报告](iOS_Safari浏览器引擎安全分析报告.md) | 阶段 1 · WebKit 架构、JSC 引擎、沙箱模型与攻击面深度分析 |
+| 30 | [iOS WebKit 漏洞：从 JavaScriptCore 到 JIT 利用原理](iOS_WebKit漏洞从JavaScriptCore到JIT利用原理.md) | 阶段 1 · JSC 执行管线、JIT 投机优化、类型混淆/OOB/UAF、addrof/fakeobj 原语与 JIT 硬化 |
 | 4 | [iOS PAC 绕过分析文章](iOS_PAC绕过分析文章.md) | 阶段 2 · 指针认证绕过 |
 | 5 | [iOS 沙箱逃逸分析文章](iOS_沙箱逃逸分析文章.md) | 阶段 3 · 沙箱逃逸 |
 | 29 | [iOS Sandbox Escape 技术详解](iOS_Sandbox_Escape技术详解.md) | 阶段 3 · 六大逃逸路径深度解析：Mach IPC、XPC、IOKit、GPU/ANGLE、媒体服务、WebKit IPC |
