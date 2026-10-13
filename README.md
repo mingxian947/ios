@@ -51,6 +51,7 @@
 | 13 | [GHOSTBLADE 与锁定模式分析报告](GHOSTBLADE与锁定模式分析报告.md) | GHOSTBLADE 复用泄露链 + Lockdown Mode 防护 |
 | 14 | [iOS 水坑攻击与网页零日漏洞分析报告](iOS_水坑攻击与网页零日漏洞分析报告.md) | 水坑投递 + 网页零日 |
 | 15 | [Coruna 漏洞影响版本分析报告](Coruna漏洞影响版本分析报告.md) | Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析 |
+| 24 | [iOS 著名漏洞案例系统网络安全文档](iOS著名漏洞案例系统网络安全文档.md) | Pegasus/FORCEDENTRY/Triangulation/checkm8/Coruna/DarkSword 等案例档案、横向对比、TTP 模式提炼 |
 
 ### 五、越狱专题
 | # | 文章 | 主题 |
