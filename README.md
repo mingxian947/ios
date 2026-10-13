@@ -31,6 +31,7 @@
 | 21 | [iOS Safari 浏览器引擎安全分析报告](iOS_Safari浏览器引擎安全分析报告.md) | 阶段 1 · WebKit 架构、JSC 引擎、沙箱模型与攻击面深度分析 |
 | 4 | [iOS PAC 绕过分析文章](iOS_PAC绕过分析文章.md) | 阶段 2 · 指针认证绕过 |
 | 5 | [iOS 沙箱逃逸分析文章](iOS_沙箱逃逸分析文章.md) | 阶段 3 · 沙箱逃逸 |
+| 29 | [iOS Sandbox Escape 技术详解](iOS_Sandbox_Escape技术详解.md) | 阶段 3 · 六大逃逸路径深度解析：Mach IPC、XPC、IOKit、GPU/ANGLE、媒体服务、WebKit IPC |
 | 6 | [iOS 内核提权分析文章](iOS_内核提权分析文章.md) | 阶段 4 · 内核提权 |
 | 7 | [iPhone 本地提权漏洞分析报告](iPhone本地提权漏洞分析报告.md) | 阶段 4 · 本地提权（LPE） |
 | 8 | [内存无文件攻击分析文章](内存无文件攻击分析文章.md) | 阶段 7 · 无持久化 / 反取证 |
