@@ -76,6 +76,11 @@
 | 19 | [iOS 硬件与系统防御分析报告](iOS硬件与系统防御分析报告.md) | 安全启动链、Secure Enclave、PAC/PPL/KTRR、AMFI、Data Protection、沙箱与 Lockdown Mode |
 | 27 | [苹果 SPTM、TXM 与 Exclaves 安全架构解析](苹果SPTM_TXM_Exclaves安全架构解析.md) | A17+ 芯片级硬件信任根：SPTM 页表监控、TXM EL3 信任根、Exclaves 协处理器隔离 |
 
+### 九、供应链安全
+| # | 文章 | 主题 |
+|---|---|---|
+| 28 | [iOS 供应链攻击分析报告](iOS供应链攻击分析报告.md) | XcodeGhost、依赖投毒、企业证书滥用、App Store 审核绕过、运行时注入与防御体系 |
+
 ---
 
 ## 核心防护要点（TL;DR）
