@@ -58,6 +58,7 @@
 | 15 | [Coruna 漏洞影响版本分析报告](Coruna漏洞影响版本分析报告.md) | Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析 |
 | 24 | [iOS 著名漏洞案例系统网络安全文档](iOS著名漏洞案例系统网络安全文档.md) | Pegasus/FORCEDENTRY/Triangulation/checkm8/Coruna/DarkSword 等案例档案、横向对比、TTP 模式提炼 |
 | 25 | [Pegasus 商业间谍软件利用 iOS 漏洞全过程分析报告](Pegasus商业间谍软件利用iOS漏洞全过程分析报告.md) | Pegasus 四代利用链技术演进（2016 Trident → 2018 ImageIO → 2019 零点击 → 2021 FORCEDENTRY → 2022+ M.O.）、持久化演化、目标分析与检测取证 |
+| 35 | [Pegasus 攻击链总体结构](Pegasus攻击链总体结构.md) | 7 层功能栈架构、各代攻击链结构对比、核心模块解析、反检测体系、C2 基础设施与模块化设计 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
