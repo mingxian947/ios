@@ -36,6 +36,7 @@
 | 29 | [iOS Sandbox Escape 技术详解](iOS_Sandbox_Escape技术详解.md) | 阶段 3 · 六大逃逸路径深度解析：Mach IPC、XPC、IOKit、GPU/ANGLE、媒体服务、WebKit IPC |
 | 6 | [iOS 内核提权分析文章](iOS_内核提权分析文章.md) | 阶段 4 · 内核提权 |
 | 7 | [iPhone 本地提权漏洞分析报告](iPhone本地提权漏洞分析报告.md) | 阶段 4 · 本地提权（LPE） |
+| 33 | [iOS Kernel Exploitation 与 KTRR/PPL 绕过技术详解](iOS_Kernel_Exploitation与KTRR_PPL绕过技术详解.md) | 阶段 4 · XNU 内核攻击面、KTRR/PPL/SPTM/TXM 机制与绕过、内核利用原语 |
 | 8 | [内存无文件攻击分析文章](内存无文件攻击分析文章.md) | 阶段 7 · 无持久化 / 反取证 |
 | 26 | [iOS 基带与无线通信安全分析报告](iOS基带与无线通信安全分析报告.md) | 无线攻击面 · 基带处理器、Wi-Fi/蓝牙/NFC、IMSI Catcher、GPS 欺骗与防御 |
 
