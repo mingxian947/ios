@@ -81,6 +81,7 @@
 | 55 | [Coruna 与 DarkSword 反取证与痕迹清除体系](Coruna与DarkSword_反取证与痕迹清除体系.md) | iOS 工件全景图、时间篡改/日志清除/崩溃规避、清除型 vs 零生成型、检测延迟与取证采集顺序铁律 |
 | 56 | [Coruna 与 DarkSword 及主流 iOS 攻击套件横向技术对比](Coruna与DarkSword_与主流攻击套件横向技术对比.md) | Trident/FORCEDENTRY/Triangulation/Coruna/DarkSword 等九套体系十二维度对比、五条演化规律与一页速查表 |
 | 57 | [iOS WebKit JIT 硬化与 Coruna/DarkSword 利用对抗演进](Coruna与DarkSword_WebKit_JIT硬化与利用对抗演进.md) | JSC 四级管线与投机优化缺陷、Gigacage/指针膨胀/CoW 页保护、锁定模式禁用 JIT 的移除型防御 |
+| 58 | [iOS 图形栈攻击面全景：ANGLE、WebGPU、Metal 与 IOGPU](Coruna与DarkSword_图形栈攻击面全景与逃逸主战场.md) | 六层图形栈结构与跨层信任假设、沙箱不可关闭的原因、驱动 CVE 价值分级、GPU 利用检测信号与 AI 计算预警 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
