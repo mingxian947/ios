@@ -78,6 +78,7 @@
 | 52 | [Coruna 与 DarkSword BlastDoor 与沙箱模型对抗分析](Coruna与DarkSword_BlastDoor与沙箱模型对抗分析.md) | Seatbelt 沙箱结构、BlastDoor 设计与 0-click 经济学、功能必需通道为何无法闭合、GPU 栈逃逸与锁定模式效果 |
 | 53 | [Coruna 与 DarkSword SEP 与钥匙串密钥提取路径](Coruna与DarkSword_SEP与钥匙串密钥提取路径.md) | 数据保护三层结构、解锁状态窗口、Keybag 与保护等级、三条 Keychain 提取路径、绕过而非攻破 SEP 的原因 |
 | 54 | [Coruna 与 DarkSword 模块化载荷编排与插件体系](Coruna与DarkSword_模块化载荷编排与插件体系.md) | 五层载荷模型、模块清单/任务队列/条件调度、一次性内联执行、模块迁移趋势与架构反推任务意图 |
+| 55 | [Coruna 与 DarkSword 反取证与痕迹清除体系](Coruna与DarkSword_反取证与痕迹清除体系.md) | iOS 工件全景图、时间篡改/日志清除/崩溃规避、清除型 vs 零生成型、检测延迟与取证采集顺序铁律 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
