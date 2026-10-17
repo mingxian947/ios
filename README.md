@@ -69,6 +69,7 @@
 | 43 | [DarkSword ANGLE/WebGPU 逃逸技术详解](DarkSword_ANGLE_WebGPU逃逸技术详解.md) | DarkSword 两阶段逃逸：ANGLE 层利用、WebGPU 攻击面、CVE-2025-43529、媒体服务注入、与 Coruna 对比 |
 | 44 | [DarkSword 媒体服务注入技术详解](DarkSword_媒体服务注入技术详解.md) | mediaserverd 架构与权限、音频/视频注入向量、解析漏洞利用、从用户态到系统级权限 |
 | 45 | [DarkSword 无持久化内存驻留技术](DarkSword_无持久化内存驻留技术.md) | Fileless 驻留策略、内存注入与执行、反取证机制、与 Coruna 持久化对比、检测与防御 |
+| 46 | [Coruna 与 DarkSword C2 通信协议分析](Coruna与DarkSword_C2通信协议分析.md) | C2 多层架构对比、通信协议与加密、心跳与任务下发、数据回传通道、反检测策略与网络检测 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
