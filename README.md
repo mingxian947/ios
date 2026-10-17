@@ -65,6 +65,7 @@
 | 39 | [Coruna WebKit 漏洞链技术详解](Coruna_WebKit漏洞链技术详解.md) | Coruna 初始访问阶段：CVE-2024-23222 JSC 类型混淆、addrof/fakeobj 原语、与 DarkSword 对比 |
 | 40 | [Coruna 沙箱逃逸技术详解](Coruna_沙箱逃逸技术详解.md) | Coruna 沙箱逃逸：GPU/ANGLE 攻击面、IOGPUDevice 内核驱动漏洞、与 DarkSword 逃逸路径对比 |
 | 41 | [Coruna 内核提权与 PAC 绕过技术](Coruna_内核提权与PAC绕过技术.md) | Coruna 内核提权：PAC 机制与绕过、KTRR/PPL 影响、SPTM/TXM 硬件保护、与 DarkSword 对比 |
+| 42 | [Coruna 数据采集模块架构分析](Coruna_数据采集模块架构分析.md) | 模块化采集架构、静态/实时监控、加密资产窃取、数据外传机制、与 DarkSword 对比 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
