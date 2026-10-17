@@ -62,6 +62,7 @@
 | 36 | [iOS Trident 漏洞链技术详解](iOS_Trident漏洞链技术详解.md) | 首个公开 iOS 全链条攻击：CVE-2016-4655/4656/4657 三漏洞串联、KASLR 绕过、内核提权与历史意义 |
 | 37 | [iOS ImageIO 0-click 漏洞链技术详解](iOS_ImageIO_0-click漏洞链技术详解.md) | 首个 iOS 0-click 攻击：iMessage 预渲染攻击面、ImageIO 解析漏洞、CVE-2018-4328/4331/4335 链式利用 |
 | 38 | [iOS FORCEDENTRY 0-click 漏洞链技术详解](iOS_FORCEDENTRY_0-click漏洞链技术详解.md) | WhatsApp 0-click 攻击：VoIP 呼叫无需接听、CoreText 字体解析漏洞 CVE-2021-30860、全球影响与 Apple 响应 |
+| 39 | [Coruna WebKit 漏洞链技术详解](Coruna_WebKit漏洞链技术详解.md) | Coruna 初始访问阶段：CVE-2024-23222 JSC 类型混淆、addrof/fakeobj 原语、与 DarkSword 对比 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
