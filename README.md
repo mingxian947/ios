@@ -74,6 +74,7 @@
 | 48 | [Coruna 与 DarkSword 防御与检测指南](Coruna与DarkSword_防御与检测指南.md) | 威胁建模分层、加固清单、MVT/网络/内存四条检测流程、应急响应时序、SIEM 规则速查与常见误区 |
 | 49 | [Coruna 与 DarkSword 漏洞武器化工程与利用链编排架构](Coruna与DarkSword_漏洞武器化工程与利用链编排架构.md) | L0-L6 武器化层次、多链编排 vs 单链精工、目标探测与原语升阶梯、可靠性工程、可观测攻击状态 |
 | 50 | [Coruna 与 DarkSword 水坑投递基础设施与目标识别机制](Coruna与DarkSword_水坑投递基础设施与目标识别机制.md) | 四类站点获取路径、三层基础设施、11 维目标识别筛选链、条件化内容分发、站点加固与画像复现取证 |
+| 51 | [Coruna 与 DarkSword KASLR 绕过与内核信息泄露技术](Coruna与DarkSword_KASLR绕过与内核信息泄露技术.md) | 三层随机化模型、五类内核泄露来源、kslide 推导路径、SPTM/TXM 影响、由 CVE 类型反推链条阶段 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
