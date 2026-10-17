@@ -71,6 +71,7 @@
 | 45 | [DarkSword 无持久化内存驻留技术](DarkSword_无持久化内存驻留技术.md) | Fileless 驻留策略、内存注入与执行、反取证机制、与 Coruna 持久化对比、检测与防御 |
 | 46 | [Coruna 与 DarkSword C2 通信协议分析](Coruna与DarkSword_C2通信协议分析.md) | C2 多层架构对比、通信协议与加密、心跳与任务下发、数据回传通道、反检测策略与网络检测 |
 | 47 | [Coruna 与 DarkSword 反检测机制对比](Coruna与DarkSword_反检测机制对比.md) | 六维工件面对比、主动清除型 vs 天然无痕型、MVT 与网络检测有效性、攻防权衡与检测分层策略 |
+| 48 | [Coruna 与 DarkSword 防御与检测指南](Coruna与DarkSword_防御与检测指南.md) | 威胁建模分层、加固清单、MVT/网络/内存四条检测流程、应急响应时序、SIEM 规则速查与常见误区 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
