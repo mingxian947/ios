@@ -67,6 +67,7 @@
 | 41 | [Coruna 内核提权与 PAC 绕过技术](Coruna_内核提权与PAC绕过技术.md) | Coruna 内核提权：PAC 机制与绕过、KTRR/PPL 影响、SPTM/TXM 硬件保护、与 DarkSword 对比 |
 | 42 | [Coruna 数据采集模块架构分析](Coruna_数据采集模块架构分析.md) | 模块化采集架构、静态/实时监控、加密资产窃取、数据外传机制、与 DarkSword 对比 |
 | 43 | [DarkSword ANGLE/WebGPU 逃逸技术详解](DarkSword_ANGLE_WebGPU逃逸技术详解.md) | DarkSword 两阶段逃逸：ANGLE 层利用、WebGPU 攻击面、CVE-2025-43529、媒体服务注入、与 Coruna 对比 |
+| 44 | [DarkSword 媒体服务注入技术详解](DarkSword_媒体服务注入技术详解.md) | mediaserverd 架构与权限、音频/视频注入向量、解析漏洞利用、从用户态到系统级权限 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
