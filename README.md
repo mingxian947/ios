@@ -84,6 +84,7 @@
 | 58 | [iOS 图形栈攻击面全景：ANGLE、WebGPU、Metal 与 IOGPU](Coruna与DarkSword_图形栈攻击面全景与逃逸主战场.md) | 六层图形栈结构与跨层信任假设、沙箱不可关闭的原因、驱动 CVE 价值分级、GPU 利用检测信号与 AI 计算预警 |
 | 59 | [Coruna 与 DarkSword 的 MITRE ATT&CK 战术映射与检测覆盖缺口](Coruna与DarkSword_ATT&CK战术映射与检测覆盖.md) | ID 可信度三档、逐战术映射与两套体系实现差异、数据源约束下的覆盖度核算、矩阵空洞与自定义 ID |
 | 60 | [iOS 0-click 利用技术演化史：从短信解析链到 Coruna 与 DarkSword](Coruna与DarkSword_0click利用技术演化史.md) | 无交互/无渲染/无解锁三层分级、解析器为何是唯一天然入口、十年入口下沉规律、0-click 与 1-click 经济学、检测受限项与现实抓手 |
+| 61 | [Apple 安全事件响应与补丁工程机制：从漏洞报告到 SWU 的时间账](Apple安全事件响应与补丁工程机制.md) | 四条漏洞接收通道、三段延迟模型、RSR 与静默修补、补丁暴露天数 PED 度量、披露机制张力与自查指标 |
 | 31 | [iOS 威胁情报与全球 APT 组织图谱分析报告](iOS威胁情报与全球APT组织图谱分析报告.md) | 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作 |
 
 ### 五、越狱专题
