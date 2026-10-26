@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 0-click 利用技术演化史：从短信解析链到 Coruna 与 DarkSword | iOS 安全研究文章库</title>
+<meta name="description" content="无交互/无渲染/无解锁三层分级、解析器为何是唯一天然入口、十年入口下沉规律、0-click 与 1-click 经济学、检测受限项与现实抓手">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a60.html">
+<meta property="og:title" content="iOS 0-click 利用技术演化史：从短信解析链到 Coruna 与 DarkSword">
+<meta property="og:description" content="无交互/无渲染/无解锁三层分级、解析器为何是唯一天然入口、十年入口下沉规律、0-click 与 1-click 经济学、检测受限项与现实抓手">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a60.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 60 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 0-click 利用技术演化史：从短信解析链到 Coruna 与 DarkSword</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Google Project Zero、Citizen Lab、Amnesty International（Pegasus 项目）、Lookout、Meta/WhatsApp 安全公告、Apple 安全发布页、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>0-click 是 iOS 攻击史上<strong>最难防御的一类能力</strong>：它不需要受害者点击、不需要授权、不需要设备解锁，甚至不需要任何一次用户交互留下线索。</p>
+<p>本文不重复单条利用链的技术细节（那些在 #36、#37、#38、#39、#43 已分别展开），而是提供<strong>十年演化视角</strong>：</p>
+<ol><li>iOS 的 0-click 为什么<strong>几乎全部落在解析器代码上</strong>——攻击面选择的内在逻辑</li><li>从 2016 年 Trident 到 2026 年 Coruna/DarkSword，入口位置发生了哪几次<strong>可辨识的迁移</strong></li><li>每一次迁移背后的<strong>驱动因素</strong>：Apple 缓解措施、供应链经济学、目标画像变化</li><li>0-click 与 1-click 在成本、寿命、归因难度上的<strong>结构性差异</strong>（与 #52 的&quot;0-click 经济学&quot;衔接）</li><li>对防御者最有用的部分：<strong>0-click 的检测为什么先天受限，以及还能做什么</strong></li></ol>
+<p>一句话预判：<strong>0-click 的演化方向不是&quot;更隐蔽&quot;，而是&quot;更早&quot;</strong>——从应用层解析器向基带、向启动阶段、向协议处理层下沉，因为只有下沉才能拿到&quot;任何交互之前&quot;这个时间窗口。</p>
+<hr>
+<h2>2. 先定义清楚：0-click 的三个层次</h2>
+<p>&quot;0-click&quot;这个词被用得太粗，导致防御决策经常建立在错误假设上。真实的能力分层是三级：</p>
+<table><thead><tr><th>层次</th><th>定义</th><th>受害者状态</th><th>代表入口</th><th>防御可行性</th></tr></thead><tbody><tr><td><strong>L1 无交互</strong></td><td>不需要用户点击或确认</td><td>设备正常使用中，屏幕可能亮</td><td>消息推送、URL 预取、后台解析</td><td>高（可关功能）</td></tr><tr><td><strong>L2 无渲染</strong></td><td>甚至不需要用户打开应用/收到可见消息</td><td>用户完全不知情，通知可被撤回</td><td>预渲染、缩略图生成、VoIP 信令</td><td>中（需关掉功能，如 #37 的预渲染）</td></tr><tr><td><strong>L3 无解锁</strong></td><td>首次引导后设备从未解锁即可触发</td><td>设备处于锁屏、文件系统类保护未打开</td><td>基带、安全启动早期阶段、内核网络栈</td><td>低（依赖硬件与固件质量）</td></tr></tbody></table>
+<p><strong>关键区别在数据保护上</strong>：L1/L2 拿到代码执行后，仍受 Data Protection 类约束（见 #53），必须等解锁窗口才能读钥匙串与多数用户数据；L3 若发生在解锁前，攻击者面对的是 <code>Complete</code> 类不可读，只能等——这解释了为什么大量 0-click 链<strong>仍要配合一次交互或等待解锁</strong>：不是入口不够早，而是密钥不可得。</p>
+<table><thead><tr><th>层次</th><th>是否触发隐私指示器</th><th>是否有崩溃概率</th><th>用户可否作证</th><th>时间锚点</th></tr></thead><tbody><tr><td>L1</td><td>可能有（麦克风/相机）</td><td>有</td><td>可（&quot;收到过一条消息&quot;）</td><td>有（消息时间戳）</td></tr><tr><td>L2</td><td>通常无</td><td>有</td><td>不可</td><td>弱（消息可能已删除）</td></tr><tr><td>L3</td><td>无</td><td>低（基带独立）</td><td>不可</td><td>无</td></tr></tbody></table>
+<hr>
+<h2>3. 十年时间线</h2>
+<table><thead><tr><th>年份</th><th>事件</th><th>入口</th><th>层次</th><th>关键机制位置</th><th>暴露方式</th></tr></thead><tbody><tr><td>2016</td><td>Trident（意大利组）</td><td>SMS 携带链接</td><td>L1（近 0-click）</td><td>WebKit + 内核，三漏洞串联（#36）</td><td>安全研究公开，非真实大规模使用</td></tr><tr><td>2018</td><td>ImageIO 预渲染链</td><td>iMessage 附件缩略图</td><td>L2</td><td>图像解析器（#37）</td><td>研究者发现通知撤回行为异常</td></tr><tr><td>2019</td><td>Pegasus &quot;三入口&quot;</td><td>iMessage/SMS/推送</td><td>L1—L2</td><td>WebKit + 媒体解析</td><td>漏洞研究披露 + 后续取证</td></tr><tr><td>2021</td><td>FORCEDENTRY</td><td>WhatsApp VoIP 呼叫 + 字体</td><td>L1—L2</td><td>CoreText/PDF 解析（#38）</td><td>平台方提前关停 + 司法披露</td></tr><tr><td>2022</td><td>REGRESSPASS/媒体类变体</td><td>图片/视频解析</td><td>L2</td><td>解析器复用，工具包外泄</td><td>泄露的供应链工件</td></tr><tr><td>2023</td><td>Triangulation</td><td>基带 + 启动早期</td><td><strong>L3</strong></td><td>无线电固件、内核崩溃可复现</td><td>反病毒产品在内核崩溃日志中发现异常</td></tr><tr><td>2023</td><td>KISKEY 类</td><td>短信 + 内核</td><td>L1</td><td>早期短信路径 + 提权</td><td>安全厂商情报通报</td></tr><tr><td>2024</td><td>Coruna（初始访问）</td><td>WebKit/JSC 类型混淆</td><td>L1—L2（含 0-click 变体）</td><td>JSC 投机优化（#39、#57）</td><td>泄露的内部工件与安全厂商还原</td></tr><tr><td>2025</td><td>DarkSword</td><td>WebKit + ANGLE/媒体服务</td><td>L1—L2</td><td>图形栈 + mediaserverd（#43、#44）</td><td>公开分析与样本披露</td></tr><tr><td>2026</td><td>供应链扩散（GHOSTBLADE 类）</td><td>复用泄露链</td><td>L1—L2</td><td>工具包化，可靠性下降</td><td>大量低质量失败尝试，反而抬高崩溃率</td></tr></tbody></table>
+<p>三条清晰规律：</p>
+<ol><li><strong>每一代攻击面都比上一代&quot;更深一层&quot;</strong>：短信链接（应用层）→ 图像解析（框架层）→ 字体/PDF（排版层）→ 基带（硬件固件层）。</li><li><strong>暴露方式从&quot;用户察觉&quot;变成&quot;遥测察觉&quot;</strong>：2018 年还能靠&quot;消息被撤回&quot;发现，2023 年只能靠内核崩溃日志与网络异常（见 #48 的四条检测流程）。</li><li><strong>0-click 没有消失，只是变贵了</strong>：L3 能力至今仍是极少数供应方拥有；主流商业套件仍以 L1/L2 为主，把成本压在&quot;投递一次成功一次&quot;的可靠性工程上（#49）。</li></ol>
+<hr>
+<h2>4. 为什么 iOS 的 0-click 几乎都在解析器</h2>
+<p>这是本文最重要的结构性解释，也是防御者唯一能举一反三的点。</p>
+<pre><code>用户数据      →  需要授权/UI →  攻击者拿不到
+用户交互      →  需要点击     →  不再是 0-click
+────────────────────────────────────────────
+外部输入自动进入的通路 = 0-click 的全部可能入口：
+
+  网络包 ──▶ 内核/协议栈 ──▶ 基带固件        [L3，极稀缺]
+  推送  ──▶ APNs 服务 ──▶ 通知展示解析      [L1]
+  消息  ──▶ 消息服务 ──▶ 富媒体预渲染        [L2]
+  呼叫  ──▶ VoIP 信令 ──▶ 字体/媒体解析      [L1-L2]
+  链接  ──▶ 浏览器/WebView ──▶ JSC/WebKit    [L1，需一次点击]</code></pre>
+<p>共同特征：<strong>这些代码必须在无用户参与的情况下，把不可信字节解析成结构</strong>。而解析器天然是&quot;输入完全由攻击者控制、执行流由代码逻辑决定&quot;的位置——安全缺陷的最高产形态。</p>
+<table><thead><tr><th>属性</th><th>解析器代码</th><th>常规应用逻辑</th></tr></thead><tbody><tr><td>输入可达性</td><td>无需授权即可投递</td><td>需权限/交互</td></tr><tr><td>代码复杂度</td><td>极高（格式规范 + 历史兼容）</td><td>中</td></tr><tr><td>内存安全</td><td>大量 C/C++（#61 讨论的语言迁移进度）</td><td>逐步迁移</td></tr><tr><td>沙箱位置</td><td>BlastDoor/独立服务（#52）</td><td>应用沙箱</td></tr><tr><td>0-click 适配度</td><td><strong>最佳</strong></td><td>不适用</td></tr></tbody></table>
+<p>由此可推一条<strong>防御优先级定律</strong>：</p>
+<blockquote><p>关闭一条&quot;外部输入自动解析&quot;通路，等于关掉一整类 0-click 入口；而打补丁只能关掉某一条具体漏洞。Apple 在 iOS 17 引入的&quot;通讯安全&quot;类功能（如附件预览过滤、链接预览关闭、iMessage 表情搜索关闭）本质上就是在<strong>削减 L2 通路的自动性</strong>（与 #52、#57 的&quot;移除型防御优于检测型防御&quot;一致）。</p></blockquote>
+<hr>
+<h2>5. 入口分层对比：拿到执行之后仍然不同</h2>
+<p>即便都成功执行代码，不同入口带来的<strong>后续能力完全不同</strong>，这直接决定攻击链要写多长：</p>
+<table><thead><tr><th>入口</th><th>起始权限域</th><th>是否需要沙箱逃逸</th><th>是否需要内核提权</th><th>解锁依赖</th><th>典型链长度</th></tr></thead><tbody><tr><td>WebKit（浏览器/WebView）</td><td>WebContent 强沙箱</td><td>必须（#40、#43）</td><td>必须（#41）</td><td>高</td><td>4—6 环</td></tr><tr><td>消息预渲染（ImageIO/核心媒体）</td><td>框架服务，权限略高</td><td>通常需要</td><td>需要</td><td>中</td><td>3—5 环</td></tr><tr><td>VoIP/呼叫信令</td><td>网络服务进程</td><td>视实现</td><td>需要</td><td>中</td><td>3—5 环</td></tr><tr><td>字体/排版解析</td><td>与消息路径重叠</td><td>需要</td><td>需要</td><td>中</td><td>4—6 环</td></tr><tr><td>基带</td><td>独立处理器，跨核边界</td><td>不适用（另需应用侧链）</td><td>不适用</td><td><strong>低（可解锁前）</strong></td><td>2 环 + 跨域</td></tr><tr><td>启动早期/Boot ROM</td><td>引导阶段</td><td>不适用</td><td>不适用</td><td>无</td><td>极短但不可持久（#34）</td></tr></tbody></table>
+<p><strong>这就是为什么基带类 0-click 被认为最危险</strong>：它把&quot;解锁依赖&quot;这一项从链上移除（L3），而应用侧链再强也绕不过密钥可用性约束（#53）。</p>
+<p>同时它也是<strong>最贵</strong>的：基带代码不公开、调试环境稀缺、失败即变砖风险，导致能做的供应方屈指可数，且几乎不可能出现在泄露工具包里。这与 #65 的供应链分层结论呼应——<strong>入口层次与供应链层级高度相关</strong>。</p>
+<hr>
+<h2>6. 0-click 与 1-click 的结构性对比</h2>
+<table><thead><tr><th>维度</th><th>0-click</th><th>1-click</th><th>Coruna/DarkSword 位置</th></tr></thead><tbody><tr><td>单条漏洞采购价</td><td>极高（数倍到十倍级）</td><td>中</td><td>两者混用（#49）</td></tr><tr><td>利用窗口寿命</td><td>短（易被异常发现而关停）</td><td>长（用户持续浏览）</td><td>—</td></tr><tr><td>可靠性要求</td><td>极苛刻（无法重试触发）</td><td>宽松（可诱导重开页面）</td><td>0-click 分支需大量回退路径</td></tr><tr><td>归因难度</td><td>高（无用户证词、无 URL）</td><td>低（有链接、有时间点）</td><td>见 #66</td></tr><tr><td>目标筛选成本</td><td>需精确画像避免浪费</td><td>可批量撒网</td><td>水坑筛选（#50）</td></tr><tr><td>事后取证抓手</td><td>内存 + 网络</td><td>浏览器历史 + 站点日志</td><td>DarkSword 无痕型更难（#45）</td></tr><tr><td>对防御方最经济动作</td><td>削减自动解析通路 + 补丁</td><td>关闭 JIT/锁定模式（#57、#34）</td><td>两者皆有效</td></tr></tbody></table>
+<p>一个常被误解的点：<strong>0-click 不必然比 1-click 更难检测</strong>。恰恰相反，因为它无法承受&quot;用户点第二次&quot;的失败，攻击者必须<strong>在真实设备上一次成功</strong>，这使得链中每一步的容错设计更复杂、崩溃概率更高、遥测异动更明显（参见 #47 关于崩溃统计异动的讨论、#51 关于内核信息泄露的必要性）。而成熟的 1-click 水坑链可以做得更安静。</p>
+<hr>
+<h2>7. 检测：0-click 的先天受限项与现实抓手</h2>
+<table><thead><tr><th>常规检测前提</th><th>0-click 下是否成立</th><th>后果</th></tr></thead><tbody><tr><td>用户上报可疑链接/附件</td><td>常不成立</td><td>失去最早的时间锚</td></tr><tr><td>消息/通知可作为证据</td><td>部分不成立（可被撤回、删除）</td><td>服务端日志成唯一时间线</td></tr><tr><td>浏览器历史记录</td><td>完全不适用</td><td>主机侧无痕迹</td></tr><tr><td>设备端进程审计</td><td>不成立（iOS 不提供）</td><td>无批量主机遥测</td></tr><tr><td>网络流量必须发生</td><td><strong>成立</strong></td><td>唯一可靠抓手（#59 结论 4）</td></tr><tr><td>崩溃/诊断日志群体异动</td><td>部分成立（取决于攻击者容错水平）</td><td>滞后指标，适合回溯</td></tr></tbody></table>
+<p>现实抓手按可行性排序：</p>
+<ol><li><strong>保留 90 天以上 DNS/SNI/NetFlow</strong>：0-click 与外泄都靠它（#46、#59）</li><li><strong>消息平台服务端的元数据请求</strong>：合规路径，时效性强</li><li><strong>Apple 推送/通知配置异常</strong>：企业侧可查设备是否收到非预期推送通道</li><li><strong>MVT 类内存与备份扫描</strong>：对 Coruna 型落地驻留有效，对 DarkSword 型失效（#45、#47）</li><li><strong>崩溃日志的群体统计</strong>：只适合版本发布后的回溯，不适合实时告警（#48）</li></ol>
+<p><strong>必须承认的失效项</strong>：面对 L3（基带/解锁前）能力，上述五项全部退化。防御手段只剩硬件代际选择与固件更新节奏，这也是 #67 强调&quot;设备代际本身就是安全决策&quot;的原因。</p>
+<hr>
+<h2>8. 防御取舍清单</h2>
+<table><thead><tr><th>措施</th><th>削减的入口</th><th>代价</th><th>建议人群</th></tr></thead><tbody><tr><td>关闭链接预览/附件预览</td><td>L2 预渲染类</td><td>体验损失</td><td>高价值目标（#13、#34）</td></tr><tr><td>关闭&quot;通讯安全&quot;以外的高级消息功能</td><td>L2</td><td>功能缺失</td><td>记者、律师、活动人士</td></tr><tr><td>启用锁定模式</td><td>L1/L2 大部分 + 禁用 JIT（#57）</td><td>明确可用性代价</td><td>高危角色默认开启</td></tr><tr><td>及时更新 iOS</td><td>全部已修补入口</td><td>需接受补丁期</td><td>所有人</td></tr><tr><td>定期重启设备</td><td>清除内存驻留型（#45）</td><td>低</td><td>高危角色每日</td></tr><tr><td>不使用未知来源消息附件</td><td>L1/L2</td><td>行为成本</td><td>高危角色</td></tr><tr><td>保留网络元数据（组织侧）</td><td>不削减入口，但恢复可检测性</td><td>存储成本</td><td>企业必备</td></tr></tbody></table>
+<blockquote><p><strong>重启是被严重低估的手段</strong>：对无持久化内存驻留体系（#45），一次重启等于强制攻击者重新完成整条链。对 L1/L2 攻击者，这意味着每一次都要消耗一条仍然有效的 0-click 漏洞——把&quot;一次性攻击成本&quot;变成&quot;周期性攻击成本&quot;。这是少数以极低代价改变对手经济模型的防御动作。</p></blockquote>
+<hr>
+<h2>9. 演化预测（未来 24—36 个月）</h2>
+<table><thead><tr><th>判断</th><th>依据</th><th>置信度</th></tr></thead><tbody><tr><td>图形/媒体栈继续作为逃逸主战场</td><td>#58 结论：六层图形栈与跨层信任假设；驱动 CVE 复用价值高</td><td>高</td></tr><tr><td>解析器 0-click 进一步向&quot;自动性最低&quot;通路迁移</td><td>Apple 逐个关闭自动解析通路后剩余面收窄</td><td>中高</td></tr><tr><td>基带类能力扩散但仍限于极少数供应方</td><td>不可泄露、不可工具包化（#65）</td><td>中</td></tr><tr><td>泄露工件继续成为次级攻击面主要来源</td><td>GHOSTBLADE 先例（#13、#65）</td><td>高</td></tr><tr><td>内存安全语言迁移降低新解析器漏洞密度</td><td>#61、#67 的语言迁移曲线</td><td>中（长期生效）</td></tr><tr><td>0-click 归因越来越依赖基础设施与站点情报而非工件</td><td>无痕型驻留上升（#47、#66）</td><td>高</td></tr></tbody></table>
+<hr>
+<h2>10. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>0-click 需按&quot;无交互/无渲染/无解锁&quot;三层区分，三层的防御成本相差一个数量级</td></tr><tr><td>2</td><td>iOS 的 0-click 集中于解析器，因为那是唯一&quot;不可信字节自动进入代码&quot;的通路</td></tr><tr><td>3</td><td>十年演化主线是入口下沉：应用层 → 框架层 → 排版/媒体层 → 无线电与启动阶段</td></tr><tr><td>4</td><td>解锁依赖是 0-click 的隐性天花板，基带类能力靠消除这一项体现价值</td></tr><tr><td>5</td><td>0-click 不一定更难检测：不可重试的可靠性要求反而放大崩溃与遥测异动</td></tr><tr><td>6</td><td>削减自动解析通路与定期重启，是性价比最高的两个非补丁手段</td></tr><tr><td>7</td><td>面对 L3 能力，现有端侧检测手段整体失效，只剩硬件代际与固件节奏</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 0-click 的历史不是&quot;漏洞越来越隐蔽&quot;，而是&quot;攻击面不断下沉到用户交互之前&quot;——因此防御的真实杠杆在于把自动解析通路和解锁窗口关小，以及用网络元数据保留期与定期重启，把一次性攻击变成持续成本。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 案例研究归档</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 商业间谍软件研究</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://www.lookout.com/threat-intelligence" rel="nofollow noopener" target="_blank">Lookout — Threat Research</a></li><li><a href="https://about.fb.com/news/" rel="nofollow noopener" target="_blank">Meta Security — FORCEDENTRY 披露</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple — Security Releases</a></li><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — iMessage 与通讯安全</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a59.html">← 第 59 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a61.html">第 61 篇 →</a></nav></article>
+</main></body></html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 模块化载荷编排与插件体系 | iOS 安全研究文章库</title>
+<meta name="description" content="五层载荷模型、模块清单/任务队列/条件调度、一次性内联执行、模块迁移趋势与架构反推任务意图">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a54.html">
+<meta property="og:title" content="Coruna 与 DarkSword 模块化载荷编排与插件体系">
+<meta property="og:description" content="五层载荷模型、模块清单/任务队列/条件调度、一次性内联执行、模块迁移趋势与架构反推任务意图">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a54.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 54 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 模块化载荷编排与插件体系</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Google Project Zero、Citizen Lab、Lookout、Amnesty International、ESET、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>一款能在 iOS 上完成&quot;逃逸 + 提权&quot;的利用套件，只解决了<strong>如何进入</strong>；真正产生持续威胁的是<strong>进入之后做什么、如何组织这些能力</strong>。这就是<strong>载荷架构（Payload Architecture）</strong> 要解决的问题。</p>
+<p>Coruna 与 DarkSword 在载荷架构上的差异，是理解两者战术定位的关键：</p>
+<ul><li><strong>Coruna</strong>：<strong>分层插件体系</strong>——小型引导器 + 按需下发的功能模块 + 任务队列 + 本地状态，本质是一个&quot;可扩展运行时&quot;</li><li><strong>DarkSword</strong>：<strong>一次性单体执行流</strong>——所有能力在一次会话中构建、执行、销毁，无模块仓库、无任务队列</li></ul>
+<p>本文从<strong>分层模型、模块生命周期、任务编排、模块保护与分发、状态管理、可扩展性</strong>六个维度解析两套体系，并说明&quot;为什么模块化是现代商业间谍软件的核心竞争力&quot;。</p>
+<hr>
+<h2>2. 载荷架构的分层模型</h2>
+<h3>2.1 通用分层</h3>
+<pre><code>┌──────────────────────────────────────────────┐
+│ L0 引导层（Bootstrap / Loader）                │
+│    极小体积、最低依赖；提权后首先建立执行环境      │
+├──────────────────────────────────────────────┤
+│ L1 核心运行时（Core Runtime）                  │
+│    模块加载器、任务调度、加密、日志、自保护         │
+├──────────────────────────────────────────────┤
+│ L2 通信层（C2 Transport）                      │
+│    心跳、指令接收、重试、多通道                   │
+├──────────────────────────────────────────────┤
+│ L3 功能模块（Capabilities / Plugins）           │
+│    采集/监控/定位/凭证/文件/音频/持久化…           │
+├──────────────────────────────────────────────┤
+│ L4 数据管道（Data Pipeline）                    │
+│    序列化、压缩、加密、分片、外传、清理            │
+└──────────────────────────────────────────────┘</code></pre>
+<h3>2.2 为什么要分层</h3>
+<table><thead><tr><th>动机</th><th>说明</th></tr></thead><tbody><tr><td><strong>降低初始落地体积</strong></td><td>引导层小，被捕获的信息价值低</td></tr><tr><td><strong>能力解耦</strong></td><td>修改采集逻辑不影响通信层，可独立更新</td></tr><tr><td><strong>按需加载</strong></td><td>只加载当前任务所需模块，减少内存驻留与特征面</td></tr><tr><td><strong>版本适配</strong></td><td>不同 iOS 版本加载不同实现，上层逻辑不变</td></tr><tr><td><strong>多客户复用</strong></td><td>同一运行时 + 不同模块集 = 不同产品形态</td></tr><tr><td><strong>失效隔离</strong></td><td>单模块崩溃不必然导致整体失陷</td></tr></tbody></table>
+<blockquote><p><strong>这正是&quot;exploit-as-a-service&quot;商业模式的技术基础</strong>：模块化让一套系统能服务多个客户、多个任务场景，摊薄极高的漏洞研发成本。</p></blockquote>
+<hr>
+<h2>3. Coruna 的模块化架构</h2>
+<h3>3.1 引导层设计</h3>
+<table><thead><tr><th>特征</th><th>说明</th></tr></thead><tbody><tr><td><strong>极小入口</strong></td><td>提权完成后仅建立最小执行能力，不携带完整功能</td></tr><tr><td><strong>环境探测</strong></td><td>采集设备/版本/权限信息，决定后续加载哪套模块</td></tr><tr><td><strong>运行时解包</strong></td><td>从 C2 拉取加密模块包，在内存/落地位置解包</td></tr><tr><td><strong>失败降级</strong></td><td>探测到环境不支持某模块则跳过该能力，不中止整体</td></tr></tbody></table>
+<h3>3.2 模块清单与调度</h3>
+<p>Coruna 采用<strong>任务队列 + 模块清单</strong>的经典 implant 模式：</p>
+<pre><code>[Module Manifest]  ─ 描述可用模块、版本、依赖、能力
+       ↓
+[Task Queue]       ─ C2 下发的待执行任务（含参数、条件、优先级）
+       ↓
+[Scheduler]        ─ 判断条件是否满足（解锁态/充电/网络类型/时间窗）
+       ↓
+[Module Loader]    ─ 按需加载并执行模块
+       ↓
+[Data Pipeline]    ─ 结果进入外传管道</code></pre>
+<p><strong>任务条件表达</strong>（典型设计）：</p>
+<table><thead><tr><th>条件类型</th><th>示例</th></tr></thead><tbody><tr><td>时间</td><td>指定时段执行（配合目标作息，降低异常时段流量）</td></tr><tr><td>状态</td><td>设备解锁 / 锁屏 / 充电中</td></tr><tr><td>网络</td><td>仅在 Wi-Fi 下执行大流量外传</td></tr><tr><td>事件触发</td><td>特定 App 启动、特定联系人消息到达</td></tr><tr><td>依赖</td><td>前置模块已成功（如已取得 keychain 权限）</td></tr></tbody></table>
+<h3>3.3 典型模块集</h3>
+<p>根据 Citizen Lab / Lookout 公开分析，Coruna 类套件的模块集合通常包括：</p>
+<table><thead><tr><th>模块类别</th><th>能力</th></tr></thead><tbody><tr><td><strong>消息采集</strong></td><td>SMS/iMessage/第三方 IM 数据库读取与增量同步</td></tr><tr><td><strong>通讯录/日历</strong></td><td>联系人、日程批量导出</td></tr><tr><td><strong>凭证提取</strong></td><td>Keychain 批量导出（详见本仓库 #53）</td></tr><tr><td><strong>媒体采集</strong></td><td>照片库、视频、录音文件批量外传</td></tr><tr><td><strong>实时监听</strong></td><td>麦克风激活、通话音频</td></tr><tr><td><strong>位置跟踪</strong></td><td>GPS/基站/Wi-Fi 定位，可周期性上报</td></tr><tr><td><strong>App 活动</strong></td><td>前台 App、浏览历史、输入行为</td></tr><tr><td><strong>设备控制</strong></td><td>截屏、开启相机、静默拍照</td></tr><tr><td><strong>加密资产</strong></td><td>钱包种子、交易所凭证</td></tr><tr><td><strong>持久化</strong></td><td>启动项写入、更新检查</td></tr><tr><td><strong>自保护</strong></td><td>环境检测、反分析、清除</td></tr></tbody></table>
+<h3>3.4 模块分发与更新</h3>
+<table><thead><tr><th>机制</th><th>说明</th></tr></thead><tbody><tr><td><strong>增量更新</strong></td><td>只下发变更模块，减少流量与暴露</td></tr><tr><td><strong>版本协商</strong></td><td>引导层报告当前模块版本，C2 决定下发内容</td></tr><tr><td><strong>按目标定制</strong></td><td>不同目标加载不同模块集（最小必要原则，降低单点损失）</td></tr><tr><td><strong>热替换</strong></td><td>运行中可替换模块，无需重新植入</td></tr></tbody></table>
+<hr>
+<h2>4. DarkSword 的一次性执行架构</h2>
+<h3>4.1 无模块仓库的设计</h3>
+<p>DarkSword 由于放弃持久化，其载荷架构呈现完全不同的形态：</p>
+<pre><code>[水坑页面下发全部所需代码/参数]
+        ↓
+[逃逸 + 提权（内存中）]
+        ↓
+[一次性任务包解析]  ← 任务清单在会话开始时全部下发
+        ↓
+[内存中构建能力例程] ← 不加载&quot;模块文件&quot;，而是构造可执行逻辑
+        ↓
+[顺序执行采集]      ← 无调度器、无条件等待（时间受限）
+        ↓
+[打包 → 外传 → 清除]</code></pre>
+<table><thead><tr><th>缺失的组件</th><th>原因</th></tr></thead><tbody><tr><td>模块清单 / 仓库</td><td>无持久化存储位置，也无法长期维护版本</td></tr><tr><td>任务队列</td><td>会话时长不允许排队等待条件满足</td></tr><tr><td>调度器</td><td>无后台常驻，无&quot;稍后执行&quot;的可能</td></tr><tr><td>增量更新</td><td>每次会话从零开始，不存在&quot;已安装模块&quot;状态</td></tr></tbody></table>
+<h3>4.2 &quot;能力内联&quot;取代&quot;模块加载&quot;</h3>
+<p>DarkSword 的工程取向是把能力<strong>内联</strong>进单一流水线：</p>
+<table><thead><tr><th>设计选择</th><th>说明</th></tr></thead><tbody><tr><td><strong>精简功能集</strong></td><td>只做小体积高价值采集（凭证、token、密钥、近期消息）</td></tr><tr><td><strong>无长周期监听</strong></td><td>放弃实时麦克风/持续定位这类需要常驻的能力</td></tr><tr><td><strong>一次批量执行</strong></td><td>所有采集顺序完成，不分次调度</td></tr><tr><td><strong>参数由页面下发</strong></td><td>C2 地址、任务清单、加密密钥都在页面下发时确定</td></tr></tbody></table>
+<h3>4.3 架构带来的能力上限</h3>
+<table><thead><tr><th>无法做到</th><th>原因</th></tr></thead><tbody><tr><td>持续监控</td><td>无常驻</td></tr><tr><td>事件触发采集</td><td>无调度器</td></tr><tr><td>大文件批量外传</td><td>会话时长与稳定性限制</td></tr><tr><td>等待解锁窗口</td><td>无持久化，不能&quot;等明天&quot;</td></tr><tr><td>多轮任务迭代</td><td>每次需重新完整走一遍链条</td></tr></tbody></table>
+<p><strong>但换来的收益也很明确</strong>：</p>
+<table><thead><tr><th>收益</th><th>说明</th></tr></thead><tbody><tr><td>几乎无设备侧痕迹</td><td>无模块文件、无清单、无状态</td></tr><tr><td>无需维护植入状态</td><td>不追踪&quot;哪些模块已安装&quot;</td></tr><tr><td>重启后无残留</td><td>天然反取证</td></tr><tr><td>单点失败影响小</td><td>不存在&quot;整套 implant 被提取分析&quot;的风险</td></tr></tbody></table>
+<hr>
+<h2>5. 架构对比</h2>
+<h3>5.1 组件级对比</h3>
+<table><thead><tr><th>组件</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>引导层</td><td>✅ 独立小型 loader</td><td>⚠️ 融合在利用链中</td></tr><tr><td>核心运行时</td><td>✅ 常驻</td><td>❌ 会话内临时构建</td></tr><tr><td>模块清单</td><td>✅</td><td>❌</td></tr><tr><td>任务队列</td><td>✅</td><td>❌（一次性任务包）</td></tr><tr><td>条件调度器</td><td>✅</td><td>❌</td></tr><tr><td>模块热加载</td><td>✅</td><td>⚠️ 仅会话内</td></tr><tr><td>状态持久化</td><td>✅</td><td>❌</td></tr><tr><td>增量更新</td><td>✅</td><td>❌</td></tr><tr><td>数据管道</td><td>✅ 多通道分片</td><td>✅ 单次批量</td></tr><tr><td>自保护模块</td><td>✅</td><td>✅（更依赖无痕）</td></tr></tbody></table>
+<h3>5.2 能力矩阵</h3>
+<table><thead><tr><th>能力</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>长期驻留监控</td><td>✅</td><td>❌</td></tr><tr><td>事件触发采集</td><td>✅</td><td>❌</td></tr><tr><td>大批量数据外传</td><td>✅</td><td>❌</td></tr><tr><td>实时音频/定位</td><td>✅</td><td>❌</td></tr><tr><td>跨重启存活</td><td>✅</td><td>❌</td></tr><tr><td>按需定制模块集</td><td>✅</td><td>⚠️ 靠任务包参数</td></tr><tr><td>文件痕迹</td><td>中</td><td>极低</td></tr><tr><td>备份可捕获</td><td>✅ 可发现</td><td>❌ 不可发现</td></tr><tr><td>单次任务完成速度</td><td>慢（可分多次）</td><td>快（必须一次）</td></tr><tr><td>目标适配灵活度</td><td>高</td><td>低</td></tr></tbody></table>
+<h3>5.3 设计哲学对照</h3>
+<pre><code>Coruna      = &quot;在设备上建立一个可扩展的小型操作系统&quot;
+              → 能力强、覆盖广、痕迹多、需要运营投入
+
+DarkSword   = &quot;一次内存中的突击行动&quot;
+              → 精准、隐蔽、能力受限、成本在重新投递</code></pre>
+<p><strong>两者都合理，取决于任务定义</strong>——这是本系列反复出现的权衡主线。</p>
+<hr>
+<h2>6. 模块保护与反分析</h2>
+<h3>6.1 分层加密</h3>
+<p>载荷架构中，模块本身需要被保护：</p>
+<table><thead><tr><th>环节</th><th>保护手段</th></tr></thead><tbody><tr><td><strong>传输</strong></td><td>TLS + 载荷层额外 AES/ChaCha20</td></tr><tr><td><strong>静态（Coruna 落地时）</strong></td><td>模块文件加密存储，运行时解密</td></tr><tr><td><strong>内存中</strong></td><td>关键代码段延迟解密，缩短明文驻留时间</td></tr><tr><td><strong>完整性</strong></td><td>模块签名/哈希校验，防被篡改或降级</td></tr><tr><td><strong>混淆</strong></td><td>符号剥离、控制流平坦化、字符串加密</td></tr></tbody></table>
+<h3>6.2 模块间 ABI 设计</h3>
+<p>现代 implant 通常定义内部 ABI：</p>
+<pre><code>每个模块导出:
+  - 元信息（ID、版本、依赖列表、能力标签）
+  - init(参数) → 状态句柄
+  - run(句柄, 任务参数) → 结果缓冲区
+  - cleanup(句柄)</code></pre>
+<p><strong>攻击者收益</strong>：新模块可独立开发测试，不用重新构建整个 implant。</p>
+<p><strong>防御者收益</strong>：ABI 与元信息结构是相对稳定的<strong>特征来源</strong>——同一厂商不同版本的模块头结构常相似，可用于聚类归因。</p>
+<h3>6.3 反分析设计</h3>
+<table><thead><tr><th>手段</th><th>说明</th></tr></thead><tbody><tr><td><strong>环境检查</strong></td><td>检测调试器、模拟器、已知分析工具特征</td></tr><tr><td><strong>沙箱/虚拟化指纹</strong></td><td>CPU 特性、设备型号一致性检查</td></tr><tr><td><strong>自杀逻辑</strong></td><td>检测到分析环境即中止/清除，拒绝暴露</td></tr><tr><td><strong>代码完整性自检</strong></td><td>检测被 hook/插桩</td></tr><tr><td><strong>按需解密</strong></td><td>静态样本中看不到完整逻辑</td></tr></tbody></table>
+<blockquote><p><strong>DarkSword 的反分析更多来自架构</strong>：不落地 ⇒ 无法静态分析。这是&quot;无痕&quot;最本质的价值。</p></blockquote>
+<hr>
+<h2>7. 与其他套件的横向对照</h2>
+<p>将 Coruna/DarkSword 放入更广的载荷架构谱系中：</p>
+<table><thead><tr><th>套件</th><th>载荷架构特征</th></tr></thead><tbody><tr><td><strong>Pegasus（NSO）</strong></td><td>经典三层（KiteRisa/Carthage 等）+ 大量功能插件 + 任务队列 + 反取证模块</td></tr><tr><td><strong>ForcedEntry 系列</strong></td><td>载荷极简，依赖单点突破 + 有限采集</td></tr><tr><td><strong>Predator（IntelCere）</strong></td><td>强模块化，后期版本转向文件less 混合策略</td></tr><tr><td><strong>Triangulation</strong></td><td>以持久化 + 固件层驻留为核心，模块化程度高</td></tr><tr><td><strong>Coruna</strong></td><td>平台化多链 + 模块化采集 + 长期运营</td></tr><tr><td><strong>DarkSword</strong></td><td>一次性内存执行 + 无模块体系 + 短时突击</td></tr></tbody></table>
+<p><strong>演化趋势</strong>（重要）：</p>
+<pre><code>第一代：植入完整 implant + 全功能常驻（痕迹大）
+    ↓
+第二代：小型 loader + 按需模块加载（减少静态特征）
+    ↓
+第三代：能力内联 + 无持久化（消除文件特征）
+    ↓
+当前趋势：混合模式 — 主体无持久化 + 极小必要状态留存</code></pre>
+<blockquote><p>这条趋势线说明：<strong>模块化并未消失，而是从&quot;落地的模块仓库&quot;迁移为&quot;C2 侧的模块仓库&quot;</strong>。攻击者的模块化能力从设备端转移到服务端，设备端越来越干净。</p></blockquote>
+<hr>
+<h2>8. 防御与检测</h2>
+<h3>8.1 针对 Coruna 类模块化架构</h3>
+<table><thead><tr><th>信号</th><th>说明</th></tr></thead><tbody><tr><td><strong>异常目录中的可疑文件族</strong></td><td>模块集中存放，常伴随机/半随机命名</td></tr><tr><td><strong>文件批量新增但无 App 安装记录</strong></td><td>模块热加载痕迹</td></tr><tr><td><strong>启动项/Agent 异常</strong></td><td>持久化引导层</td></tr><tr><td><strong>周期性的&quot;小请求 + 偶发大上传&quot;</strong></td><td>心跳 + 模块下发 + 数据外传模式</td></tr><tr><td><strong>模块加载时的短时代码签名异常</strong></td><td>未签名/临时授权代码执行</td></tr><tr><td><strong>增量同步型数据流</strong></td><td>相同数据集反复少量新增（任务队列驱动）</td></tr></tbody></table>
+<h3>8.2 针对 DarkSword 类一次性架构</h3>
+<table><thead><tr><th>信号</th><th>说明</th></tr></thead><tbody><tr><td><strong>匿名可执行内存页</strong></td><td>非 JIT 进程出现 PROT_EXEC 区（最强信号）</td></tr><tr><td><strong>加载页面 → 数秒内新域名外连</strong></td><td>一次性突击的时间特征</td></tr><tr><td><strong>短时高上行流量 + 随后完全静默</strong></td><td>采集外传后消失</td></tr><tr><td><strong>mediaserverd/守护进程异常线程</strong></td><td>注入后的执行痕迹</td></tr><tr><td><strong>同目标反复被触发</strong></td><td>每次重启后需重新投递 ⇒ 攻击频次高（重要行为特征）</td></tr></tbody></table>
+<h3>8.3 通用架构级检测原则</h3>
+<table><thead><tr><th>原则</th><th>说明</th></tr></thead><tbody><tr><td><strong>看行为序列而非单点特征</strong></td><td>模块化与一次性架构在&quot;时间序列&quot;上都异常</td></tr><tr><td><strong>建立正常基线</strong></td><td>设备/App 正常外连频率与体量</td></tr><tr><td><strong>保留网络侧证据</strong></td><td>唯一能跨越重启的证据源</td></tr><tr><td><strong>优先内存/运行时取证</strong></td><td>第三代架构的主要检出方式</td></tr><tr><td><strong>威胁情报关注 ABI/结构相似性</strong></td><td>用于厂商归因聚类</td></tr></tbody></table>
+<h3>8.4 最有效的降维打击</h3>
+<table><thead><tr><th>措施</th><th>为什么有效</th></tr></thead><tbody><tr><td><strong>每日重启</strong></td><td>直接摧毁模块化架构的&quot;跨重启状态&quot;，同时迫使一次性架构重新投递（增加暴露次数）</td></tr><tr><td><strong>锁定模式</strong></td><td>链条到不了载荷层，模块化无从谈起</td></tr><tr><td><strong>快速强制升级</strong></td><td>同上</td></tr><tr><td><strong>限制设备侧存放高价值秘密</strong></td><td>载荷架构再精妙，提取不到有价值数据就是零收益</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>结论</th><th>内容</th></tr></thead><tbody><tr><td><strong>1. 载荷架构决定&quot;能拿到什么&quot;</strong></td><td>漏洞链决定能否进入，模块化程度决定进入后的能力边界</td></tr><tr><td><strong>2. 模块化是商业模式的技术基础</strong></td><td>exploit-as-a-service 需要一套运行时服务多客户多场景，非模块化架构无法支撑</td></tr><tr><td><strong>3. Coruna 是&quot;操作系统式&quot;implant</strong></td><td>清单 + 队列 + 调度 + 热加载 + 状态，能力全面但痕迹多</td></tr><tr><td><strong>4. DarkSword 是&quot;突击行动式&quot;载荷</strong></td><td>无模块体系、内联能力、一次完成，隐蔽性强但能力受限</td></tr><tr><td><strong>5. 模块化正在从设备端迁往服务端</strong></td><td>设备端越来越干净，攻击智能越来越多留在 C2 侧下发</td></tr><tr><td><strong>6. 无持久化天然偏好小体积高价值数据</strong></td><td>架构直接塑造目标选择（凭证/密钥优于照片库）</td></tr><tr><td><strong>7. 重启是对两种架构都有效的低成本反制</strong></td><td>破坏 Coruna 的状态、增加 DarkSword 的投递频次</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>载荷架构的选择，本质是在说&quot;我要什么样的任务&quot;。 长期全面监控 → 需要 Coruna 式模块化驻留； 精准快速取密 → DarkSword 式一次性突击更划算。 防御者应从<strong>架构特征</strong>反推<strong>任务意图</strong>——这比识别单个模块更能预测攻击者的下一步。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna 载荷模块化与采集能力分析</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Amnesty International: <a href="https://www.amnesty.org/en/latest/research/2021/07/forensic-methodology-report-how-to-catch-nso-groups-pegasus/" rel="nofollow noopener" target="_blank">The Pegasus Project — Implant Architecture</a></li><li>Lookout: <a href="https://www.lookout.com/threat-report" rel="nofollow noopener" target="_blank">Commercial Spyware Payload Analysis</a></li><li>ESET / WeLiveSecurity: <a href="https://www.welivesecurity.com/" rel="nofollow noopener" target="_blank">Predator &amp; LightPy malware analysis</a></li><li>Citizen Lab: <a href="https://citizenlab.ca/2023/11/triangulation-a-0-click-exploit-chain-targeting-ios-devices/" rel="nofollow noopener" target="_blank">Triangulation 载荷与固件层驻留分析</a></li><li>MITRE ATT&amp;CK Mobile: <a href="https://attack.mitre.org/matrices/enterprise/mobile/" rel="nofollow noopener" target="_blank">Mobile Matrix — Collection, Payload</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a53.html">← 第 53 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a55.html">第 55 篇 →</a></nav></article>
+</main></body></html>

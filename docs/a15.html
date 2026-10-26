@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 漏洞影响版本分析报告 | iOS 安全研究文章库</title>
+<meta name="description" content="Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a15.html">
+<meta property="og:title" content="Coruna 漏洞影响版本分析报告">
+<meta property="og:description" content="Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a15.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 15 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 漏洞利用工具包——影响版本深度分析报告</h1>
+<blockquote><p>编制日期：2026-10-09 数据来源：Google Cloud Threat Intelligence、Apple Security Releases、Malwarebytes、Zimperium、Centripetal AI、9to5Mac、Securelist 等公开威胁情报 性质：防御性安全研究分析（Defensive Security Research）</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>Coruna</strong>（又名 CryptoWaters）是首个被证实从国家级/商业间谍软件供应商扩散至有组织犯罪集团的 iOS 全链条漏洞利用工具包。2026 年 3 月 3 日由 Google Cloud Threat Intelligence 公开披露。</p>
+<p>该工具包包含 <strong>5 条完整利用链（full exploit chains）</strong>、共计 <strong>23 个独立漏洞利用</strong>，覆盖 <strong>iOS 13.0 至 iOS 17.2.1</strong> 的全部版本跨度，是迄今为止影响范围最广的 iOS 移动端利用框架。Apple 于 2026 年 3 月 11 日为旧版本 iOS 发布了紧急补充补丁。</p>
+<p><strong>本报告聚焦 Coruna 的影响版本范围、各 CVE 对应的修复版本、五条利用链的版本覆盖逻辑，以及不同 iOS 版本段的实际风险暴露面。</strong></p>
+<hr>
+<h2>2. 总体影响版本范围</h2>
+<table><thead><tr><th>维度</th><th>内容</th></tr></thead><tbody><tr><td><strong>最低受影响版本</strong></td><td>iOS 13.0</td></tr><tr><td><strong>最高受影响版本</strong></td><td>iOS 17.2.1（含 iPadOS 对应版本）</td></tr><tr><td><strong>跨版本跨度</strong></td><td>覆盖 iOS 13 / 14 / 15 / 16 / 17 五个大版本线</td></tr><tr><td><strong>利用链数量</strong></td><td>5 条完整链（每条链可从 Safari 网页 → 内核完全控制）</td></tr><tr><td><strong>漏洞利用总数</strong></td><td>23 个（含 WebKit RCE、沙箱逃逸、内核提权、保护机制绕过等）</td></tr><tr><td><strong>已知 CVE 数</strong></td><td>10+ 个已分配 CVE</td></tr><tr><td><strong>补丁状态</strong></td><td>所有已知 CVE 均已修复；Apple 为旧版本线补发了回溯补丁</td></tr></tbody></table>
+<h3>关键结论</h3>
+<blockquote><p>Coruna 的五条利用链并非各自独立覆盖全部版本，而是<strong>按版本段分工</strong>——不同链针对不同 iOS 版本区间内的特定漏洞组合，形成&quot;接力式&quot;覆盖。这意味着即使用户处于某一&quot;中间版本&quot;，仍然至少落入一条链的攻击范围。</p></blockquote>
+<hr>
+<h2>3. 已知 CVE 清单与修复版本映射</h2>
+<h3>3.1 WebKit / 用户空间漏洞（初始访问 &amp; RCE）</h3>
+<table><thead><tr><th>CVE 编号</th><th>漏洞类型</th><th>影响组件</th><th>首次修复版本</th><th>备注</th></tr></thead><tbody><tr><td>CVE-2021-30952</td><td>WebKit 漏洞</td><td>WebKit</td><td>iOS 15.2（2021-12）</td><td>早期链组件；SwiftShader 相关</td></tr><tr><td>CVE-2022-48503</td><td>WebKit RCE（类型混淆）</td><td>WebKit / JavaScriptCore</td><td>iOS 15.6（2022-07）</td><td>已在野利用；Coruna 链 1 核心入口</td></tr><tr><td>CVE-2023-43000</td><td>Use-after-free</td><td>WebKit</td><td>iOS 16.6（2023-07）</td><td>Coruna 链 2/3 入口</td></tr><tr><td>CVE-2024-23222</td><td>WebKit RCE（类型混淆）</td><td>WebKit</td><td>iOS 17.3（2024-02）</td><td><strong>已在野利用</strong>；Coruna 主链核心入口，历史 N-day</td></tr></tbody></table>
+<h3>3.2 沙箱逃逸漏洞</h3>
+<table><thead><tr><th>CVE 编号</th><th>漏洞类型</th><th>影响组件</th><th>首次修复版本</th><th>备注</th></tr></thead><tbody><tr><td>CVE-2023-32409</td><td>沙箱逃逸</td><td>IOSurface / 图形栈</td><td>iOS 16.5（2023-06）</td><td>从 WebKit 沙箱逃逸至用户空间</td></tr><tr><td>CVE-2023-41974</td><td>沙箱逃逸 / 提权</td><td>内核</td><td>iOS 16.6（2023-07）</td><td>已在野利用；Coruna 链核心组件</td></tr></tbody></table>
+<h3>3.3 内核漏洞（LPE &amp; 保护机制绕过）</h3>
+<table><thead><tr><th>CVE 编号</th><th>漏洞类型</th><th>影响组件</th><th>首次修复版本</th><th>备注</th></tr></thead><tbody><tr><td>CVE-2023-32434</td><td>内核内存破坏</td><td>XNU 内核</td><td>iOS 16.5（2023-06）</td><td><strong>历史三角行动（Operation Triangulation）组件</strong></td></tr><tr><td>CVE-2023-38606</td><td>内核硬件 MMIO 保护绕过</td><td>Apple A-series 硬件调试接口</td><td>iOS 16.6（2023-07）</td><td><strong>历史三角行动组件</strong>；利用 iPhone 硬件调试特性的未公开功能</td></tr><tr><td>CVE-2023-43010</td><td>内核漏洞</td><td>XNU 内核</td><td>iOS 17.0（2023-09）</td><td>Coruna 链内核阶段组件</td></tr><tr><td>CVE-2024-23225</td><td>内核保护绕过</td><td>PAC / 内核保护机制</td><td>iOS 17.4（2024-03）</td><td>绕过 PAC（指针认证）保护</td></tr><tr><td>CVE-2024-23296</td><td>内核保护绕过</td><td>内核内存保护</td><td>iOS 17.4（2024-03）</td><td>绕过页面所有权保护</td></tr></tbody></table>
+<hr>
+<h2>4. 五条利用链的版本覆盖分析</h2>
+<p>Coruna 的五条链并非&quot;一条链打天下&quot;，而是按目标 iOS 版本段选择不同漏洞组合。以下是基于公开情报的链-版本映射分析：</p>
+<h3>4.1 链 1：iOS 13.x – 14.x 链</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td>入口</td><td>CVE-2022-48503（WebKit 类型混淆，修复于 iOS 15.6）</td></tr><tr><td>沙箱逃逸</td><td>CVE-2021-30952 + 早期沙箱逃逸原语</td></tr><tr><td>内核提权</td><td>CVE-2023-32434（XNU 内存破坏）</td></tr><tr><td>保护绕过</td><td>早期 PAC 绕过技术</td></tr><tr><td><strong>覆盖版本</strong></td><td><strong>iOS 13.0 – 14.8.x</strong></td></tr></tbody></table>
+<h3>4.2 链 2：iOS 15.x 早期链</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td>入口</td><td>CVE-2022-48503（WebKit，修复于 iOS 15.6）或 CVE-2023-43000（WebKit UAF，修复于 iOS 16.6）</td></tr><tr><td>沙箱逃逸</td><td>CVE-2023-32409（IOSurface，修复于 iOS 16.5）</td></tr><tr><td>内核提权</td><td>CVE-2023-41974（内核提权，修复于 iOS 16.6）</td></tr><tr><td><strong>覆盖版本</strong></td><td><strong>iOS 15.0 – 15.8.x</strong>（Apple 于 2026-03-11 补发 iOS 15.8.7 修复）</td></tr></tbody></table>
+<h3>4.3 链 3：iOS 15.6 – 16.4 链</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td>入口</td><td>CVE-2023-43000（WebKit UAF）</td></tr><tr><td>沙箱逃逸</td><td>CVE-2023-32409 + CVE-2023-41974</td></tr><tr><td>内核提权</td><td>CVE-2023-32434 + CVE-2023-38606（MMIO 绕过）</td></tr><tr><td><strong>覆盖版本</strong></td><td><strong>iOS 15.6 – 16.4.x</strong></td></tr></tbody></table>
+<h3>4.4 链 4：iOS 16.5 – 17.2 链（主力链）</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td>入口</td><td>CVE-2024-23222（WebKit 类型混淆，已在野利用）</td></tr><tr><td>沙箱逃逸</td><td>CVE-2023-41974 变体</td></tr><tr><td>内核提权</td><td>CVE-2023-38606（硬件 MMIO 绕过）+ CVE-2023-43010</td></tr><tr><td>保护绕过</td><td>CVE-2024-23225 / CVE-2024-23296（PAC / 页面保护绕过）</td></tr><tr><td><strong>覆盖版本</strong></td><td><strong>iOS 16.5 – 17.2.1</strong></td></tr></tbody></table>
+<blockquote><p>这是 Coruna 最成熟、利用最广泛的链，也是与三角行动（Operation Triangulation）关联最紧密的链。</p></blockquote>
+<h3>4.5 链 5：补充 / 备用链</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td>用途</td><td>当主链因版本微差或补丁状态不匹配时作为后备</td></tr><tr><td>特征</td><td>复用其他链的漏洞组件，但组合方式不同；可能包含尚未公开分配的 CVE</td></tr><tr><td><strong>覆盖版本</strong></td><td>跨版本补充，确保无死角</td></tr></tbody></table>
+<h3>版本覆盖示意</h3>
+<pre><code>iOS 13.0 ──────── 14.8.x ─── 15.0 ── 15.5 ─ 15.6 ──── 16.4 ─ 16.5 ──── 17.2.1
+  │  链 1  │          │  链 2  │        │  链 3   │       │  链 4   │
+  └────────┘          └────────┘        └─────────┘       └─────────┘
+                     ↑ 链 5 作为补充覆盖所有间隙 ↑</code></pre>
+<blockquote><p><strong>核心发现</strong>：五条链形成&quot;接力覆盖&quot;，确保 iOS 13.0 至 17.2.1 之间<strong>不存在安全间隙</strong>。即便某个 CVE 在特定版本已修复，Coruna 仍可通过切换至另一条链完成攻击。</p></blockquote>
+<hr>
+<h2>5. Apple 补丁版本与受影响设备对照</h2>
+<h3>5.1 补丁时间线</h3>
+<table><thead><tr><th>日期</th><th>补丁版本</th><th>修复内容</th></tr></thead><tbody><tr><td>2021-12</td><td>iOS 15.2</td><td>修复 CVE-2021-30952</td></tr><tr><td>2022-07</td><td>iOS 15.6</td><td>修复 CVE-2022-48503</td></tr><tr><td>2023-06</td><td>iOS 16.5</td><td>修复 CVE-2023-32409、CVE-2023-32434</td></tr><tr><td>2023-07</td><td>iOS 16.6</td><td>修复 CVE-2023-43000、CVE-2023-38606、CVE-2023-41974</td></tr><tr><td>2023-09</td><td>iOS 17.0</td><td>修复 CVE-2023-43010</td></tr><tr><td>2024-02</td><td>iOS 17.3</td><td>修复 CVE-2024-23222（已在野利用）</td></tr><tr><td>2024-03</td><td>iOS 17.4</td><td>修复 CVE-2024-23225、CVE-2024-23296</td></tr><tr><td><strong>2026-03-11</strong></td><td><strong>iOS 15.8.7</strong></td><td><strong>回溯修复 Coruna 利用的 CVE-2023-41974、CVE-2024-23222、CVE-2023-43000、CVE-2023-43010</strong></td></tr><tr><td><strong>2026-03-11</strong></td><td><strong>iOS 16.7.15</strong></td><td><strong>回溯修复同上 CVE</strong></td></tr></tbody></table>
+<h3>5.2 受影响设备与当前风险</h3>
+<table><thead><tr><th>设备类型</th><th>可运行版本范围</th><th>是否受影响</th><th>建议最低安全版本</th></tr></thead><tbody><tr><td>iPhone 6s / 6s Plus / SE (1代)</td><td>iOS 13 – 15.x</td><td>✅ 受影响</td><td>iOS 15.8.7+</td></tr><tr><td>iPhone 7 / 7 Plus / iPhone 8 / 8 Plus / X</td><td>iOS 13 – 16.x</td><td>✅ 受影响</td><td>iOS 16.7.15+</td></tr><tr><td>iPhone XR / XS / XS Max / 11 系列</td><td>iOS 13 – 17.x</td><td>✅ 受影响</td><td>iOS 17.4+</td></tr><tr><td>iPhone 12 系列</td><td>iOS 14 – 18.x</td><td>✅ 受影响（若未更新至 17.3+）</td><td>iOS 17.3+</td></tr><tr><td>iPhone 13 系列</td><td>iOS 15 – 18.x</td><td>✅ 受影响（若未更新至 17.3+）</td><td>iOS 17.3+</td></tr><tr><td>iPhone 14 系列</td><td>iOS 16 – 18.x</td><td>✅ 受影响（若未更新至 17.3+）</td><td>iOS 17.3+</td></tr><tr><td>iPhone 15 系列</td><td>iOS 17 – 18.x</td><td>✅ 受影响（若运行 &lt; 17.3）</td><td>iOS 17.3+</td></tr><tr><td>iPhone 16 系列</td><td>iOS 18+</td><td>⚠️ 仅受 DarkSword 影响（非 Coruna）</td><td>iOS 18.7.5+</td></tr></tbody></table>
+<blockquote><p><strong>关键提示</strong>：Apple 于 2026-03-11 补发的 iOS 15.8.7 和 iOS 16.7.15 是<strong>回溯补丁</strong>，专门为无法升级到 iOS 17+ 的旧设备修复 Coruna 利用的漏洞。持有旧设备的用户必须更新至这些版本。</p></blockquote>
+<hr>
+<h2>6. 各版本段风险等级评估</h2>
+<table><thead><tr><th>版本段</th><th>风险等级</th><th>说明</th></tr></thead><tbody><tr><td>iOS 13.0 – 14.8.x</td><td>🔴 <strong>极高</strong></td><td>链 1 覆盖；设备老旧，多数已停止接收安全更新；攻击面最大</td></tr><tr><td>iOS 15.0 – 15.5.x</td><td>🔴 <strong>极高</strong></td><td>链 2 覆盖；iOS 15.8.7 补丁前无修复</td></tr><tr><td>iOS 15.6 – 15.8.6</td><td>🟠 <strong>高</strong></td><td>链 3 覆盖；部分 CVE 已修但链仍可切换</td></tr><tr><td>iOS 15.8.7</td><td>🟡 <strong>中</strong></td><td>Apple 回溯补丁已修复 Coruna 核心 CVE</td></tr><tr><td>iOS 16.0 – 16.4.x</td><td>🟠 <strong>高</strong></td><td>链 3 覆盖</td></tr><tr><td>iOS 16.5 – 16.7.14</td><td>🟠 <strong>高</strong></td><td>链 4 覆盖；CVE-2024-23222 已在野利用</td></tr><tr><td>iOS 16.7.15</td><td>🟡 <strong>中</strong></td><td>Apple 回溯补丁已修复 Coruna 核心 CVE</td></tr><tr><td>iOS 17.0 – 17.2.1</td><td>🔴 <strong>极高</strong></td><td>链 4 主力链覆盖；Coruna 最成熟攻击路径</td></tr><tr><td>iOS 17.3 – 17.4+</td><td>🟢 <strong>低</strong></td><td>Coruna 已知 CVE 均已修复；但仍受 DarkSword 威胁</td></tr><tr><td>iOS 18.x</td><td>🟢 <strong>Coruna 免疫</strong></td><td>Coruna 不影响 iOS 18+；但受 DarkSword 影响</td></tr></tbody></table>
+<hr>
+<h2>7. Coruna 与其他利用工具包的版本覆盖对比</h2>
+<table><thead><tr><th>工具包</th><th>影响版本</th><th>漏洞数</th><th>活跃时段</th></tr></thead><tbody><tr><td><strong>Coruna</strong></td><td>iOS 13.0 – 17.2.1</td><td>23 个 / 5 链</td><td>2023 – 2026</td></tr><tr><td><strong>DarkSword</strong></td><td>iOS 18.4 – 18.7 / iOS 26 &lt; 26.3</td><td>6 个（含零日）</td><td>2025 末 – 2026</td></tr><tr><td><strong>三角行动框架</strong></td><td>iOS 12 – 16.6</td><td>4+ 个</td><td>2019 – 2023</td></tr><tr><td><strong>FORCEDENTRY</strong> (NSO)</td><td>iOS 14 – 15.x</td><td>1 个（Pegasus）</td><td>2021</td></tr><tr><td><strong>BLASTPASS</strong> (NSO)</td><td>iOS 14 – 16.6</td><td>2 个</td><td>2023</td></tr></tbody></table>
+<blockquote><p>Coruna 是已知影响版本跨度最大（5 个大版本线）、漏洞利用数量最多（23 个）的 iOS 利用工具包。DarkSword 作为其后继者，将攻击目标上移至 iOS 18+ 和 iOS 26。</p></blockquote>
+<hr>
+<h2>8. 缓解与防护建议</h2>
+<h3>8.1 按版本段的紧急措施</h3>
+<table><thead><tr><th>当前版本</th><th>紧急措施</th></tr></thead><tbody><tr><td>iOS 13 – 14.x</td><td><strong>立即升级</strong>至设备支持的最高版本；若为 iPhone 6s/SE1，至少升级至 <strong>iOS 15.8.7</strong></td></tr><tr><td>iOS 15.0 – 15.8.6</td><td><strong>立即升级</strong>至 <strong>iOS 15.8.7</strong> 或更高</td></tr><tr><td>iOS 16.0 – 16.7.14</td><td><strong>立即升级</strong>至 <strong>iOS 16.7.15</strong> 或更高</td></tr><tr><td>iOS 17.0 – 17.2.1</td><td><strong>立即升级</strong>至 <strong>iOS 17.4+</strong>（推荐 iOS 18.x）</td></tr><tr><td>iOS 17.3+ / 18.x</td><td>保持更新至最新版本；关注 DarkSword 威胁</td></tr></tbody></table>
+<h3>8.2 通用防护</h3>
+<ol><li><strong>启用锁定模式（Lockdown Mode）</strong>：Coruna 在检测到该模式时会主动中止攻击。</li><li><strong>避免访问不可信网页</strong>：Coruna 通过水坑攻击 / 被入侵网页投递。</li><li><strong>资产清点</strong>：组织应清点所有 iOS 设备版本，识别仍运行受影响版本的设备。</li><li><strong>网络层监控</strong>：检测 DGA 外传流量和已知恶意域名。</li><li><strong>运行时行为检测</strong>：Coruna 无持久化植入物，需依赖运行时异常行为检测。</li></ol>
+<hr>
+<h2>9. 结论</h2>
+<p>Coruna 是迄今为止影响版本跨度最大的 iOS 全链条利用工具包，覆盖 iOS 13.0 至 17.2.1 共五个大版本线，通过 5 条接力式利用链和 23 个漏洞利用实现&quot;无死角&quot;覆盖。Apple 已通过常规补丁和 2026-03-11 的回溯补丁修复所有已知 CVE。</p>
+<p><strong>当前最紧迫的风险</strong>在于：大量旧设备（iPhone 6s/7/8/X 等）仍运行未补丁的 iOS 15/16 版本，这些设备完全暴露在 Coruna 攻击之下。用户和组织应立即将设备更新至各版本线的安全补丁版本。</p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit" rel="nofollow noopener" target="_blank">Coruna: The Mysterious Journey of a Powerful iOS Exploit Kit — Google Cloud Threat Intelligence</a></li><li><a href="https://thehackernews.com/2026/03/coruna-ios-exploit-kit-uses-23-exploits.html" rel="nofollow noopener" target="_blank">Coruna iOS Exploit Kit Uses 23 Exploits Across Five Chains — The Hacker News</a></li><li><a href="https://www.iverify.com/blog/coruna-inside-the-nation-state-grade-ios-exploit-kit-we-ve-been-tracking" rel="nofollow noopener" target="_blank">Coruna: Inside the Nation-State-Grade iOS Exploit Kit — iVerify</a></li><li><a href="https://www.malwarebytes.com/blog/news/2026/03/apple-patches-coruna-exploit-kit-flaws-for-older-ios-versions" rel="nofollow noopener" target="_blank">Apple patches Coruna exploit kit flaws for older iOS versions — Malwarebytes</a></li><li><a href="https://9to5mac.com/2026/03/11/apple-confirms-todays-ios-and-ipados-updates-for-older-devices-address-the-coruna-exploit/" rel="nofollow noopener" target="_blank">Apple confirms iOS/iPadOS updates fix Coruna exploit — 9to5Mac</a></li><li><a href="https://support.apple.com/en-is/126632" rel="nofollow noopener" target="_blank">About the security content of iOS 15.8.7 and iPadOS 15.8.7 — Apple</a></li><li><a href="https://support.apple.com/en-us/126646" rel="nofollow noopener" target="_blank">About the security content of iOS 16.7.15 and iPadOS 16.7.15 — Apple</a></li><li><a href="https://www.centripetal.ai/threat-research/coruna-ios-exploit-kit" rel="nofollow noopener" target="_blank">Coruna iOS Exploit Kit: Observed Traffic Across Regions — Centripetal AI</a></li><li><a href="https://securelist.com/coruna-framework-updated-operation-triangulation-exploit/119228/" rel="nofollow noopener" target="_blank">Coruna: the framework used in Operation Triangulation — Securelist</a></li><li><a href="https://zimperium.com/blog/coruna-ios-exploit-kit-highlights-the-need-for-multi-layer-mobile-defense" rel="nofollow noopener" target="_blank">Coruna iOS Exploit Kit Highlights the Need for Multi-Layer Defense — Zimperium</a></li><li><a href="https://www.penligent.ai/hackinglabs/government-grade-iphone-exploit-kit-goes-rogue-coruna-hits-the-black-market-and-turns-old-ios-into-a-money-pipe/" rel="nofollow noopener" target="_blank">Government grade iPhone Exploit Kit Goes Rogue — Penligent AI</a></li><li><a href="https://en.wikipedia.org/wiki/Coruna_(exploit_kit" rel="nofollow noopener" target="_blank">Coruna (exploit kit) — Wikipedia</a>)</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a14.html">← 第 14 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a16.html">第 16 篇 →</a></nav></article>
+</main></body></html>

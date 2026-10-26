@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 推送服务与通知通路攻击面：无交互投递的第一公里 | iOS 安全研究文章库</title>
+<meta name="description" content="六组件信任边界、令牌与 Provider 凭据治理、附件自动解析面、借 APNs 隐蔽信道、时间线矛盾检测与平台关停困境">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a65.html">
+<meta property="og:title" content="iOS 推送服务与通知通路攻击面：无交互投递的第一公里">
+<meta property="og:description" content="六组件信任边界、令牌与 Provider 凭据治理、附件自动解析面、借 APNs 隐蔽信道、时间线矛盾检测与平台关停困境">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a65.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 65 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 推送服务与通知通路攻击面：无交互投递的第一公里</h1>
+<blockquote><p>编制日期：2026-10-21 数据来源：Apple 开发者文档（Remote Notifications / Notification Service Extension）、Google Project Zero、Citizen Lab 的推送唤醒相关披露、Lookout、Amnesty International Pegasus 项目、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>#60 讲清了 0-click 为什么集中在解析器，本文补上那条链路的<strong>前半段</strong>：攻击者的触发信号与载荷是<strong>怎样在没有用户交互的前提下到达设备并被交给解析器的</strong>。</p>
+<p>推送/通知通路在这一过程中的角色常被误解为&quot;另一个漏洞入口&quot;。更准确的描述是：<strong>它是攻击者唯一可以借用 Apple 自有基础设施的投递与唤醒信道</strong>，其价值主要在三点：</p>
+<table><thead><tr><th>价值</th><th>说明</th><th>对防御的含义</th></tr></thead><tbody><tr><td>唤醒能力</td><td>让休眠的目标进程/扩展按攻击者节奏醒来</td><td>可把 0-click 触发时机压到最有利窗口</td></tr><tr><td>合法信道</td><td>流量来自 Apple 域名与证书，被企业网络默认放行</td><td>网络侧几乎无法分离（与 #63 盲点一致）</td></tr><tr><td>载荷投递</td><td>通知携带附件时由扩展进程下载并解析</td><td>把不可信字节自动送进解析器（#37、#60）</td></tr></tbody></table>
+<p>三个结论先给：</p>
+<ol><li><strong>推送通路本身不是&quot;0-day 生产者&quot;，而是&quot;0-click 放大器&quot;</strong>：它让已有的解析器漏洞更容易在正确时间被触发，且不引入新的可疑外部连接。</li><li>对它的防御<strong>不能靠网络检测</strong>（会被 Apple 基础设施遮蔽），只能靠削减通知侧的自动解析能力与设备侧配置（锁定模式、预览关闭）。</li><li>归因与取证上，推送通路留下的最强工件是<strong>时间线矛盾</strong>——&quot;用户没有打开任何应用，但相关进程在此刻活动&quot;，这恰是 #63 里 HUNT-01 的输入特征。</li></ol>
+<hr>
+<h2>2. 通路的六个组件与信任边界</h2>
+<pre><code> 提供方（App 后端 / Provider）
+        │ ①鉴权：Provider 令牌（基于 APNs 密钥或证书）
+        ▼
+ APNs（Apple 推送基础设施）
+        │ ②按 device token 路由（令牌由 App 注册时向系统申请）
+        ▼
+ 设备：apsd（推送守护进程，维持与 APNs 的长连接）
+        │ ③按 payload 的 aps 字段决定行为：alert / badge /
+        │   sound / content-available / mutable-content / thread-id
+        ▼
+ 目标 App 或其通知服务扩展（NSE）
+        │ ④若 attachment：扩展进程从 URL 下载并处理内容
+        ▼
+ 展示层（UserNotificationCenter）与后台执行窗口</code></pre>
+<table><thead><tr><th>边界</th><th>谁控制</th><th>攻击者视角的价值</th><th>现实难度</th></tr></thead><tbody><tr><td>① Provider 鉴权</td><td>应用运营方</td><td>令牌泄露=可向该 App 全体用户推送</td><td>与漏洞无关，属凭据治理问题</td></tr><tr><td>② device token</td><td>系统/App</td><td>拿到目标令牌=可精确投递到单台设备</td><td>令牌不公开，但可从他处泄露</td></tr><tr><td>③ <code>aps</code> 字段解释</td><td>系统</td><td>可请求&quot;静默推送&quot;&quot;可变内容&quot;等语义</td><td>需合法 provider 身份</td></tr><tr><td>④ 扩展下载与解析</td><td>App 扩展</td><td><strong>最直接的 0-click 解析面</strong>：URL 由外部可控内容引导</td><td>依赖具体 App 的扩展实现</td></tr><tr><td>⑤ 展示与后台窗口</td><td>系统/App</td><td>提供有限执行时间</td><td>沙箱严格</td></tr></tbody></table>
+<p><strong>关键结构性认识</strong>：①②属于&quot;谁能让设备醒来&quot;，④属于&quot;醒来后解析谁的数据&quot;。真实利用链通常把 ①② 当<strong>调度器</strong>，把 ④（或消息/媒体通路）当<strong>执行面</strong>——这两件事分开看，才能理解为什么&quot;推送漏洞&quot;在公开记录里稀少，而&quot;推送参与利用&quot;的披露反复出现。</p>
+<hr>
+<h2>3. 五类攻击面逐一评估</h2>
+<h3>3.1 令牌与凭据滥用（非漏洞类，但最常被低估）</h3>
+<table><thead><tr><th>场景</th><th>后果</th><th>治理手段</th></tr></thead><tbody><tr><td>Provider 密钥/证书泄露</td><td>攻击者可向任意/全部用户下发推送，作为唤醒信号</td><td>密钥轮换、最小权限、按环境隔离</td></tr><tr><td>device token 从后端泄露</td><td>单目标精准投递能力（定向攻击的&quot;地址簿&quot;）</td><td>token 存储加密、访问审计</td></tr><tr><td>token 在日志/分析 SDK 中泄露</td><td>目标可识别、可关联</td><td>数据分级与脱敏（与 #50 的画像维度相关）</td></tr></tbody></table>
+<p><strong>为什么对国家级/商业投放方有吸引力</strong>：它<strong>不需要任何 iOS 漏洞</strong>就能获得&quot;精确到设备的可达性&quot;。定向攻击最贵的往往不是漏洞，而是&quot;确认这台设备在线且属于目标&quot;这一能力。</p>
+<h3>3.2 载荷解析面：<code>aps</code> 与附件</h3>
+<table><thead><tr><th>载荷要素</th><th>系统行为</th><th>攻击面属性</th></tr></thead><tbody><tr><td><code>alert</code></td><td>展示文本（富文本/本地化参数）</td><td>文本渲染解析，历史上低风险</td></tr><tr><td><code>mutable-content</code></td><td>触发 NSE 处理，允许改写通知内容</td><td><strong>把外部内容交给扩展进程</strong></td></tr><tr><td><code>attachment URL</code></td><td>扩展下载并处理媒体</td><td>高价值：与图像/媒体解析器同构（#37）</td></tr><tr><td><code>content-available</code>（静默）</td><td>App 后台获得有限执行窗口</td><td>执行调度面，非直接内存安全面</td></tr><tr><td><code>thread-id</code> / category</td><td>会话归类与操作按钮</td><td>低</td></tr></tbody></table>
+<p>工程上最该被注意的一条：<strong>&quot;下载并解析外部附件&quot;这件事发生在扩展进程里，而扩展进程同样在沙箱内</strong>。因此它给攻击者的不是权限，而是<strong>入口 + 一次自动执行的解析调用</strong>——与 #52 讨论的 BlastDoor 语义相同：自动执行的解析器是 0-click 的经济学基础。</p>
+<blockquote><p>附件下载在设备侧有流量与尺寸限制，且下载通常经 App 的扩展进程完成。这个&quot;限制&quot;本身也是防御资产：任何绕过限制的路径都值得作为高优先级审计目标。</p></blockquote>
+<h3>3.3 apsd 与守护进程位置</h3>
+<p><code>apsd</code> 是长驻系统守护进程，维持与 APNs 的连接并派发通知。攻击者视角：</p>
+<table><thead><tr><th>属性</th><th>评估</th></tr></thead><tbody><tr><td>进程权限</td><td>系统级但职责窄，直接价值有限</td></tr><tr><td>作为逃逸跳板</td><td>比 mediaserverd（#44）类媒体进程价值低——后者持有更多硬件与文件通路</td></tr><tr><td>作为持久化宿主</td><td>与&quot;注入系统进程存活&quot;模型（#45）兼容，但需内核级能力，成本高</td></tr><tr><td>作为隐蔽信道端点</td><td>有价值：其出站连接天然被信任</td></tr></tbody></table>
+<p>结论：apsd 在攻击链里的合理角色是<strong>信标与信道伪装</strong>，而不是提权落点。</p>
+<h3>3.4 借用 APNs 作为 C2 的隐蔽信道</h3>
+<table><thead><tr><th>设想</th><th>现实约束</th><th>判定</th></tr></thead><tbody><tr><td>完全用 APNs 做双向 C2</td><td>APNs 不提供应用自定义回传；需借用 App 自身后端</td><td>可行但等于普通混合 C2</td></tr><tr><td>用推送做&quot;任务下发信号&quot;，实际数据走自己的信道</td><td>只需一次唤醒</td><td><strong>最合理</strong>，也更难检测</td></tr><tr><td>借用 Apple 域名/IP 做前置（fronting）</td><td>Apple 基础设施不可被攻击者占用，但流量混杂其中</td><td>只能借&quot;同出口/同 ASN&quot;的混叠效果</td></tr></tbody></table>
+<p>对防御者的直接后果（与 #59 的网络侧结论并列）：</p>
+<ul><li><strong>JA4/SNI 类指纹对 Apple 服务段无效</strong>：目标设备的 APNs 连接与其他用户的 APNs 连接看起来一样。</li><li><strong>单设备稀有性检测仍然有效</strong>：不是看&quot;它连了 Apple&quot;，而是看&quot;这台设备在此刻被唤醒后紧接着做了什么&quot;。这就是 HUNT-01 的会话形态翻转特征（#63）。</li><li><strong>心跳模型改变</strong>：若对手把唤醒交给 APNs，其自有 C2 可以退化为&quot;纯上行、按需短会话&quot;，让长连接心跳检测（#46）失效。这是网络检测侧一个真实的盲点。</li></ul>
+<h3>3.5 静默推送与后台执行窗口</h3>
+<p><code>content-available</code> 给 App 的后台窗口，是&quot;无用户可见痕迹&quot;的活动来源：</p>
+<table><thead><tr><th>可被用于</th><th>观测痕迹</th></tr></thead><tbody><tr><td>触发数据采集任务（#42）</td><td>传感器/权限指示器可能亮起（矛盾信号，见第 4 节）</td></tr><tr><td>拉取任务清单再建立自有信道</td><td>唤醒后立刻出现新的外发连接（HUNT-01）</td></tr><tr><td>维持&quot;看起来像正常 App 行为&quot;</td><td>后台活动统计异常，需设备侧可见性（不存在，P1）</td></tr></tbody></table>
+<hr>
+<h2>4. 时间线矛盾：这条通路最好的检测抓手</h2>
+<p>推送通路唯一无法隐藏的东西是<strong>&quot;没有用户动作，却有系统活动&quot;</strong>。可交叉验证的组合：</p>
+<table><thead><tr><th>组合信号</th><th>含义</th><th>数据来源</th></tr></thead><tbody><tr><td>通知到达时刻 ≈ 外发连接建立时刻</td><td>唤醒式任务下发</td><td>网络元数据 + 通知日志</td></tr><tr><td>屏幕未点亮但上行字节突增</td><td>静默推送驱动的采集</td><td>NetFlow + 设备状态（MDM）</td></tr><tr><td>权限指示器亮起但无前台 App</td><td>后台访问传感器（高危）</td><td>设备侧观察（人工）+ 用户访谈</td></tr><tr><td>目标设备在&quot;无操作&quot;时段集中活动</td><td>心跳/采集窗口</td><td>#63 HUNT-01</td></tr></tbody></table>
+<p><strong>必须承认的局限</strong>：前三项都需要设备侧或用户侧配合，无法批量自动化；企业网络看不到 APNs 载荷内容，也看不到通知到达时间。所以这条通路的检测<strong>本质上依赖高危角色的行为约定</strong>（例如&quot;发现无来由的通知/权限指示灯立刻上报&quot;），这在 #48 的用户上报路径里是同一件事。</p>
+<hr>
+<h2>5. 与 Coruna / DarkSword 形态的关系</h2>
+<p>公开披露对两套体系在推送通路上的具体做法并没有给出可靠细节，因此这里只做<strong>结构推断</strong>，并标注为推断而非事实：</p>
+<table><thead><tr><th>体系特征（已发布结论）</th><th>推送通路能提供的增益</th><th>推断</th></tr></thead><tbody><tr><td>Coruna：水坑投递 + 落地驻留 + 批量采集（#39、#42、#45）</td><td>唤醒采集窗口、复用合法信道</td><td>高收益，尤其便于&quot;定时采集 + 定时外传&quot;</td></tr><tr><td>DarkSword：无落地、内存驻留、重启即失效（#43、#45）</td><td>用唤醒降低自有信道存在感；重启后可低成本再触发</td><td>收益更大，因为它的信道设计目标是短会话</td></tr><tr><td>两者都强调反检测（#47、#55）</td><td>借用 Apple 基础设施 = 天然降噪</td><td>与&quot;减少自建基础设施暴露&quot;的洋葱式分层一致（#46）</td></tr><tr><td>两者都以 WebKit/媒体面为入口（#39、#43、#58）</td><td>推送负责时机，不负责漏洞</td><td>符合&quot;调度器 + 执行面&quot;分工</td></tr></tbody></table>
+<blockquote><p>反过来说，<strong>水坑投递（#50）与推送唤醒是互补而非替代</strong>：水坑负责&quot;送到人&quot;，推送负责&quot;送到时刻&quot;。防御者若只加固站点而不削减通知侧自动解析，等于只关了半扇门。</p></blockquote>
+<hr>
+<h2>6. 为什么平台方很难一刀关停这条通路</h2>
+<table><thead><tr><th>关停动作</th><th>代价</th><th>现实可能性</th></tr></thead><tbody><tr><td>禁止通知携带外部附件 URL</td><td>破坏新闻/聊天/会议类 App 核心体验</td><td>低（默认不允许，需扩展显式处理）</td></tr><tr><td>禁止静默推送后台执行</td><td>邮件、同步、健康类 App 受损</td><td>中（锁定模式已部分收紧）</td></tr><tr><td>强制通知内容本地化处理</td><td>服务端逻辑改动大</td><td>中</td></tr><tr><td>限制扩展进程的网络与文件权限</td><td>附件类通知功能整体退化</td><td><strong>高</strong>（锁定模式方向即在此）</td></tr></tbody></table>
+<p>这正是&quot;移除型防御优于检测型防御&quot;（#57）的具体形态：与其等某个解析器出 0-day，不如让扩展进程在高风险配置下<strong>没有能力去下载和解析</strong>外部内容。对高危个体，可用手段排序：</p>
+<ol><li>启用锁定模式（同时收紧推送、附件与后台执行）（#34、#13）</li><li>关闭非必要 App 的通知，尤其带富媒体/附件的第三方 App</li><li>关闭锁屏预览，减少未解锁状态下的自动渲染与处理</li><li>对极高价值角色：定期重启（#64 的重启重置效力）+ 每日重启后的状态核对</li></ol>
+<hr>
+<h2>7. 企业侧治理清单</h2>
+<table><thead><tr><th>层</th><th>动作</th><th>责任方</th></tr></thead><tbody><tr><td>App 侧（若组织自研 iOS App）</td><td>Provider 密钥轮换与最小权限、按环境隔离 token、避免把 token 写进日志与分析 SDK</td><td>开发/平台</td></tr><tr><td>后端侧</td><td>推送内容来源校验（禁止把外部可控 URL 直接交给附件下载）</td><td>后端</td></tr><tr><td>MDM 侧</td><td>高危角色设备统一收紧通知策略；记录并校验锁定模式启用状态（#63 数据源）</td><td>IT/移动安全</td></tr><tr><td>网络侧</td><td>承认 APNs 不可分离，把检测重心放到&quot;唤醒后的行为形态&quot;（#63 HUNT-01）</td><td>SOC</td></tr><tr><td>人员侧</td><td>建立&quot;无来由通知 / 指示灯异常&quot;的即时上报约定（#48）</td><td>高危个体</td></tr><tr><td>取证侧</td><td>事件响应时保留通知与设备状态时间线，注意通知可被清除（#55、#62）</td><td>调查/法务</td></tr></tbody></table>
+<hr>
+<h2>8. 与既有各篇的接口</h2>
+<table><thead><tr><th>若你在做</th><th>参考</th></tr></thead><tbody><tr><td>判定 0-click 入口层次</td><td>#60（无交互/无渲染/无解锁三层）</td></tr><tr><td>设计网络检测</td><td>#63（HUNT-01 会话形态、HUNT-02 稀有域名）、#59（可检测性三档）</td></tr><tr><td>分析攻击链编排</td><td>#49（武器化层次）、#46（C2 分层与心跳模型）</td></tr><tr><td>评估投递路径</td><td>#50（水坑站点与目标识别）</td></tr><tr><td>解释逃逸需求</td><td>#52（BlastDoor 与沙箱）、#44（媒体服务注入对照）</td></tr><tr><td>制定加固清单</td><td>#48（分层加固）、#34（锁定模式）</td></tr><tr><td>应急与证据</td><td>#48（时序）、#62（通知工件与&quot;未发现≠未感染&quot;）</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>推送通路的攻击价值是&quot;唤醒 + 合法信道 + 自动解析入口&quot;，而不是自身产生 0-day</td></tr><tr><td>2</td><td>令牌与 Provider 凭据治理是最省事也最常被忽视的一环：它无需漏洞即可获得精准可达性</td></tr><tr><td>3</td><td>附件类通知把外部字节自动交给扩展进程解析，与 #37/#60 的解析器 0-click 逻辑同构</td></tr><tr><td>4</td><td>借用 APNs 会让自建信道的检测特征退化：心跳检测可能失效，单设备稀有性检测仍有效</td></tr><tr><td>5</td><td>企业网络无法分离 APNs 内容，本通路防御重心必须从检测转向削减自动解析能力</td></tr><tr><td>6</td><td>唯一稳定的观测抓手是&quot;无用户动作却有系统活动&quot;的时间线矛盾，需人员上报机制补位</td></tr><tr><td>7</td><td>水坑与推送互补：一个决定送到谁，一个决定送到什么时刻，只加固一侧等于留半扇门</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：推送与通知通路是攻击者在 iOS 上唯一可以搭 Apple 便车的投递信道——它不提供权限，却提供&quot;什么时候醒、醒后自动解析什么&quot;，因此防御它的正确姿势不是在网络里认出它（认不出来），而是收紧高风险角色设备上的自动执行与富媒体解析能力，并把检测精力放在它唤醒之后必然留下的行为形态变化上。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://developer.apple.com/documentation/usernotifications" rel="nofollow noopener" target="_blank">Apple Developer — Push Notifications / Basic Notification Payload</a></li><li><a href="https://developer.apple.com/documentation/usernotifications/unnotificationserviceextension" rel="nofollow noopener" target="_blank">Apple Developer — Notification Service App Extension</a></li><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Notifications 与锁定模式</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 推送唤醒与定向监控研究</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a64.html">← 第 64 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a66.html">第 66 篇 →</a></nav></article>
+</main></body></html>

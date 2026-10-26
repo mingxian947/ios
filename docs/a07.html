@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iPhone 本地提权漏洞分析报告 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 4 · 本地提权（LPE）">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a07.html">
+<meta property="og:title" content="iPhone 本地提权漏洞分析报告">
+<meta property="og:description" content="阶段 4 · 本地提权（LPE）">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a07.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 7 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iPhone 本地提权漏洞（Local Privilege Escalation, LPE）· 分析报告</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Google Project Zero、Jamf、CIS Advisory、SentinelOne、Apple 安全公告、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 什么是本地提权（LPE）</h2>
+<p><strong>本地提权（Local Privilege Escalation, LPE）</strong> 指攻击者<strong>已在设备上拥有低权限代码执行</strong>（如一个普通 App、沙箱内进程、或 Web RCE 后的 WebContent 进程），利用漏洞把权限<strong>提升到 root / 内核</strong>。</p>
+<p>与&quot;远程代码执行（RCE）&quot;的区别：</p>
+<ul><li><strong>RCE</strong>：从&quot;无代码执行&quot;到&quot;有代码执行&quot;（需投递，如 Web 零日、iMessage 零点击）。</li><li><strong>LPE</strong>：从&quot;有低权限代码执行&quot;到&quot;高权限（root/内核）&quot;（<strong>假设已有立足点</strong>）。</li></ul>
+<p>在 iOS 全链条中，<strong>LPE 是&quot;初始访问之后、完整沦陷之前&quot;的关键一步</strong>：</p>
+<pre><code>[初始访问 RCE / 恶意 App]  →  [沙箱逃逸]  →  [本地提权 LPE → root/内核]  →  数据窃取/持久化</code></pre>
+<blockquote><p>恶意 App 场景：用户安装了一个看似正常的 App（或企业签名/描述文件侧载），App 内利用 LPE 漏洞提权——<strong>无需任何远程投递</strong>，是&quot;本地&quot;提权的典型。</p></blockquote>
+<hr>
+<h2>2. LPE 的漏洞类型（按被击穿的内核/系统组件）</h2>
+<table><thead><tr><th>类型</th><th>说明</th><th>代表 CVE / 案例</th></tr></thead><tbody><tr><td><strong>内核内存破坏</strong></td><td>XNU 中 UAF / 越界写 / 类型混淆，获得内核读写后覆写凭证提权</td><td>CVE-2023-32434、CVE-2025-43510、CVE-2025-43520、CVE-2026-20687 (UAF)</td></tr><tr><td><strong>IOKit 驱动缺陷</strong></td><td>用户态可达的内核驱动接口内存缺陷</td><td>Project Zero《A survey of recent iOS kernel exploits》多例</td></tr><tr><td><strong>Mach 陷阱 / IPC 缺陷</strong></td><td>内核 Mach 接口、voucher、端口处理错误</td><td>历史在野链条</td></tr><tr><td><strong>加载器 / 签名校验缺陷</strong></td><td>dyld 等禁用签名校验/页所有权，允许提权后运行任意代码</td><td>CVE-2026-20700</td></tr><tr><td><strong>硬件 / MMIO 绕过</strong></td><td>绕过 GPU/硬件映射保护，辅助提权或绕内存保护</td><td>CVE-2023-38606</td></tr><tr><td><strong>沙箱/容器策略缺陷</strong></td><td>沙箱 profile 或容器权限配置错误，使低权限进程越权</td><td>研究级</td></tr><tr><td><strong>PPL/KTRR 绕过（提权使能）</strong></td><td>突破内核完整性保护，使内核读写/提权成立</td><td>Dopamine/越狱研究、DarkSword 链条</td></tr></tbody></table>
+<p><strong>提权的典型子步骤</strong>：信息泄露（破 KASLR）→ 内核内存破坏（内核读写）→ 绕过 PPL/KTRR/PAC → 覆写进程凭证（cred）/ 关闭完整性 → <strong>root</strong>。</p>
+<hr>
+<h2>3. LPE 在全链条与越狱中的位置</h2>
+<table><thead><tr><th>场景</th><th>LPE 的角色</th></tr></thead><tbody><tr><td><strong>恶意全链条（Coruna/DarkSword/三角行动）</strong></td><td>Web RCE + 沙箱逃逸后，用内核 LPE 达 root，完成窃密</td></tr><tr><td><strong>恶意 App / 侧载</strong></td><td>App 内直接 LPE，无需远程投递</td></tr><tr><td><strong>越狱</strong></td><td>越狱本质 = 用户主动触发的 LPE + 沙箱/签名绕过</td></tr><tr><td><strong>取证/红队</strong></td><td>以 LPE PoC 验证设备防护（如 Jamf iOS 13.7 LPE PoC）</td></tr></tbody></table>
+<p><strong>关键洞察</strong>：LPE 漏洞是<strong>全链条与越狱的公共组件</strong>；Apple 为堵越狱加的 PPL/KTRR/SPTM 同时抬高恶意 LPE 门槛。</p>
+<hr>
+<h2>4. 代表案例与研究</h2>
+<table><thead><tr><th>来源 / 案例</th><th>要点</th></tr></thead><tbody><tr><td>Project Zero《A survey of recent iOS kernel exploits》(2020)</td><td>系统梳理 iOS 内核 LPE 手法（内存破坏、信息泄露、绕过）</td></tr><tr><td>Jamf《Running code in the context of iOS Kernel: LPE PoC on iOS 13.7》</td><td>公开 LPE PoC，展示从用户态到内核执行的路径</td></tr><tr><td>CIS Advisory (2026-027)</td><td>Apple 多产品<strong>提权类</strong>漏洞公告，强调补丁</td></tr><tr><td>CVE-2026-20687 (iPadOS UAF)</td><td>近年 UAF 型提权代表</td></tr><tr><td>DarkSword 内核阶段</td><td>dyld（CVE-2026-20700）+ 内存管理（CVE-2025-43510/43520）提权至 root</td></tr></tbody></table>
+<hr>
+<h2>5. 检测与防护建议</h2>
+<h3>个人 / 高危用户</h3>
+<ol><li><strong>保持系统最新</strong>：LPE 漏洞修复靠系统更新（iOS 18.7.x / 26.3+）。</li><li><strong>不侧载/不装不明 App 与描述文件</strong>：削减&quot;恶意 App 本地提权&quot;入口。</li><li><strong>高危时启用 Lockdown Mode</strong>：收紧攻击面（含侧载/描述文件限制）。</li></ol>
+<h3>企业 / 组织</h3>
+<ol><li>补丁管理覆盖全部 Apple 设备与 BYOD；建立版本基线。</li><li><strong>MDM 禁止侧载/未签名 App</strong>；监控描述文件安装。</li><li>移动端 EDR/MTD 关注：低权限进程异常内核调用、异常崩溃后提权迹象、securityd/钥匙串异常访问。</li><li>对高价值人群分层防护（Lockdown Mode + 专用网络 + 行为监控）。</li></ol>
+<h3>研究 / 防御团队</h3>
+<ol><li>回归测试 Project Zero / 厂商披露的内核 LPE CVE 补丁；跟踪越狱社区 PPL/KTRR 绕过的武器化。</li><li>以&quot;立足点 → LPE → 数据&quot;建模恶意 App 与全链条两类场景。</li></ol>
+<hr>
+<h2>6. 结论</h2>
+<p>iPhone 本地提权（LPE）是&quot;已有低权限立足点 → root/内核&quot;的关键一跃，漏洞以<strong>内核内存破坏、IOKit 驱动、Mach/IPC、加载器/签名、MMIO 绕过、PPL/KTRR 绕过</strong>为主。它既是恶意全链条（Coruna/DarkSword/三角行动）的必经环节，也是恶意 App/侧载与越狱的公共组件。<strong>防御要点：及时补丁 + 禁侧载/描述文件 + Lockdown Mode + 针对低权限进程异常内核行为的运行时检测。</strong> 对攻击者而言 LPE 零日价值极高；对防御者而言，<strong>削减立足点（不装不明 App）+ 及时补丁</strong>是最有效的两道前置防线。</p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://projectzero.google/2020/06/a-survey-of-recent-ios-kernel-exploits.html" rel="nofollow noopener" target="_blank">A survey of recent iOS kernel exploits — Google Project Zero</a></li><li><a href="https://www.jamf.com/blog/running-code-in-the-context-of-ios-kernel-part-i-lpe-poc-on-ios-137/" rel="nofollow noopener" target="_blank">Running code in the context of iOS Kernel: LPE PoC on iOS 13.7 — Jamf</a></li><li><a href="https://www.cisecurity.org/advisory/multiple-vulnerabilities-in-apple-products-could-allow-for-privilege-escalation_2026-027" rel="nofollow noopener" target="_blank">Multiple Vulnerabilities in Apple Products Could Allow for Privilege Escalation — CIS Advisory 2026-027</a></li><li><a href="https://www.sentinelone.com/vulnerability-database/cve-2026-20687/" rel="nofollow noopener" target="_blank">CVE-2026-20687: Apple iPadOS Use After Free — SentinelOne</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud TI</a></li><li>iOS 越狱漏洞分析报告（本仓库）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a06.html">← 第 6 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a08.html">第 8 篇 →</a></nav></article>
+</main></body></html>

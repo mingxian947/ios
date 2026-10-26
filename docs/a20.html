@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 覆盖数据类别分析报告 | iOS 安全研究文章库</title>
+<meta name="description" content="8 大数据类别、Data Protection _classes、Keychain 访问属性与真实案例映射">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a20.html">
+<meta property="og:title" content="iOS 覆盖数据类别分析报告">
+<meta property="og:description" content="8 大数据类别、Data Protection _classes、Keychain 访问属性与真实案例映射">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a20.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 20 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 攻击链覆盖数据类别深度分析报告</h1>
+<blockquote><p>编制日期：2026-10-09 数据来源：Apple Platform Security、Kaspersky、Google Threat Intelligence、MITRE ATT&amp;CK、Securelist、IBM Security 等公开威胁情报 性质：防御性安全研究分析（Defensive Security Research）</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>iOS 全链条攻击（Full-Chain Exploit）的最终目标是<strong>数据窃取</strong>。攻击者通过 WebKit RCE → 沙箱逃逸 → 内核提权的完整攻击路径，获得对设备的完全控制权后，可访问 iOS 系统上几乎所有类型的数据。</p>
+<p>本报告系统梳理 iOS 攻击链覆盖的<strong>八大类数据</strong>，分析各类数据的保护机制、攻击者的获取方式、以及对应的检测与防护策略。</p>
+<p><strong>核心发现</strong>：</p>
+<ul><li>全链条攻击可绕过 iOS Data Protection 的所有保护级别</li><li>内核提权后可访问 Keychain、加密文件、安全隔区（SEP）授权令牌</li><li>实时监视能力（摄像头/麦克风/屏幕）超越静态数据窃取</li><li>加密货币钱包和 BIP39 助记词成为近年攻击重点</li></ul>
+<hr>
+<h2>2. iOS 数据保护体系概述</h2>
+<h3>2.1 Data Protection  Classes（数据保护类）</h3>
+<p>iOS 通过 <strong>Data Protection Classes</strong> 对文件系统进行分级加密保护，每类数据根据设备锁定状态决定可访问性：</p>
+<table><thead><tr><th>保护类</th><th>英文标识</th><th>可访问时机</th><th>典型数据</th></tr></thead><tbody><tr><td><strong>完全保护</strong></td><td><code>NSFileProtectionComplete</code></td><td>仅设备解锁时</td><td>消息数据库、健康数据、Keychain 项（WhenUnlocked）</td></tr><tr><td><strong>除非已打开</strong></td><td><code>NSFileProtectionCompleteUnlessOpen</code></td><td>已打开的文件在锁定时仍可访问</td><td>正在录制的音频、正在下载的文件</td></tr><tr><td><strong>首次认证后</strong></td><td><code>NSFileProtectionCompleteUntilFirstUserAuthentication</code></td><td>开机后首次输入密码后即可访问（即使锁定）</td><td>推送通知、后台任务数据、大多数 App 数据</td></tr><tr><td><strong>无保护</strong></td><td><code>NSFileProtectionNone</code></td><td>任何时候均可访问</td><td>系统缓存、临时文件</td></tr></tbody></table>
+<h3>2.2 Keychain 访问控制</h3>
+<p>Keychain 项通过 <code>kSecAttrAccessible</code> 属性控制访问时机：</p>
+<table><thead><tr><th>属性</th><th>可访问时机</th><th>用途</th></tr></thead><tbody><tr><td><code>kSecAttrAccessibleWhenUnlocked</code></td><td>设备解锁时</td><td>默认，最常用</td></tr><tr><td><code>kSecAttrAccessibleAfterFirstUnlock</code></td><td>首次解锁后（即使锁定）</td><td>后台任务需要的凭证</td></tr><tr><td><code>kSecAttrAccessibleWhenPasscodeSet</code></td><td>设备设置密码后且解锁时</td><td>高敏感数据</td></tr><tr><td><code>kSecAttrAccessibleAlways</code></td><td>任何时候（已弃用）</td><td>遗留代码</td></tr></tbody></table>
+<h3>2.3 安全隔区（Secure Enclave）</h3>
+<ul><li><strong>非对称密钥对</strong>：私钥永不离开 SEP，无法导出</li><li><strong>数据保护主密钥</strong>：由 SEP 持有，与设备密码绑定</li><li><strong>Crypto Erase</strong>：删除数据保护密钥即可使所有加密数据不可恢复</li></ul>
+<blockquote><p><strong>关键弱点</strong>：内核提权后，攻击者可利用 SEP 的<strong>授权机制</strong>——在设备解锁状态下，SEP 会授权访问数据保护密钥，从而使攻击者获得与合法用户相同的数据访问能力。</p></blockquote>
+<hr>
+<h2>3. 八大类覆盖数据详解</h2>
+<h3>3.1 通信数据（Communication Data）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>SMS / iMessage</strong></td><td><code>~/Library/SMS/sms.db</code>（SQLite）</td><td>CompleteUntilFirstUserAuthentication</td><td>内核提权后直接读取 SQLite 数据库</td></tr><tr><td><strong>WhatsApp 聊天</strong></td><td><code>~/Library/ChatStorage/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取加密数据库 + 从 Keychain 获取解密密钥</td></tr><tr><td><strong>Telegram 聊天</strong></td><td>App 沙箱内 SQLite</td><td>CompleteUntilFirstUserAuthentication</td><td>同上</td></tr><tr><td><strong>Signal 聊天</strong></td><td>App 沙箱内 SQLite</td><td>Complete（需解锁）</td><td>内核提权 + 等待设备解锁后读取</td></tr><tr><td><strong>电子邮件</strong></td><td><code>~/Library/Mail/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取邮件数据库 + 附件</td></tr><tr><td><strong>通话记录</strong></td><td>系统数据库</td><td>CompleteUntilFirstUserAuthentication</td><td>直接读取</td></tr><tr><td><strong>联系人</strong></td><td><code>~/Library/AddressBook/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取联系人数据库</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>三角行动（Operation Triangulation）</strong>：TriangleDB 植入物专门窃取 SMS、WhatsApp、Telegram 聊天记录</li><li><strong>Pegasus</strong>：读取所有即时通讯应用消息，包括已删除消息（从数据库回收站恢复）</li></ul>
+<h3>3.2 媒体与文件（Media &amp; Files）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>照片库</strong></td><td><code>~/PhotoData/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取照片数据库 + 原始文件</td></tr><tr><td><strong>相机拍摄</strong></td><td>实时流</td><td>N/A（实时）</td><td>劫持摄像头进程，实时录制</td></tr><tr><td><strong>视频</strong></td><td>照片库 / App 沙箱</td><td>同上</td><td>同上</td></tr><tr><td><strong>文档</strong></td><td>Files App / iCloud Drive</td><td>CompleteUntilFirstUserAuthentication</td><td>读取文件系统</td></tr><tr><td><strong>语音备忘录</strong></td><td><code>~/Library/Recordings/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取录音文件</td></tr><tr><td><strong>屏幕截图</strong></td><td>实时流</td><td>N/A（实时）</td><td>劫持屏幕录制服务</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>Coruna / DarkSword</strong>：扫描 BIP39 助记词时，通过屏幕截图捕获钱包应用的助记词显示画面</li><li><strong>Pegasus</strong>：激活摄像头拍摄环境照片，录制屏幕操作</li></ul>
+<h3>3.3 凭证与密钥（Credentials &amp; Secrets）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>Keychain 项</strong></td><td>系统 Keychain 数据库</td><td>各 App 自定义</td><td>内核提权 + SEP 授权 → 读取所有 Keychain 项</td></tr><tr><td><strong>App 密码</strong></td><td>Keychain / App 沙箱</td><td>各 App 自定义</td><td>从 Keychain 或配置文件读取</td></tr><tr><td><strong>Session Cookie</strong></td><td>Keychain / NSUserDefaults</td><td>各 App 自定义</td><td>窃取会话令牌，劫持登录状态</td></tr><tr><td><strong>银行 App 凭证</strong></td><td>Keychain（高保护）</td><td>WhenUnlocked / WhenPasscodeSet</td><td>等待设备解锁后读取</td></tr><tr><td><strong>社交媒体令牌</strong></td><td>Keychain</td><td>AfterFirstUnlock</td><td>首次解锁后即可读取</td></tr><tr><td><strong>Wi-Fi 密码</strong></td><td>系统 Keychain</td><td>系统级保护</td><td>内核提权后读取</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>三角行动</strong>：TriangleDB 模块专门提取 Keychain 数据，包括所有 App 存储的密码和令牌</li><li><strong>Pegasus</strong>：通过键盘记录（keylogger）捕获实时输入的密码</li></ul>
+<h3>3.4 加密货币与金融数据（Cryptocurrency &amp; Financial）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>BIP39 助记词</strong></td><td>钱包 App 沙箱 / Keychain</td><td>Complete（需解锁）</td><td>屏幕截图 + 文件读取 + Keychain 提取</td></tr><tr><td><strong>私钥</strong></td><td>钱包 App 沙箱 / SEP</td><td>Complete / SEP 保护</td><td>从内存或文件读取（若未使用 SEP）</td></tr><tr><td><strong>交易记录</strong></td><td>钱包 App 数据库</td><td>CompleteUntilFirstUserAuthentication</td><td>读取 SQLite 数据库</td></tr><tr><td><strong>银行 App 数据</strong></td><td>银行 App 沙箱</td><td>Complete（需解锁）</td><td>屏幕截图 + 文件读取</td></tr><tr><td><strong>支付信息</strong></td><td>Apple Pay / 银行 App</td><td>SEP 保护 / Complete</td><td>Apple Pay 令牌不可提取；银行卡号从 App 读取</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>Coruna</strong>：专门扫描钱包应用的 BIP39 助记词显示画面，通过屏幕截图捕获 12/24 个单词</li><li><strong>DarkSword</strong>：劫持加密货币钱包应用，实时捕获交易签名</li><li><strong>SpyAgent</strong>：针对 iOS 的恶意软件，专门窃取加密钱包种子短语</li></ul>
+<blockquote><p><strong>关键风险</strong>：大多数钱包应用将助记词以明文形式显示在屏幕上供用户备份，这成为屏幕截图攻击的主要目标。即使数据加密存储，屏幕截图绕过了所有加密保护。</p></blockquote>
+<h3>3.5 位置与移动轨迹（Location &amp; Movement）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>实时 GPS</strong></td><td>系统位置服务</td><td>N/A（实时）</td><td>订阅位置更新 API</td></tr><tr><td><strong>位置历史</strong></td><td><code>~/Library/Caches/...</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取位置缓存数据库</td></tr><tr><td><strong>常去地点</strong></td><td>系统隐私数据库</td><td>Complete（系统级）</td><td>内核提权后读取</td></tr><tr><td><strong>地理围栏</strong></td><td>App 沙箱</td><td>各 App 自定义</td><td>读取 App 配置</td></tr><tr><td><strong>Wi-Fi 热点</strong></td><td>系统缓存</td><td>系统级</td><td>扫描当前可见 Wi-Fi</td></tr><tr><td><strong>蓝牙设备</strong></td><td>系统缓存</td><td>系统级</td><td>扫描当前可见蓝牙</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>三角行动</strong>：TriangleDB 持续监控设备地理位置，通过加密 C2 通道外传</li><li><strong>Pegasus</strong>：实时追踪位置，记录移动轨迹</li></ul>
+<h3>3.6 实时监视数据（Real-time Surveillance）</h3>
+<table><thead><tr><th>数据类型</th><th>获取方式</th><th>保护机制</th><th>攻击绕过方式</th></tr></thead><tbody><tr><td><strong>摄像头视频</strong></td><td>劫持摄像头进程</td><td>摄像头指示灯（绿点）</td><td>无法绕过指示灯，但可短暂激活</td></tr><tr><td><strong>麦克风音频</strong></td><td>劫持麦克风进程</td><td>麦克风指示灯（橙点）</td><td>无法绕过指示灯，但可短暂录制</td></tr><tr><td><strong>屏幕内容</strong></td><td>劫持屏幕录制服务</td><td>屏幕录制提示（红条）</td><td>短暂激活，用户可能未察觉</td></tr><tr><td><strong>键盘输入</strong></td><td>键盘事件钩子</td><td>无直接提示</td><td>完全隐蔽，持续记录</td></tr><tr><td><strong>通话音频</strong></td><td>劫持通话进程</td><td>通话指示灯</td><td>仅在通话期间录制</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>Pegasus</strong>：激活摄像头和麦克风进行环境监视，录制通话音频</li><li><strong>三角行动</strong>：通过内存植入物捕获实时音频</li></ul>
+<blockquote><p><strong>关键限制</strong>：iOS 14+ 引入的摄像头/麦克风指示灯使隐蔽长期监视变得困难。攻击者只能短暂激活，或在用户预期使用摄像头/麦克风时（如视频通话）并行录制。</p></blockquote>
+<h3>3.7 应用数据（App Data）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>SQLite 数据库</strong></td><td>App 沙箱 <code>Documents/</code> <code>Library/</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取数据库文件</td></tr><tr><td><strong>App 配置文件</strong></td><td>App 沙箱 <code>Preferences/</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取 plist 文件</td></tr><tr><td><strong>浏览器历史</strong></td><td>Safari / Chrome 沙箱</td><td>CompleteUntilFirstUserAuthentication</td><td>读取历史数据库</td></tr><tr><td><strong>Cookie / 缓存</strong></td><td>App 沙箱 <code>Library/Caches/</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取缓存文件</td></tr><tr><td><strong>下载文件</strong></td><td>App 沙箱 <code>Documents/</code></td><td>CompleteUntilFirstUserAuthentication</td><td>读取文件</td></tr><tr><td><strong>App 状态</strong></td><td>App 沙箱</td><td>CompleteUntilFirstUserAuthentication</td><td>读取状态文件</td></tr></tbody></table>
+<p><strong>真实案例</strong>：</p>
+<ul><li><strong>三角行动</strong>：扫描所有 App 的 SQLite 数据库，提取敏感信息</li><li><strong>Coruna</strong>：注入系统进程（<code>powerd</code> <code>locationd</code> <code>imagent</code>），访问跨 App 数据</li></ul>
+<h3>3.8 系统数据（System Data）</h3>
+<table><thead><tr><th>数据类型</th><th>存储位置</th><th>保护级别</th><th>攻击获取方式</th></tr></thead><tbody><tr><td><strong>设备标识符</strong></td><td>系统 API</td><td>无保护</td><td>调用 API 获取 UDID、序列号</td></tr><tr><td><strong>网络信息</strong></td><td>系统配置</td><td>无保护</td><td>读取 IP、MAC、SSID</td></tr><tr><td><strong>已安装 App</strong></td><td>系统 API</td><td>无保护</td><td>枚举已安装应用列表</td></tr><tr><td><strong>系统配置</strong></td><td>系统数据库</td><td>系统级</td><td>内核提权后读取</td></tr><tr><td><strong>日志文件</strong></td><td><code>/var/log/</code></td><td>系统级</td><td>内核提权后读取</td></tr><tr><td><strong>进程列表</strong></td><td>系统 API</td><td>无保护</td><td>枚举运行中进程</td></tr></tbody></table>
+<hr>
+<h2>4. 攻击链各阶段的数据访问能力</h2>
+<h3>4.1 阶段 1：WebKit RCE（沙箱内）</h3>
+<p><strong>可访问数据</strong>：</p>
+<ul><li>浏览器 Cookie、缓存、历史</li><li>浏览器沙箱内的文件</li><li>通过浏览器 API 获取的有限信息（User-Agent、屏幕尺寸等）</li></ul>
+<p><strong>不可访问</strong>：</p>
+<ul><li>其他 App 数据</li><li>Keychain</li><li>系统文件</li><li>摄像头/麦克风（需用户授权）</li></ul>
+<h3>4.2 阶段 2：沙箱逃逸（用户空间）</h3>
+<p><strong>新增可访问数据</strong>：</p>
+<ul><li>其他 App 沙箱文件（需破解文件保护）</li><li>部分系统配置</li><li>网络流量（可嗅探）</li></ul>
+<p><strong>仍不可访问</strong>：</p>
+<ul><li>Keychain（需内核权限）</li><li>受保护的文件系统区域</li><li>摄像头/麦克风（需内核权限）</li></ul>
+<h3>4.3 阶段 3：内核提权（完全控制）</h3>
+<p><strong>新增可访问数据</strong>：</p>
+<ul><li><strong>所有</strong>文件系统数据（等待设备解锁）</li><li><strong>所有</strong> Keychain 项（通过 SEP 授权）</li><li>摄像头/麦克风（短暂激活）</li><li>屏幕内容</li><li>键盘输入</li><li>实时位置</li><li>所有进程内存</li></ul>
+<blockquote><p><strong>关键能力</strong>：内核提权后，攻击者获得与设备所有者<strong>相同的数据访问权限</strong>。唯一限制是物理隔离的数据（如 SEP 内的私钥）和需要用户生物识别授权的数据（如 Face ID/Touch ID 保护的 Keychain 项）。</p></blockquote>
+<hr>
+<h2>5. 真实攻击案例的数据覆盖对比</h2>
+<table><thead><tr><th>攻击 / 工具</th><th>通信</th><th>媒体</th><th>凭证</th><th>加密</th><th>位置</th><th>实时监视</th><th>App 数据</th><th>系统</th></tr></thead><tbody><tr><td><strong>三角行动</strong></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td><strong>Coruna</strong></td><td>✅</td><td>✅</td><td>✅</td><td>✅✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td><strong>DarkSword</strong></td><td>✅</td><td>✅</td><td>✅</td><td>✅✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td><strong>Pegasus</strong></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅✅</td><td>✅</td><td>✅</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr></tbody></table>
+<blockquote><p>✅✅ = 重点目标；✅ = 覆盖；空白 = 未报告</p></blockquote>
+<hr>
+<h2>6. 数据保护机制与绕过</h2>
+<h3>6.1 Data Protection 的局限</h3>
+<table><thead><tr><th>保护机制</th><th>设计目标</th><th>攻击绕过方式</th></tr></thead><tbody><tr><td><strong>文件加密</strong></td><td>设备锁定时保护数据</td><td>内核提权 + 等待设备解锁</td></tr><tr><td><strong>Keychain 访问控制</strong></td><td>限制凭证访问时机</td><td>SEP 授权（设备解锁状态下）</td></tr><tr><td><strong>沙箱隔离</strong></td><td>限制 App 间数据访问</td><td>沙箱逃逸 + 内核提权</td></tr><tr><td><strong>SEP 密钥保护</strong></td><td>私钥永不离开硬件</td><td>无法直接提取，但可利用授权</td></tr></tbody></table>
+<h3>6.2 无法绕过的保护</h3>
+<table><thead><tr><th>保护机制</th><th>保护内容</th><th>为何无法绕过</th></tr></thead><tbody><tr><td><strong>SEP 私钥</strong></td><td>Apple Pay 令牌、部分生物识别数据</td><td>硬件隔离，无软件访问路径</td></tr><tr><td><strong>Face ID / Touch ID 授权</strong></td><td>特定 Keychain 项</td><td>需要物理生物识别，无法软件模拟</td></tr><tr><td><strong>Secure Enclave 密钥生成</strong></td><td>设备唯一密钥</td><td>密钥永不离开 SEP</td></tr><tr><td><strong>Crypto Erase</strong></td><td>所有数据</td><td>删除主密钥后数据不可恢复</td></tr></tbody></table>
+<hr>
+<h2>7. 检测与防护策略</h2>
+<h3>7.1 数据泄露检测</h3>
+<table><thead><tr><th>数据类型</th><th>检测信号</th><th>检测方法</th></tr></thead><tbody><tr><td><strong>通信数据</strong></td><td>异常数据库访问</td><td>端点行为检测（EDR）</td></tr><tr><td><strong>凭证泄露</strong></td><td>异常 Keychain 访问</td><td>Keychain 访问日志审计</td></tr><tr><td><strong>加密货币窃取</strong></td><td>屏幕截图 + 钱包 App 同时激活</td><td>运行时行为监控</td></tr><tr><td><strong>位置追踪</strong></td><td>持续位置 API 调用</td><td>网络流量分析 + 进程监控</td></tr><tr><td><strong>实时监视</strong></td><td>摄像头/麦克风异常激活</td><td>指示灯监控 + 进程审计</td></tr></tbody></table>
+<h3>7.2 防护建议</h3>
+<p><strong>按数据类别</strong>：</p>
+<ol><li><strong>通信数据</strong></li></ol>
+<p>   - 使用端到端加密应用（Signal）</p>
+<p>   - 定期清理聊天记录</p>
+<p>   - 启用消失消息功能</p>
+<ol><li><strong>凭证与密钥</strong></li></ol>
+<p>   - 使用强密码 + 生物识别</p>
+<p>   - 启用 Advanced Data Protection（高级数据保护）</p>
+<p>   - 定期审查 Keychain 访问权限</p>
+<ol><li><strong>加密货币</strong></li></ol>
+<p>   - 使用硬件钱包（Ledger / Trezor）存储大额资产</p>
+<p>   - 避免在手机上显示助记词</p>
+<p>   - 使用支持 SEP 保护的钱包应用</p>
+<ol><li><strong>实时监视防护</strong></li></ol>
+<p>   - 关注摄像头/麦克风指示灯</p>
+<p>   - 启用 Lockdown Mode（锁定模式）</p>
+<p>   - 定期检查运行中进程</p>
+<ol><li><strong>通用防护</strong></li></ol>
+<p>   - <strong>及时更新 iOS</strong>：修复已知漏洞</p>
+<p>   - <strong>启用 Lockdown Mode</strong>：高危用户必选</p>
+<p>   - <strong>启用 Advanced Data Protection</strong>：端到端加密 iCloud 数据</p>
+<p>   - <strong>定期重启设备</strong>：清除内存植入物（针对无持久化攻击）</p>
+<hr>
+<h2>8. 风险评级与优先级</h2>
+<table><thead><tr><th>数据类别</th><th>风险等级</th><th>优先级</th><th>说明</th></tr></thead><tbody><tr><td><strong>加密货币 / 金融</strong></td><td>🔴 <strong>极高</strong></td><td>1</td><td>直接经济损失；不可逆</td></tr><tr><td><strong>凭证 / 密钥</strong></td><td>🔴 <strong>极高</strong></td><td>1</td><td>可导致连锁泄露；长期影响</td></tr><tr><td><strong>通信数据</strong></td><td>🟠 <strong>高</strong></td><td>2</td><td>隐私泄露；社会工程攻击素材</td></tr><tr><td><strong>实时监视</strong></td><td>🟠 <strong>高</strong></td><td>2</td><td>人身安全威胁；商业间谍</td></tr><tr><td><strong>位置数据</strong></td><td>🟡 <strong>中</strong></td><td>3</td><td>行踪追踪；物理安全</td></tr><tr><td><strong>媒体文件</strong></td><td>🟡 <strong>中</strong></td><td>3</td><td>隐私泄露</td></tr><tr><td><strong>App 数据</strong></td><td>🟡 <strong>中</strong></td><td>3</td><td>业务数据泄露</td></tr><tr><td><strong>系统数据</strong></td><td>🟢 <strong>低</strong></td><td>4</td><td>侦察用途；间接风险</td></tr></tbody></table>
+<hr>
+<h2>9. 结论</h2>
+<p>iOS 全链条攻击可覆盖设备上<strong>几乎所有类型的数据</strong>，从静态存储的通信记录、凭证、媒体文件，到实时生成的摄像头视频、麦克风音频、键盘输入、屏幕内容。</p>
+<p><strong>核心风险点</strong>：</p>
+<ol><li><strong>内核提权 = 完全控制</strong>：攻击者获得与设备所有者相同的数据访问权限</li><li><strong>屏幕截图绕过加密</strong>：即使数据加密存储，屏幕内容无法加密</li><li><strong>加密货币成为首要目标</strong>：BIP39 助记词的显示方式使其易受屏幕截图攻击</li><li><strong>无持久化攻击难以检测</strong>：内存植入物重启即消失，传统检测失效</li></ol>
+<p><strong>最有效防护</strong>：</p>
+<ul><li>及时更新 iOS</li><li>启用 Lockdown Mode</li><li>使用硬件钱包存储大额加密资产</li><li>启用 Advanced Data Protection</li><li>定期重启设备</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/data-protection-classes-secb010e978a/web" rel="nofollow noopener" target="_blank">Data Protection Classes — Apple Platform Security</a></li><li><a href="https://attack.mitre.org/campaigns/C0054/" rel="nofollow noopener" target="_blank">Operation Triangulation, Campaign C0054 — MITRE ATT&amp;CK</a></li><li><a href="https://www.kaspersky.com/about/press-releases/kaspersky-reveals-details-behind-the-spyware-used-in-operation-triangulation" rel="nofollow noopener" target="_blank">Kaspersky reveals details behind Operation Triangulation spyware</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud Threat Intelligence</a></li><li><a href="https://www.group-ib.com/blog/pegasus-spyware/" rel="nofollow noopener" target="_blank">Pegasus Spyware: What It Is &amp; How to Detect It — Group-IB</a></li><li><a href="https://en.wikipedia.org/wiki/Pegasus_(spyware" rel="nofollow noopener" target="_blank">Pegasus (spyware) — Wikipedia</a>)</li><li><a href="https://www.nutrient.io/blog/how-to-use-ios-data-protection/" rel="nofollow noopener" target="_blank">How to use iOS Data Protection (updated for iOS 17) — Nutrient.io</a></li><li><a href="https://medium.com/@salamsajid7/ios-keychain-and-data-protection-classes-abuse-and-misuse-759267ee03b4" rel="nofollow noopener" target="_blank">iOS Keychain and Data Protection Classes Abuse — Medium</a></li><li><a href="https://www.ibm.com/think/insights/spyagent-malware-targets-crypto-wallets-stealing-screenshots" rel="nofollow noopener" target="_blank">SpyAgent malware targets crypto wallets — IBM Security</a></li><li><a href="https://securelist.com/triangulation-validators-modules/110847/" rel="nofollow noopener" target="_blank">Coruna: the framework used in Operation Triangulation — Securelist</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a19.html">← 第 19 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a21.html">第 21 篇 →</a></nav></article>
+</main></body></html>

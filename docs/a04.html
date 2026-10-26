@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS PAC 绕过分析文章 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 2 · 指针认证绕过">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a04.html">
+<meta property="og:title" content="iOS PAC 绕过分析文章">
+<meta property="og:description" content="阶段 2 · 指针认证绕过">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a04.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 4 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS PAC 绕过（Pointer Authentication Code Bypass）· 分析文章</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Google Project Zero、USENIX Security、Apple Developer 文档、Jamf、公开研究（含 DarkSword 链条 PAC 绕过分析） 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. PAC 是什么，为什么它是 iOS 防御的基石</h2>
+<p><strong>PAC（Pointer Authentication Code，指针认证码）</strong> 是 ARMv8.3+ 引入、Apple 在 A12 及以后芯片全面启用的硬件安全特性：</p>
+<ul><li>对<strong>代码指针 / 返回地址 / 函数指针</strong>附加一段加密签名（PAC），签名与指针值、上下文（如栈地址、密钥）绑定。</li><li>使用指针前通过 <code>AUT</code> 指令校验签名；签名不匹配则指针被&quot;毒化&quot;，后续访问触发崩溃。</li><li>目的：<strong>即使攻击者能任意写内存，也难以伪造一个&quot;合法签名&quot;的控制流指针</strong>来劫持程序跳转。</li></ul>
+<p>PAC 与 <strong>KASLR、PPL、KTRR、代码签名</strong> 共同构成 iOS 内核/用户态的纵深防御。对攻击者而言，<strong>绕过 PAC 是控制流劫持类利用（ROP/JOP）能否成立的前提</strong>。</p>
+<hr>
+<h2>2. 攻击者为什么必须绕过 PAC</h2>
+<p>在内存破坏漏洞（UAF / 越界写）之后，经典利用手法是<strong>覆写返回地址或函数指针</strong>跳转到攻击者代码。PAC 使这种&quot;直接覆写指针&quot;失效——伪造的指针签名校验失败即崩溃。</p>
+<p>因此，现代 iOS 利用链中，攻击者要么：</p>
+<ul><li><strong>绕过 PAC</strong> 以完成控制流劫持，或</li><li><strong>改用不依赖伪造指针的手法</strong>（data-only、复用已签名指针、oracle 等）。</li></ul>
+<p>PAC 绕过通常是<strong>沙箱逃逸 / 内核提权环节的关键子步骤</strong>。公开分析显示，<strong>DarkSword 全链条中包含专门的 PAC 绕过组件</strong>，用于支撑后续控制流劫持。</p>
+<hr>
+<h2>3. PAC 绕过的概念性思路（防御视角分类）</h2>
+<blockquote><p>以下为公开研究归纳的<strong>思路分类</strong>，用于威胁建模与检测，不含具体利用代码。</p></blockquote>
+<table><thead><tr><th>类别</th><th>思路</th><th>说明</th></tr></thead><tbody><tr><td><strong>复用已签名指针（Pointer Reuse）</strong></td><td>不伪造新指针，而是把内存中<strong>已合法签名</strong>的指针搬到目标位置</td><td>签名对&quot;值+上下文&quot;有效，若上下文不变可被重用</td></tr><tr><td><strong>PAC Oracle / 签名泄露</strong></td><td>利用某处可被诱导执行 <code>AUT</code>/签名校验并回传结果的缺陷，把&quot;校验能力&quot;当 oracle 用</td><td>通过反复试探恢复合法签名或确认指针</td></tr><tr><td><strong>Data-Only 攻击</strong></td><td>完全不动控制流指针，只篡改<strong>数据</strong>（标志、长度、对象字段）达成目标</td><td>规避 PAC（PAC 只保护指针，不保护普通数据）</td></tr><tr><td><strong>绕过校验点 / 禁用 PAC</strong></td><td>在内核/高权限处修改 PAC 密钥、关闭校验、或劫持到不校验的路径</td><td>需先有较高权限，常用于提权后期</td></tr><tr><td><strong>JIT / 代码复用</strong></td><td>复用已签名的 JIT 代码块或 gadget，而非注入新指针</td><td>结合 JIT 加固绕过难度高</td></tr><tr><td><strong>信息泄露配合</strong></td><td>先泄露密钥/已签名指针/内核地址，降低伪造或复用难度</td><td>常与内存泄露漏洞组合</td></tr></tbody></table>
+<p><strong>关键洞察</strong>：PAC 保护的是&quot;指针完整性&quot;，<strong>不保护数据完整性</strong>。因此 <strong>data-only 攻击与指针复用</strong>是最常见的&quot;绕开&quot;而非&quot;破解&quot;PAC 的方式；真正&quot;破解&quot;PAC 签名本身在工程上极难。</p>
+<hr>
+<h2>4. 相关研究与代表案例</h2>
+<table><thead><tr><th>来源 / 案例</th><th>要点</th></tr></thead><tbody><tr><td>Project Zero《Examining Pointer Authentication on the iPhone XS》(2019)</td><td>早期系统剖析 PAC 在 iOS 的实现与限制</td></tr><tr><td>USENIX Security'23《Demystifying Pointer Authentication on Apple M1》</td><td>对 M1 上 PAC 的深入逆向与安全性评估</td></tr><tr><td>Jamf《TFP0 PoC on PAC-Enabled iOS &lt;= 12.4.2》</td><td>展示在 PAC 设备上达成内核读写（tfp0）的思路</td></tr><tr><td>DarkSword 链条 PAC 绕过分析（NashTech, 2026）</td><td>指出 DarkSword 全链条含专门 PAC 绕过组件，支撑控制流劫持</td></tr><tr><td>Apple Developer 文档《Preparing your app to work with pointer authentication》</td><td>官方对 PAC 语义与开发者适配的说明</td></tr></tbody></table>
+<p><strong>在链条中的位置</strong>：</p>
+<pre><code>内存破坏 (获得任意写)  →  [PAC 绕过 / 指针复用 / data-only]  →  控制流劫持或数据篡改
+        →  沙箱逃逸  →  内核提权 (root)</code></pre>
+<hr>
+<h2>5. Apple 的配套缓解与攻防趋势</h2>
+<ul><li><strong>PAC + 上下文绑定</strong>：签名与栈地址/密钥绑定，抬高跨上下文复用难度。</li><li><strong>PPL / KTRR</strong>：限制内核关键内存与页表，即使绕过 PAC 仍难改内核。</li><li><strong>JIT 加固 / W^X</strong>：限制复用 JIT 代码页。</li><li><strong>数据完整性补充</strong>：Apple 逐步在关键结构加入额外校验，压缩 data-only 空间。</li></ul>
+<p><strong>趋势</strong>：单一&quot;覆写返回地址&quot;已死；攻击转向<strong>指针复用、data-only、oracle、多原语组合</strong>，并与零日打包。PAC 并未被&quot;破解&quot;，而是被&quot;绕开&quot;——这推动防御方同时关注<strong>数据完整性</strong>与<strong>异常控制流/校验行为</strong>。</p>
+<hr>
+<h2>6. 检测与防护建议</h2>
+<h3>个人 / 高危用户</h3>
+<ol><li><strong>保持系统最新</strong>：PAC 相关绕过依赖的底层漏洞修复靠系统更新。</li><li><strong>高危时启用 Lockdown Mode</strong>：收紧攻击面，使含 PAC 绕过的全链条前置环节失效。</li></ol>
+<h3>企业 / 组织</h3>
+<ol><li>补丁管理覆盖全部 Apple 设备与 BYOD。</li><li>移动端 EDR/MTD 关注：异常崩溃模式（PAC 校验失败的毒化指针崩溃）、异常控制流、内核级校验异常。</li><li>对高价值人群分层防护（Lockdown Mode + 专用网络 + 行为监控）。</li></ol>
+<h3>研究 / 防御团队</h3>
+<ol><li>威胁建模同时覆盖<strong>指针完整性（PAC）与数据完整性（data-only）</strong>两条线。</li><li>关注 PAC oracle / 指针复用类研究，回归测试相关 CVE 补丁。</li></ol>
+<hr>
+<h2>7. 结论</h2>
+<p>PAC 是 iOS 抵御控制流劫持的硬件基石，使&quot;直接伪造指针&quot;失效。但攻击者通过<strong>指针复用、data-only、PAC oracle、绕过校验点、信息泄露组合</strong>等方式&quot;绕开&quot;而非&quot;破解&quot;PAC；DarkSword 等现代全链条已内置专门 PAC 绕过组件。PAC 保护指针却不保护数据，决定了 <strong>data-only 与复用</strong>是最现实的 bypass 路径。<strong>防御要点：及时补丁 + Lockdown Mode + 同时监控指针完整性与数据完整性异常。</strong></p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://projectzero.google/2019/02/examining-pointer-authentication-on.html" rel="nofollow noopener" target="_blank">Examining Pointer Authentication on the iPhone XS — Google Project Zero</a></li><li><a href="https://www.usenix.org/system/files/usenixsecurity23-cai-zechao.pdf" rel="nofollow noopener" target="_blank">Demystifying Pointer Authentication on Apple M1 — USENIX Security'23</a></li><li><a href="https://www.jamf.com/blog/tfp0-poc-on-pac-enabled-ios-devices-12-4-2/" rel="nofollow noopener" target="_blank">TFP0 POC on PAC-Enabled iOS Devices &lt;= 12.4.2 — Jamf</a></li><li><a href="https://blog.nashtechglobal.com/vulnerability-analysis-taking-a-look-at-the-pac-bypass-behind-the-darksword-exploit-chain-part-1/" rel="nofollow noopener" target="_blank">Vulnerability Analysis: The PAC bypass behind the DarkSword exploit chain — NashTech</a></li><li><a href="https://developer.apple.com/documentation/security/preparing-your-app-to-work-with-pointer-authentication" rel="nofollow noopener" target="_blank">Preparing your app to work with pointer authentication — Apple Developer</a></li><li><a href="https://github.com/MottaSec/White-Papers/blob/main/ARM%20Pointer%20Authentication%20Bypass/arm_pac_bypass.md" rel="nofollow noopener" target="_blank">ARM Pointer Authentication Bypass — MottaSec White-Papers</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a03.html">← 第 3 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a05.html">第 5 篇 →</a></nav></article>
+</main></body></html>

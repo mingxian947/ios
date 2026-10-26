@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 漏洞类型全景与 iPhone 安全全面解析 | iOS 安全研究文章库</title>
+<meta name="description" content="8 大漏洞类别 + 全链条模型 + 案例映射 + 缓解×绕过">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a02.html">
+<meta property="og:title" content="iOS 漏洞类型全景与 iPhone 安全全面解析">
+<meta property="og:description" content="8 大漏洞类别 + 全链条模型 + 案例映射 + 缓解×绕过">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a02.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 2 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 漏洞类型全景与 iPhone 安全全面解析</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Apple Security Guide、Google Project Zero / Threat Intelligence、Kaspersky、CSA、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码 定位：本仓库 iOS 安全系列的<strong>总纲</strong>，串联 WebKit / PAC / 沙箱逃逸 / 内核提权 / 无文件 / EK / 案例各专题</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>iPhone 的安全体系是<strong>多层纵深防御</strong>：硬件（SEP/PAC/PPL/KTRR）→ 内核（XNU）→ 沙箱 → 代码签名（AMCI/AMFI）→ 数据保护 → 应用隔离。攻击者要达成&quot;完整设备沦陷&quot;，必须<strong>逐层击穿</strong>；相应地，iOS 漏洞也按&quot;被击穿的层&quot;分类。</p>
+<p>本报告给出 <strong>iOS 漏洞类型全景</strong>（从 Web 到硬件/数据），并以<strong>全链条攻击模型</strong>串联：</p>
+<pre><code>[Web/WebKit 零日] → [PAC 绕过] → [沙箱逃逸] → [内核提权] → [数据窃取/无持久化]</code></pre>
+<p>代表案例：<strong>Coruna、DarkSword、GHOSTBLADE、Operation Triangulation</strong>。结论：<strong>没有单层是绝对的</strong>；防御必须是&quot;补丁 + Lockdown Mode + 分层检测&quot;的体系。</p>
+<hr>
+<h2>2. iOS 安全架构总览（防御的&quot;层&quot;）</h2>
+<table><thead><tr><th>层</th><th>组件/机制</th><th>防护目标</th></tr></thead><tbody><tr><td>硬件</td><td><strong>Secure Enclave (SEP)</strong>、<strong>PAC</strong>、<strong>PPL/KTRR/SPTM</strong>、安全启动</td><td>密钥隔离、控制流完整性、内核完整性</td></tr><tr><td>内核</td><td>XNU、KASLR、W^X、代码签名内核</td><td>内存/进程/权限管理</td></tr><tr><td>沙箱</td><td>Seatbelt profile、进程隔离</td><td>限制不可信进程（WebContent 等）权限</td></tr><tr><td>代码签名</td><td>AMFI、签名校验</td><td>仅允许签名代码执行</td></tr><tr><td>数据保护</td><td>Data Protection 类、钥匙串、SEP 托管密钥</td><td>静态/凭据数据加密</td></tr><tr><td>应用隔离</td><td>沙箱化 App、权限模型、ATS</td><td>应用间隔离与网络安全</td></tr><tr><td>Web 隔离</td><td>WebKit 进程隔离、JIT 加固</td><td>不可信网页内容执行边界</td></tr></tbody></table>
+<p><strong>攻击 = 逐层击穿；漏洞 = 某一层的缺陷。</strong></p>
+<hr>
+<h2>3. iOS 漏洞类型全景（按层分类）</h2>
+<h3>3.1 Web / 浏览器层（初始访问）</h3>
+<p>组件：<strong>WebKit（渲染）+ JavaScriptCore（JSC）</strong></p>
+<table><thead><tr><th>类型</th><th>说明</th><th>代表 CVE</th></tr></thead><tbody><tr><td>类型混淆</td><td>JSC/JIT 错误假设对象类型</td><td>CVE-2024-23222</td></tr><tr><td>释放后使用 (UAF)</td><td>对象释放后仍被操作</td><td>多条在野链条</td></tr><tr><td>越界读写 (OOB)</td><td>边界检查缺失/被优化掉</td><td>CVE-2025-24201</td></tr><tr><td>JIT 编译缺陷</td><td>优化 pass 生成错误机器码</td><td>CVE-2025-31277</td></tr><tr><td>逻辑/绑定缺陷</td><td>bindings/沙箱逻辑错误</td><td>CVE-2025-14174</td></tr></tbody></table>
+<blockquote><p>作用：获得 <strong>WebContent 进程内 RCE</strong>（仍受沙箱限制）。详见《WebKit RCE》专题。</p></blockquote>
+<h3>3.2 控制流完整性层（PAC）</h3>
+<table><thead><tr><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>PAC 绕过</td><td>指针复用 / PAC oracle / data-only / 绕过校验点 / 信息泄露组合</td></tr></tbody></table>
+<blockquote><p>作用：使控制流劫持成立。PAC 保护指针但<strong>不保护数据</strong>，故 data-only 与复用是主要 bypass。详见《PAC 绕过》专题。</p></blockquote>
+<h3>3.3 沙箱逃逸层</h3>
+<table><thead><tr><th>攻击面</th><th>说明</th><th>代表</th></tr></thead><tbody><tr><td>WebKit IPC / 绑定</td><td>调用高权限服务的 IPC 校验缺陷</td><td>Synacktiv 研究</td></tr><tr><td>GPU / ANGLE / WebGPU</td><td>渲染栈/驱动缺陷，导入后台媒体服务</td><td>DarkSword（CVE-2025-43529 链条）</td></tr><tr><td>Mach / IPC</td><td>Mach 端口、voucher 处理缺陷</td><td>历史链条</td></tr><tr><td>IOKit 驱动</td><td>用户态可达驱动内存缺陷</td><td>经典逃逸面</td></tr></tbody></table>
+<blockquote><p>作用：从 WebContent 突破到更高权限进程。详见《沙箱逃逸》专题。</p></blockquote>
+<h3>3.4 内核提权层</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>代表 CVE</th></tr></thead><tbody><tr><td>内核/驱动内存破坏</td><td>UAF/OOB/类型混淆于 XNU/IOKit</td><td>CVE-2023-32434、CVE-2025-43510/43520</td></tr><tr><td>硬件/MMIO 绕过</td><td>绕过 GPU/硬件映射保护</td><td>CVE-2023-38606</td></tr><tr><td>加载器/签名缺陷</td><td>dyld 禁用签名校验/页所有权</td><td>CVE-2026-20700</td></tr><tr><td>内存管理缺陷</td><td>页/对象缓存缺陷提权</td><td>CVE-2025-43510/43520</td></tr><tr><td>Mach 陷阱缺陷</td><td>内核 IPC 接口处理错误</td><td>历史链条</td></tr></tbody></table>
+<blockquote><p>作用：获得 root / 内核读写。详见《内核提权》专题。</p></blockquote>
+<h3>3.5 硬件 / 固件层</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>案例</th></tr></thead><tbody><tr><td>未公开硬件调试特性</td><td>芯片&quot;测试/调试&quot;功能被武器化，绕过内存保护</td><td>Operation Triangulation</td></tr><tr><td>SEP 侧信道/实现缺陷</td><td>针对安全隔区的攻击（极难）</td><td>研究级</td></tr><tr><td>BootROM/sepROM 缺陷</td><td>启动链根信任缺陷（极难、影响深远）</td><td>历史研究</td></tr></tbody></table>
+<blockquote><p>特点：<strong>软件缓解可被硬件特性架空</strong>；修复难（硬件不可补丁或需换芯片）。</p></blockquote>
+<h3>3.6 数据 / 凭据层</h3>
+<table><thead><tr><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>钥匙串窃取</td><td>高权限滥用 securityd/备份/越狱取证/运行时内存读取</td></tr><tr><td>数据保护类误用</td><td>应用错误配置保护类导致静态数据可提取</td></tr><tr><td>备份/配对提取</td><td>受信任配对或备份机制被滥用</td></tr></tbody></table>
+<blockquote><p>SEP 托管密钥<strong>不可导出</strong>，是最后防线；非 SEP 项与运行时内存是失窃面。详见《三角行动/SEP/钥匙串》专题。</p></blockquote>
+<h3>3.7 网络 / 协议 / 基带层</h3>
+<table><thead><tr><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>基带/无线栈缺陷</td><td>Wi-Fi/蓝牙/基带远程攻击面（零点击潜力）</td></tr><tr><td>iMessage 零点击</td><td>消息服务解析缺陷（三角行动投递向量）</td></tr></tbody></table>
+<blockquote><p>特点：可<strong>零点击</strong>远程触发，无需用户交互。</p></blockquote>
+<h3>3.8 社会工程 / 配置层</h3>
+<table><thead><tr><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>恶意配置描述文件 / MDM 滥用</td><td>诱导安装描述文件获取控制</td></tr><tr><td>钓鱼/伪造门户</td><td>水坑配套，窃凭据或诱导访问</td></tr></tbody></table>
+<blockquote><p>不依赖内存破坏，靠&quot;人&quot;与&quot;配置信任&quot;。</p></blockquote>
+<hr>
+<h2>4. 全链条攻击模型（把各层串起来）</h2>
+<pre><code>[3.1 Web 零日]  WebKit/JSC RCE (WebContent)
+      → [3.2 PAC 绕过]  控制流劫持 / data-only
+      → [3.3 沙箱逃逸]  GPU/IPC/IOKit → 更高权限进程
+      → [3.4 内核提权]  root / 内核读写
+      → [3.5 硬件绕过]  (可选) 调试特性绕内存保护
+      → [3.6 数据窃取]  钥匙串/文件/密钥；或 [无持久化] 短时清除</code></pre>
+<p><strong>案例映射</strong></p>
+<table><thead><tr><th>案例</th><th>Web</th><th>PAC</th><th>逃逸</th><th>内核</th><th>硬件</th><th>数据/驻留</th></tr></thead><tbody><tr><td>Coruna</td><td>✓(7 CVE)</td><td>✓</td><td>✓</td><td>✓</td><td>–</td><td>嵌入特权进程</td></tr><tr><td>DarkSword</td><td>✓(6 CVE)</td><td>✓</td><td>✓(GPU)</td><td>✓(dyld)</td><td>–</td><td><strong>无持久化</strong></td></tr><tr><td>GHOSTBLADE</td><td>复用 DarkSword</td><td>✓</td><td>✓</td><td>✓</td><td>–</td><td>无持久化</td></tr><tr><td>三角行动</td><td>iMessage 零点击</td><td>✓</td><td>✓</td><td>✓</td><td><strong>✓(调试特性)</strong></td><td>内存驻留(重启消失)</td></tr></tbody></table>
+<hr>
+<h2>5. Apple 缓解 × 绕过 对照表</h2>
+<table><thead><tr><th>缓解</th><th>防什么</th><th>被绕过方式</th></tr></thead><tbody><tr><td>沙箱</td><td>不可信进程权限</td><td>IPC/GPU/IOKit 逃逸</td></tr><tr><td>PAC</td><td>控制流劫持</td><td>指针复用/data-only/oracle</td></tr><tr><td>PPL/KTRR</td><td>内核完整性</td><td>内核零日 + 硬件绕过</td></tr><tr><td>代码签名/AMFI</td><td>任意代码执行</td><td>dyld/签名校验缺陷</td></tr><tr><td>SEP</td><td>密钥导出</td><td>不防运行时读取/合法调用</td></tr><tr><td>KASLR</td><td>地址猜测</td><td>信息泄露</td></tr><tr><td>Lockdown Mode</td><td>整体攻击面</td><td>非绝对；攻击者主动回避或找非 Web 向量</td></tr><tr><td>JIT 加固</td><td>JIT 注入</td><td>逻辑缺陷/data-only</td></tr></tbody></table>
+<hr>
+<h2>6. 分层防御建议</h2>
+<ol><li><strong>补丁（所有层的基础）</strong>：Web/内核/驱动零日修复靠系统更新（iOS 18.7.x / 26.3+）。</li><li><strong>Lockdown Mode（高危）</strong>：收紧 Web/消息/连接攻击面，使全链条前置失效。</li><li><strong>运行时/行为检测</strong>：WebContent 崩溃→异常内存/子进程、GPU/IPC 异常、securityd/钥匙串异常、DGA 外传（移动端 EDR/MTD）。</li><li><strong>内存取证能力</strong>：无持久化/内存驻留植入需&quot;重启前捕获内存&quot;（Volatility/MemInspect）。</li><li><strong>数据层加固</strong>：关键密钥 SEP 托管 + This Device Only；最小化钥匙串明文项。</li><li><strong>配置/人</strong>：警惕描述文件、钓鱼、伪造门户；企业侧 MDM 与白名单治理。</li><li><strong>资产可视化</strong>：清点受影响版本设备，优先升级高危人群。</li></ol>
+<hr>
+<h2>7. 结论</h2>
+<p>iOS 漏洞按&quot;被击穿的层&quot;可分为八大类：<strong>Web/WebKit、PAC、沙箱逃逸、内核提权、硬件/固件、数据/凭据、网络/基带、社会工程/配置</strong>。全链条攻击把它们串成&quot;Web 零日 → PAC → 逃逸 → 内核 → 数据&quot;的流水线，Coruna/DarkSword/GHOSTBLADE/三角行动 是各阶段的现实注脚。Apple 的多层缓解（沙箱/PAC/PPL/SEP/签名/Lockdown）持续抬高门槛，但<strong>没有单层是绝对的</strong>：硬件调试特性可架空软件缓解，SEP 不防运行时读取，Lockdown 非绝对免疫。<strong>因此 iPhone 安全的正解是体系化纵深防御：及时补丁 + Lockdown Mode + 分层运行时检测 + 数据层加固 + 资产与人的治理。</strong></p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/en-ie/guide/security/sec59b0b31ff/web" rel="nofollow noopener" target="_blank">Apple Security Guide (Secure Enclave / 平台安全)</a></li><li><a href="https://projectzero.google/2019/08/a-very-deep-dive-into-ios-exploit.html" rel="nofollow noopener" target="_blank">A very deep dive into iOS Exploit chains found in the wild — Google Project Zero</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit" rel="nofollow noopener" target="_blank">Coruna: The Mysterious Journey of a Powerful iOS Exploit Kit — Google Cloud TI</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud TI</a></li><li><a href="https://www.kaspersky.com/about/press-releases/kaspersky-reveals-details-behind-the-spyware-used-in-operation-triangulation" rel="nofollow noopener" target="_blank">Kaspersky reveals details behind the spyware used in Operation Triangulation</a></li><li><a href="https://www.kaspersky.com/about/press-releases/kaspersky-discloses-iphone-hardware-feature-vital-in-operation-triangulation-case" rel="nofollow noopener" target="_blank">Kaspersky discloses iPhone hardware feature vital in Operation Triangulation</a></li><li><a href="https://support.apple.com/en-us/105120" rel="nofollow noopener" target="_blank">About Lockdown Mode — Apple Support</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a01.html">← 第 1 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a03.html">第 3 篇 →</a></nav></article>
+</main></body></html>

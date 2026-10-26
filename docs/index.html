@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 安全研究文章库：iOS 国家级攻击链与商业间谍软件防御分析</title>
+<meta name="description" content="中文 iOS 安全研究文章库：水坑投递、WebKit RCE、PAC 绕过、沙箱逃逸、内核提权、无文件驻留、取证检测，覆盖 Coruna 与 DarkSword 案例。">
+<link rel="canonical" href="https://mingxian947.github.io/ios/index.html">
+<meta property="og:title" content="iOS 安全研究文章库：iOS 国家级攻击链与商业间谍软件防御分析">
+<meta property="og:description" content="中文 iOS 安全研究文章库：水坑投递、WebKit RCE、PAC 绕过、沙箱逃逸、内核提权、无文件驻留、取证检测，覆盖 Coruna 与 DarkSword 案例。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/index.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+
+<article><h1>iOS 安全研究文章库</h1><p>面向防御的 iOS 安全研究（Defensive Security Research）合集。围绕 <strong>iOS 全链条攻击链</strong> 展开：从远程投递、初始代码执行，到 PAC 绕过、沙箱逃逸、内核提权，最终完成数据窃取与痕迹清除。</p>
+<blockquote><p>声明：本仓库所有文章均用于<strong>防御性安全研究与教育目的</strong>，帮助读者理解攻击原理、提升检测与加固能力，不提供任何可直接使用的攻击代码或武器化工具。</p></blockquote>
+<hr>
+<h2>攻击链全景</h2>
+<pre><code>[0] 侦察/投递 → [1] 初始访问(WebKit/JSC) → [2] PAC 绕过 → [3] 沙箱逃逸</code></pre><p class="meta">共 76 篇 · 防御性安全研究（Defensive Security Research），不提供可利用代码</p><ol><li><a href="a01.html">iOS 核心漏洞与攻击链分析报告</a><br><span class="meta">第 1 篇 · 以攻击链为主轴，串联各环节核心漏洞、CVE、缓解与绕过</span></li>
+<li><a href="a02.html">iOS 漏洞类型全景与 iPhone 安全全面解析</a><br><span class="meta">第 2 篇 · 8 大漏洞类别 + 全链条模型 + 案例映射 + 缓解×绕过</span></li>
+<li><a href="a03.html">WebKit 远程代码执行分析文章</a><br><span class="meta">第 3 篇 · 阶段 1 · 初始访问</span></li>
+<li><a href="a04.html">iOS PAC 绕过分析文章</a><br><span class="meta">第 4 篇 · 阶段 2 · 指针认证绕过</span></li>
+<li><a href="a05.html">iOS 沙箱逃逸分析文章</a><br><span class="meta">第 5 篇 · 阶段 3 · 沙箱逃逸</span></li>
+<li><a href="a06.html">iOS 内核提权分析文章</a><br><span class="meta">第 6 篇 · 阶段 4 · 内核提权</span></li>
+<li><a href="a07.html">iPhone 本地提权漏洞分析报告</a><br><span class="meta">第 7 篇 · 阶段 4 · 本地提权（LPE）</span></li>
+<li><a href="a08.html">内存无文件攻击分析文章</a><br><span class="meta">第 8 篇 · 阶段 7 · 无持久化 / 反取证</span></li>
+<li><a href="a09.html">三角行动 · Secure Enclave · 钥匙串窃取分析报告</a><br><span class="meta">第 9 篇 · SEP、Data Protection、Keychain 访问控制及其滥用</span></li>
+<li><a href="a10.html">iOS Coruna 与 DarkSword 系统分析报告</a><br><span class="meta">第 10 篇 · 两代全链条利用套件对比与系统分析</span></li>
+<li><a href="a11.html">DarkSword 深度分析报告</a><br><span class="meta">第 11 篇 · DarkSword 无持久化全链条深度剖析</span></li>
+<li><a href="a12.html">漏洞利用套件 Exploit Kit 分析报告</a><br><span class="meta">第 12 篇 · Exploit Kit 生态、投递与演化</span></li>
+<li><a href="a13.html">GHOSTBLADE 与锁定模式分析报告</a><br><span class="meta">第 13 篇 · GHOSTBLADE 复用泄露链 + Lockdown Mode 防护</span></li>
+<li><a href="a14.html">iOS 水坑攻击与网页零日漏洞分析报告</a><br><span class="meta">第 14 篇 · 水坑投递 + 网页零日</span></li>
+<li><a href="a15.html">Coruna 漏洞影响版本分析报告</a><br><span class="meta">第 15 篇 · Coruna 五条利用链 × 23 个漏洞 × iOS 13–17.2.1 版本覆盖深度分析</span></li>
+<li><a href="a16.html">iOS 越狱漏洞分析报告</a><br><span class="meta">第 16 篇 · 越狱类型、漏洞原语与 checkm8 等</span></li>
+<li><a href="a17.html">iOS 恶意载荷与组件分析报告</a><br><span class="meta">第 17 篇 · 分层载荷、注入/持久化/C2/窃取/反分析组件与 AI 定制</span></li>
+<li><a href="a18.html">iOS 凭证窃取与擦除分析报告</a><br><span class="meta">第 18 篇 · Keychain/Data Protection/SEP 保护体系、凭证窃取手法、反取证与破坏性擦除</span></li>
+<li><a href="a19.html">iOS 硬件与系统防御分析报告</a><br><span class="meta">第 19 篇 · 安全启动链、Secure Enclave、PAC/PPL/KTRR、AMFI、Data Protection、沙箱与 Lockdown Mode</span></li>
+<li><a href="a20.html">iOS 覆盖数据类别分析报告</a><br><span class="meta">第 20 篇 · 8 大数据类别、Data Protection _classes、Keychain 访问属性与真实案例映射</span></li>
+<li><a href="a21.html">iOS Safari 浏览器引擎安全分析报告</a><br><span class="meta">第 21 篇 · 阶段 1 · WebKit 架构、JSC 引擎、沙箱模型与攻击面深度分析</span></li>
+<li><a href="a22.html">iOS 系统漏洞概述分析报告</a><br><span class="meta">第 22 篇 · 10+ 子系统漏洞编目、历史统计、演进趋势与防御纵深全景</span></li>
+<li><a href="a23.html">iOS 数据采集能力分析报告</a><br><span class="meta">第 23 篇 · 采集架构、静态/实时/加密资产提取、外传通道、反检测与案例对比</span></li>
+<li><a href="a24.html">iOS 著名漏洞案例系统网络安全文档</a><br><span class="meta">第 24 篇 · Pegasus/FORCEDENTRY/Triangulation/checkm8/Coruna/DarkSword 等案例档案、横向对比、TTP 模式提炼</span></li>
+<li><a href="a25.html">Pegasus 商业间谍软件利用 iOS 漏洞全过程分析报告</a><br><span class="meta">第 25 篇 · Pegasus 四代利用链技术演进（2016 Trident → 2018 ImageIO → 2019 零点击 → 2021 FORCEDENTRY → 2022+ M.O.）、持久化演化、目标分析与检测取证</span></li>
+<li><a href="a26.html">iOS 基带与无线通信安全分析报告</a><br><span class="meta">第 26 篇 · 无线攻击面 · 基带处理器、Wi-Fi/蓝牙/NFC、IMSI Catcher、GPS 欺骗与防御</span></li>
+<li><a href="a27.html">苹果 SPTM、TXM 与 Exclaves 安全架构解析</a><br><span class="meta">第 27 篇 · A17+ 芯片级硬件信任根：SPTM 页表监控、TXM EL3 信任根、Exclaves 协处理器隔离</span></li>
+<li><a href="a28.html">iOS 供应链攻击分析报告</a><br><span class="meta">第 28 篇 · XcodeGhost、依赖投毒、企业证书滥用、App Store 审核绕过、运行时注入与防御体系</span></li>
+<li><a href="a29.html">iOS Sandbox Escape 技术详解</a><br><span class="meta">第 29 篇 · 阶段 3 · 六大逃逸路径深度解析：Mach IPC、XPC、IOKit、GPU/ANGLE、媒体服务、WebKit IPC</span></li>
+<li><a href="a30.html">iOS WebKit 漏洞：从 JavaScriptCore 到 JIT 利用原理</a><br><span class="meta">第 30 篇 · 阶段 1 · JSC 执行管线、JIT 投机优化、类型混淆/OOB/UAF、addrof/fakeobj 原语与 JIT 硬化</span></li>
+<li><a href="a31.html">iOS 威胁情报与全球 APT 组织图谱分析报告</a><br><span class="meta">第 31 篇 · 国家级 APT、商业间谍公司、攻击能力分级、目标分析、MVT 检测与行业协作</span></li>
+<li><a href="a32.html">iOS Exploit Chain 完整攻击链分析</a><br><span class="meta">第 32 篇 · 七阶段全链条解析：投递→初始访问→PAC绕过→沙箱逃逸→内核提权→数据窃取→外传→驻留/清除</span></li>
+<li><a href="a33.html">iOS Kernel Exploitation 与 KTRR/PPL 绕过技术详解</a><br><span class="meta">第 33 篇 · 阶段 4 · XNU 内核攻击面、KTRR/PPL/SPTM/TXM 机制与绕过、内核利用原语</span></li>
+<li><a href="a34.html">iOS Lockdown Mode 安全机制与绕过分析</a><br><span class="meta">第 34 篇 · 锁定模式设计原理、各子系统限制详解、对攻击链影响、绕过技术与局限、启用建议</span></li>
+<li><a href="a35.html">Pegasus 攻击链总体结构</a><br><span class="meta">第 35 篇 · 7 层功能栈架构、各代攻击链结构对比、核心模块解析、反检测体系、C2 基础设施与模块化设计</span></li>
+<li><a href="a36.html">iOS Trident 漏洞链技术详解</a><br><span class="meta">第 36 篇 · 首个公开 iOS 全链条攻击：CVE-2016-4655/4656/4657 三漏洞串联、KASLR 绕过、内核提权与历史意义</span></li>
+<li><a href="a37.html">iOS ImageIO 0-click 漏洞链技术详解</a><br><span class="meta">第 37 篇 · 首个 iOS 0-click 攻击：iMessage 预渲染攻击面、ImageIO 解析漏洞、CVE-2018-4328/4331/4335 链式利用</span></li>
+<li><a href="a38.html">iOS FORCEDENTRY 0-click 漏洞链技术详解</a><br><span class="meta">第 38 篇 · WhatsApp 0-click 攻击：VoIP 呼叫无需接听、CoreText 字体解析漏洞 CVE-2021-30860、全球影响与 Apple 响应</span></li>
+<li><a href="a39.html">Coruna WebKit 漏洞链技术详解</a><br><span class="meta">第 39 篇 · Coruna 初始访问阶段：CVE-2024-23222 JSC 类型混淆、addrof/fakeobj 原语、与 DarkSword 对比</span></li>
+<li><a href="a40.html">Coruna 沙箱逃逸技术详解</a><br><span class="meta">第 40 篇 · Coruna 沙箱逃逸：GPU/ANGLE 攻击面、IOGPUDevice 内核驱动漏洞、与 DarkSword 逃逸路径对比</span></li>
+<li><a href="a41.html">Coruna 内核提权与 PAC 绕过技术</a><br><span class="meta">第 41 篇 · Coruna 内核提权：PAC 机制与绕过、KTRR/PPL 影响、SPTM/TXM 硬件保护、与 DarkSword 对比</span></li>
+<li><a href="a42.html">Coruna 数据采集模块架构分析</a><br><span class="meta">第 42 篇 · 模块化采集架构、静态/实时监控、加密资产窃取、数据外传机制、与 DarkSword 对比</span></li>
+<li><a href="a43.html">DarkSword ANGLE/WebGPU 逃逸技术详解</a><br><span class="meta">第 43 篇 · DarkSword 两阶段逃逸：ANGLE 层利用、WebGPU 攻击面、CVE-2025-43529、媒体服务注入、与 Coruna 对比</span></li>
+<li><a href="a44.html">DarkSword 媒体服务注入技术详解</a><br><span class="meta">第 44 篇 · mediaserverd 架构与权限、音频/视频注入向量、解析漏洞利用、从用户态到系统级权限</span></li>
+<li><a href="a45.html">DarkSword 无持久化内存驻留技术</a><br><span class="meta">第 45 篇 · Fileless 驻留策略、内存注入与执行、反取证机制、与 Coruna 持久化对比、检测与防御</span></li>
+<li><a href="a46.html">Coruna 与 DarkSword C2 通信协议分析</a><br><span class="meta">第 46 篇 · C2 多层架构对比、通信协议与加密、心跳与任务下发、数据回传通道、反检测策略与网络检测</span></li>
+<li><a href="a47.html">Coruna 与 DarkSword 反检测机制对比</a><br><span class="meta">第 47 篇 · 六维工件面对比、主动清除型 vs 天然无痕型、MVT 与网络检测有效性、攻防权衡与检测分层策略</span></li>
+<li><a href="a48.html">Coruna 与 DarkSword 防御与检测指南</a><br><span class="meta">第 48 篇 · 威胁建模分层、加固清单、MVT/网络/内存四条检测流程、应急响应时序、SIEM 规则速查与常见误区</span></li>
+<li><a href="a49.html">Coruna 与 DarkSword 漏洞武器化工程与利用链编排架构</a><br><span class="meta">第 49 篇 · L0-L6 武器化层次、多链编排 vs 单链精工、目标探测与原语升阶梯、可靠性工程、可观测攻击状态</span></li>
+<li><a href="a50.html">Coruna 与 DarkSword 水坑投递基础设施与目标识别机制</a><br><span class="meta">第 50 篇 · 四类站点获取路径、三层基础设施、11 维目标识别筛选链、条件化内容分发、站点加固与画像复现取证</span></li>
+<li><a href="a51.html">Coruna 与 DarkSword KASLR 绕过与内核信息泄露技术</a><br><span class="meta">第 51 篇 · 三层随机化模型、五类内核泄露来源、kslide 推导路径、SPTM/TXM 影响、由 CVE 类型反推链条阶段</span></li>
+<li><a href="a52.html">Coruna 与 DarkSword BlastDoor 与沙箱模型对抗分析</a><br><span class="meta">第 52 篇 · Seatbelt 沙箱结构、BlastDoor 设计与 0-click 经济学、功能必需通道为何无法闭合、GPU 栈逃逸与锁定模式效果</span></li>
+<li><a href="a53.html">Coruna 与 DarkSword SEP 与钥匙串密钥提取路径</a><br><span class="meta">第 53 篇 · 数据保护三层结构、解锁状态窗口、Keybag 与保护等级、三条 Keychain 提取路径、绕过而非攻破 SEP 的原因</span></li>
+<li><a href="a54.html">Coruna 与 DarkSword 模块化载荷编排与插件体系</a><br><span class="meta">第 54 篇 · 五层载荷模型、模块清单/任务队列/条件调度、一次性内联执行、模块迁移趋势与架构反推任务意图</span></li>
+<li><a href="a55.html">Coruna 与 DarkSword 反取证与痕迹清除体系</a><br><span class="meta">第 55 篇 · iOS 工件全景图、时间篡改/日志清除/崩溃规避、清除型 vs 零生成型、检测延迟与取证采集顺序铁律</span></li>
+<li><a href="a56.html">Coruna 与 DarkSword 及主流 iOS 攻击套件横向技术对比</a><br><span class="meta">第 56 篇 · Trident/FORCEDENTRY/Triangulation/Coruna/DarkSword 等九套体系十二维度对比、五条演化规律与一页速查表</span></li>
+<li><a href="a57.html">iOS WebKit JIT 硬化与 Coruna/DarkSword 利用对抗演进</a><br><span class="meta">第 57 篇 · JSC 四级管线与投机优化缺陷、Gigacage/指针膨胀/CoW 页保护、锁定模式禁用 JIT 的移除型防御</span></li>
+<li><a href="a58.html">iOS 图形栈攻击面全景：ANGLE、WebGPU、Metal 与 IOGPU</a><br><span class="meta">第 58 篇 · 六层图形栈结构与跨层信任假设、沙箱不可关闭的原因、驱动 CVE 价值分级、GPU 利用检测信号与 AI 计算预警</span></li>
+<li><a href="a59.html">Coruna 与 DarkSword 的 MITRE ATT&amp;CK 战术映射与检测覆盖缺口</a><br><span class="meta">第 59 篇 · ID 可信度三档、逐战术映射与两套体系实现差异、数据源约束下的覆盖度核算、矩阵空洞与自定义 ID</span></li>
+<li><a href="a60.html">iOS 0-click 利用技术演化史：从短信解析链到 Coruna 与 DarkSword</a><br><span class="meta">第 60 篇 · 无交互/无渲染/无解锁三层分级、解析器为何是唯一天然入口、十年入口下沉规律、0-click 与 1-click 经济学、检测受限项与现实抓手</span></li>
+<li><a href="a61.html">Apple 安全事件响应与补丁工程机制：从漏洞报告到 SWU 的时间账</a><br><span class="meta">第 61 篇 · 四条漏洞接收通道、三段延迟模型、RSR 与静默修补、补丁暴露天数 PED 度量、披露机制张力与自查指标</span></li>
+<li><a href="a62.html">iOS 取证的证据链与法律效力：从设备提取到可采性认定</a><br><span class="meta">第 62 篇 · 四类可采性要件、提取层级与 BFU/AFU 分水岭、工件证明力矩阵、哈希链与保管链、&quot;未发现≠未感染&quot;表述纪律</span></li>
+<li><a href="a63.html">iOS 威胁狩猎手册：面向 Coruna 与 DarkSword 的六个可执行剧本</a><br><span class="meta">第 63 篇 · 数据源保留期硬门槛、通信形状漂移、孤点设备稀有性、基础设施成簇关联、崩溃回溯、备份差分与时间线断裂</span></li>
+<li><a href="a64.html">iOS 安全启动链与固件完整性：间谍软件的能力上限在哪里</a><br><span class="meta">第 64 篇 · 七层信任链与并行信任域、内核镜像安全强度变体、为何商业套件不打启动链、重启重置效力、机型代际与排除性取证用途</span></li>
+<li><a href="a65.html">iOS 推送服务与通知通路攻击面：无交互投递的第一公里</a><br><span class="meta">第 65 篇 · 六组件信任边界、令牌与 Provider 凭据治理、附件自动解析面、借 APNs 隐蔽信道、时间线矛盾检测与平台关停困境</span></li>
+<li><a href="a66.html">iOS 权限模型与隐私指示器的对抗分析：Entitlement、沙箱、TCC 与采集能力</a><br><span class="meta">第 66 篇 · 四层权限模型、采集能力三条路径、隐私指示器语义、TCC 工件取证价值、时间线矛盾检测与加固清单</span></li>
+<li><a href="a67.html">企业分发通道武器化：配置描述文件、MDM 与合法签名链上的 iOS 入侵</a><br><span class="meta">第 67 篇 · 企业签名分发、根 CA 与代理描述文件滥用、MDM 凭证被武器化、设备侧观测失效、清单比对判据与流程加固</span></li>
+<li><a href="a68.html">Mach IPC 与 XPC 接口审计：iOS 沙箱逃逸的攻击面测绘方法</a><br><span class="meta">第 68 篇 · 可达性与身份校验双层模型、四类 IPC 跳板威胁画像、可落地审计流程与风险优先级公式、BlastDoor 语义、时间线矛盾检测</span></li>
+<li><a href="a69.html">设备间同步与中继通道攻击面：Handoff、AirDrop 与 iCloud 同步链路分析</a><br><span class="meta">第 69 篇 · 账户级信任与跨设备能力借用、三条同步威胁路径、iCloud 密钥分层与端对端保护、锁定模式边界、设备列表审计与取证顺序纪律</span></li>
+<li><a href="a70.html">Safari 与 WebView 取证工件目录：从浏览痕迹重建 iOS 入侵时间线</a><br><span class="meta">第 70 篇 · 11 类浏览器工件目录、七步解析顺序与缓存集合差方法、时间戳可信度分层、无痕与清除的工件灭失、缺口即证据的表述纪律</span></li>
+<li><a href="a71.html">iMessage 与端到端消息通路的攻击面分析：0-click 投递面与取证边界</a><br><span class="meta">第 71 篇 · 送达即解析的三层风险叠加、端到端加密改变与不改变的维度、五种投递形态与前置能力、会话工件取证缺口与表述纪律、锁定模式缓解</span></li>
+<li><a href="a72.html">iOS 基带与无线固件攻击面：蜂窝、Wi-Fi、蓝牙链上的远程边界分析</a><br><span class="meta">第 72 篇 · 基带作为并行信任域、R1–R6 无线入口分类与前置成本、基带驻留与清除差异、设备方可观测性的诚实边界、加固清单</span></li>
+<li><a href="a73.html">代码签名、库验证与 dyld 加载链：iOS 应用完整性的边界在哪里失效</a><br><span class="meta">第 73 篇 · 签名校验链与判定者、五种完整性失效形态、宿主借用审计三步法、签名有效≠未被注入的取证表述纪律</span></li>
+<li><a href="a74.html">iOS 备份与恢复路径的安全边界：本地备份、加密备份与云端备份的攻防双侧分析</a><br><span class="meta">第 74 篇 · 三条备份通路能力对照、备份内工件双向表、版本元数据泄露、恢复不等于清洗的三个失效认知、落点与密钥归属加固</span></li>
+<li><a href="a75.html">iOS 漏洞赏金、CVE 披露与补丁周期：把防御优先级从&quot;漏洞分数&quot;改成&quot;暴露窗口&quot;</a><br><span class="meta">第 75 篇 · 三条漏洞供给渠道的结构性偏差、披露时机对攻击成本的反向影响、暴露窗口五步计算法、披露产生的检测指标</span></li>
+<li><a href="a76.html">iOS 安全日志与企业可见性全景：MDM、遥测与检测能力的真实边界</a><br><span class="meta">第 76 篇 · 配置/工件/行为三层可见性对照、MDM 可查字段与告警规则、提取触发条件、组织 KPI 设计、两个无法用日志填补的空白</span></li></ol></article>
+</main></body></html>

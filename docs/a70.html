@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Safari 与 WebView 取证工件目录：从浏览痕迹重建 iOS 入侵时间线 | iOS 安全研究文章库</title>
+<meta name="description" content="11 类浏览器工件目录、七步解析顺序与缓存集合差方法、时间戳可信度分层、无痕与清除的工件灭失、缺口即证据的表述纪律">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a70.html">
+<meta property="og:title" content="Safari 与 WebView 取证工件目录：从浏览痕迹重建 iOS 入侵时间线">
+<meta property="og:description" content="11 类浏览器工件目录、七步解析顺序与缓存集合差方法、时间戳可信度分层、无痕与清除的工件灭失、缺口即证据的表述纪律">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a70.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 70 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Safari 与 WebView 取证工件目录：从浏览痕迹重建 iOS 入侵时间线</h1>
+<blockquote><p>编制日期：2026-10-22 数据来源：Apple Platform Security 文档、MVT 与 OpenPDF 公开工件研究、Aleph1/XiVO 等取证工具的工件说明、Google Project Zero 关于水坑投递的披露、Citizen Lab 与 Amnesty 的 Pegasus 调查报告、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>在几乎所有 iOS 入侵调查里，&quot;攻击者是怎么进来的&quot;最终都要回答成一个具体问题：<strong>目标在什么时间访问了哪个 URL</strong>。对水坑/定向投递型链条（#40、Coruna 与 DarkSword 的公开描述均采用这一入口）而言，浏览器与 WebView 侧工件是<strong>唯一能直接指向投递页面的证据来源</strong>。</p>
+<p>本文给出一个可执行的工件目录（Artifact Catalog）与解析顺序，而不是概念讨论。</p>
+<p>四条结论：</p>
+<ol><li>Safari 的工件分散在<strong>多个互不同步的存储</strong>里（历史数据库、本地/HTTP 缓存、Cookie 库、图标与读取列表、崩溃日志、iCloud 同步后的 Tab）。任何单一来源都不足以重建时间线，必须做<strong>交叉关联</strong>。</li><li><strong>缓存命中不一定留下历史条目</strong>：某些重定向、iframe 子资源与 WebView 内加载只进缓存不进历史。这是&quot;历史里没有可疑 URL&quot;这一错误结论的技术根源，与 #62 的&quot;未发现≠未感染&quot;纪律同源。</li><li>WebView（含 App 内嵌 <code>WKWebView</code>、通知服务扩展的渲染路径 #65、BlastDoor 解析面 #52/#68）的工件比 Safari 更稀疏，但<strong>归属更明确</strong>——它能告诉你&quot;是哪个 App 加载了它&quot;，这在水坑归因里是关键区分。</li><li>时间戳的可信度分层是本文最容易被忽略的部分：不同工件的时间源、精度与偏移不同；做时序论证前必须先声明时间基准，否则整条链条在法律与工程上都不成立（#62 的真实性与完整性要件）。</li></ol>
+<hr>
+<h2>2. 工件目录</h2>
+<table><thead><tr><th>#</th><th>工件</th><th>内容</th><th>时间精度</th><th>主要取证价值</th><th>局限</th></tr></thead><tbody><tr><td>A1</td><td>Safari 历史数据库</td><td>URL、标题、访问次数、<code>visited_time</code></td><td>秒级</td><td>投递页面直接证据</td><td>无痕模式下不落；用户可清除</td></tr><tr><td>A2</td><td>HTTP/本地缓存</td><td>资源 URL、响应头、<code>Date</code>、ETag、内容片段</td><td>依赖头部</td><td><strong>补历史缺口</strong>：重定向与子资源可见</td><td>循环淘汰、无完整 URL 语义</td></tr><tr><td>A3</td><td>Cookie 库</td><td>域、名称、值、过期与创建时间</td><td>秒级</td><td>判定&quot;确实加载过该站&quot;、追踪标识</td><td>值可能被服务端脱敏；跨站受限</td></tr><tr><td>A4</td><td>站点图标/读取列表（Reading List）</td><td>标题、URL、保存时间</td><td>秒级</td><td>用户主动行为标记，用于意图区分</td><td>覆盖面窄</td></tr><tr><td>A5</td><td>favicon 缓存</td><td>域列表与时间</td><td>粗</td><td>只有域名，无完整路径</td><td>常与其他缓存混存</td></tr><tr><td>A6</td><td>自动填充/密码使用痕迹</td><td>表单域、站点关联</td><td>粗</td><td>判定&quot;登录动作发生过&quot;</td><td>与 #53 钥匙串风险交叉，敏感度高</td></tr><tr><td>A7</td><td>WebKit 相关崩溃日志</td><td>进程名（<code>WebContent</code>）、异常类型、时间</td><td>秒级</td><td><strong>攻击尝试失败的痕迹</strong>（利用有崩溃成本，#63 HUNT-04）</td><td>成熟载荷规避崩溃</td></tr><tr><td>A8</td><td>iCloud 同步 Tab / 跨设备记录</td><td>其他设备上的同源条目</td><td>秒级</td><td>目标设备已清除时的<strong>恢复路径</strong>（#69）</td><td>需账户侧证据配合</td></tr><tr><td>A9</td><td>App 沙箱内的 WebView 缓存</td><td>宿主 App 容器内的缓存/Cookie</td><td>依赖头部</td><td><strong>归因到具体 App 与入口</strong></td><td>各家容器路径与保留策略不一</td></tr><tr><td>A10</td><td>DNS/连接元数据（设备侧可恢复部分）</td><td>解析时间、域名</td><td>秒级</td><td>与缓存时间戳互证（#47）</td><td>保留期极短</td></tr><tr><td>A11</td><td>推送/通知触发记录</td><td>唤醒时间与来源</td><td>秒级</td><td>与 A1/A9 时刻对齐（#65）</td><td>无 URL 语义</td></tr></tbody></table>
+<p><strong>目录里最被低估的是 A2 与 A9</strong>：A2 覆盖历史覆盖不到的子资源与重定向，A9 提供&quot;哪个 App 加载的&quot;这一归因维度。二者的组合通常决定了能否把入侵从&quot;用户点了个链接&quot;精确到&quot;某 App 内的某次加载&quot;。</p>
+<hr>
+<h2>3. 解析顺序（可直接作为剧本执行）</h2>
+<pre><code>第 0 步  固定基准
+        - 记录设备时区、NTP 同步状态、单调时钟偏移
+        - 对每个提取文件计算哈希并写入保全记录（#62）
+第 1 步  广度扫描
+        A1 历史 → 可疑域清单（时间窗：投递期 ±48h）
+        A2 缓存 → URL/域清单（与 A1 做集合差：只进缓存的项）
+        A3 Cookie → 域清单（与 A1/A2 交集）
+第 2 步  缺口判定
+        集合差 = 仅出现在缓存/但不在历史里的资源
+        → 这些是重定向与子资源候选，水坑落地页常在此出现
+第 3 步  归因
+        A9：可疑 URL 出现在哪个 App 容器？
+        A11：该时刻前是否有通知/推送唤醒？
+        → 区分「用户主动访问」/「App 内加载」/「唤醒后自动加载」
+第 4 步  互证
+        A2 响应头 Date ↔ A1 visited_time ↔ A10 DNS 时间
+        三者偏移应在合理阈值内；超阈值 → 存在时钟/伪造问题（进入 #62 完整性审查）
+第 5 步  跨设备补齐
+        A8 从其他设备与账户侧恢复同源条目（配合 #69 设备列表审计）
+第 6 步  失败尝试痕迹
+        A7 崩溃日志聚合：同域名的多次 WebContent 异常
+        → 即使最终未成功投递，也提供攻击者活动时间窗（#63）
+第 7 步  结论形态
+        每条结论标注证据强度（多源一致/单源/推定）并明确&quot;未发现&quot;的边界</code></pre>
+<p><strong>第 2 步是本文最有价值的一步</strong>：很多调查在&quot;历史里没有可疑链接&quot;后就停止。正确动作是把 A2/A3 的集合差单独列出来看——<strong>&quot;只在缓存里出现&quot;本身就是重定向投递的形态特征</strong>。</p>
+<hr>
+<h2>4. 时间戳可信度分层</h2>
+<table><thead><tr><th>时间源</th><th>可信度</th><th>风险</th><th>处理方式</th></tr></thead><tbody><tr><td>设备文件系统时间（受 Data Protection 保护）</td><td>高</td><td>用户/攻击者可改系统时间（#55 反取证）</td><td>与外部时间源（邮件、推送、服务端日志）比对</td></tr><tr><td>数据库内业务时间戳（<code>visited_time</code> 等）</td><td>高</td><td>与文件系统时间可能不一致（写入延迟/时区）</td><td>双时间并列呈现，不做单一断言</td></tr><tr><td>HTTP <code>Date</code> 头</td><td>中—高</td><td>服务端时间、缓存代理可改写</td><td>仅作互证，不作主证据</td></tr><tr><td>Cookie 过期时间</td><td>低</td><td>相对量，非绝对时刻</td><td>不用作时序论证</td></tr><tr><td>缓存淘汰推算的时间窗</td><td>低</td><td>只能给上下界</td><td>表述为&quot;区间&quot;而非&quot;时刻&quot;</td></tr><tr><td>崩溃日志时间</td><td>中</td><td>日志聚合延迟</td><td>用于时间窗而非精确时刻</td></tr></tbody></table>
+<p><strong>时序论证纪律</strong>：主张&quot;访问 A → 随后 B 发生&quot;时，必须给出两个时刻各自的时间源与可信度层级，并给出可容忍偏移。这与 #62 的&quot;真实性/完整性/关联性/合法性&quot;四要件一一对应——缺少时间基准声明的结论，在对抗性审查里应视为不成立。</p>
+<hr>
+<h2>5. 无痕、清除与工件灭失</h2>
+<table><thead><tr><th>场景</th><th>结果</th><th>可恢复证据</th><th>防御/调查建议</th></tr></thead><tbody><tr><td>无痕浏览</td><td>A1 不落历史</td><td>A2 缓存（部分版本仍产生）、A3（会话后清除）、A7 崩溃</td><td>不能因&quot;无痕&quot;排除访问；重点转向缓存与崩溃</td></tr><tr><td>用户手动清除历史</td><td>A1 条目删除</td><td>A2/A3 残留、A8 其他设备、SQLite WAL/journal 残留</td><td><strong>清除后立即提取</strong>，越早恢复率越高</td></tr><tr><td>攻击者主动清痕（#55）</td><td>多工件时间缺口</td><td>缺口本身即证据：与其他设备/账户记录比对</td><td>把&quot;时间线缺口&quot;写入结论，而非当作无数据</td></tr><tr><td>iCloud 同步开启</td><td>跨设备扩散</td><td>A8 为最强恢复路径</td><td>与 #69 的设备列表审计同步进行</td></tr><tr><td>备份覆盖</td><td>旧版本可能被覆盖</td><td>历史备份中的同名文件</td><td>保留<strong>多个时间点备份</strong>（与 #62 链条一致）</td></tr><tr><td>恢复出厂/擦除</td><td>本机工件灭失</td><td>仅云端与其他设备</td><td>优先做非破坏性提取，再决定是否擦除（灭证风险）</td></tr></tbody></table>
+<p><strong>表述纪律</strong>（延续 #62）：正确写法是&quot;在本设备当前工件范围内未发现指向 X 站的访问记录，缓存与会话级工件不能排除无痕访问，其他设备未纳入本次提取&quot;。<strong>不能写</strong>&quot;目标未访问该页面&quot;。</p>
+<hr>
+<h2>6. 与检测侧的接口：为什么浏览器工件也用于狩猎</h2>
+<table><thead><tr><th>用途</th><th>做法</th><th>对应篇目</th></tr></thead><tbody><tr><td>投递页识别</td><td>把 A2/A9 中的可疑域与已知基础设施指标（DNS/SNI 留存）比对</td><td>#47、#63 HUNT-01</td></tr><tr><td>水坑页共性发现</td><td>多台设备缓存中同一域/同一资源特征 → 群体命中</td><td>#63 HUNT-04（群体基线）</td></tr><tr><td>载荷落地关联</td><td>A1/A9 时刻 ↔ 安装数据库变化 ↔ 首次异常出站</td><td>#42、#54（模块化载荷）</td></tr><tr><td>唤醒通路确认</td><td>A11 通知唤醒时刻 ↔ 加载时刻（无用户动作）</td><td>#65</td></tr><tr><td>攻击失败时间窗</td><td>A7 崩溃聚合</td><td>#63、#61（补丁优先级）</td></tr><tr><td>反取证告警</td><td>历史被清除 + 无同期账户操作</td><td>#55</td></tr></tbody></table>
+<p>浏览器工件因此不只是&quot;事后重建&quot;，它是<strong>把网络侧指标落到设备侧行为</strong>的唯一黏合层。</p>
+<hr>
+<h2>7. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>投递入口</td><td>#40（水坑投递）、#59（ATT&amp;CK 映射）</td></tr><tr><td>渲染与解析面</td><td>#52（沙箱/BlastDoor）、#68（IPC/XPC 审计）、#44（图形与媒体解析）</td></tr><tr><td>唤醒与自动加载</td><td>#65（推送与通知通路）</td></tr><tr><td>跨设备恢复</td><td>#69（同步与中继通道）</td></tr><tr><td>灭失与反取证</td><td>#55（反取证与时间线缺口）、#45（驻留）</td></tr><tr><td>证据纪律</td><td>#62（取证证据链与法律效力）、#48（应急时序）</td></tr><tr><td>检测剧本</td><td>#63（狩猎手册）、#47（反检测对比）</td></tr><tr><td>凭据与钥匙串</td><td>#53（SEP 与钥匙串）、#42（采集架构）</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>Safari/WebView 工件分散在多个互不同步的存储里，单一来源不能重建时间线</td></tr><tr><td>2</td><td>缓存与 Cookie 覆盖历史覆盖不到的重定向与子资源；&quot;历史里没有&quot;不是排除依据</td></tr><tr><td>3</td><td>App 容器内的 WebView 工件提供归因维度（哪个 App 加载），价值高于其内容本身</td></tr><tr><td>4</td><td>时间戳必须分层声明可信度；缺少时间基准的时序结论在法律与工程上都不成立</td></tr><tr><td>5</td><td>清除与无痕造成的是&quot;缺口&quot;，缺口本身应作为证据写入结论</td></tr><tr><td>6</td><td>崩溃聚合可以给出攻击尝试的时间窗，即使最终未成功投递</td></tr><tr><td>7</td><td>浏览器工件是把网络侧指标与设备侧行为黏合起来的唯一层，因此同时服务于取证与狩猎</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：Coruna 与 DarkSword 这类链条最终都要经过&quot;目标设备上的一次页面加载&quot;，而这一次加载会同时留在历史、缓存、Cookie、App 容器和崩溃日志五个彼此独立、清除策略各不相同的地方——调查的正确做法不是找那一条&quot;可疑链接&quot;，而是对这五类工件做集合差与时间互证，因为真正指向水坑投递的，往往正是那条<strong>没有出现在历史记录里、却存在于缓存中</strong>的资源。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Safari &amp; Data Protection</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — iOS 工件提取与检查模块</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 水坑投递与定向利用研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Pegasus 调查报告与工件披露</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://webkit.org/security-issues/" rel="nofollow noopener" target="_blank">WebKit — 安全与渲染进程模型</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a69.html">← 第 69 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a71.html">第 71 篇 →</a></nav></article>
+</main></body></html>

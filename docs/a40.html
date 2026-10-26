@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 沙箱逃逸技术详解 | iOS 安全研究文章库</title>
+<meta name="description" content="Coruna 沙箱逃逸：GPU/ANGLE 攻击面、IOGPUDevice 内核驱动漏洞、与 DarkSword 逃逸路径对比">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a40.html">
+<meta property="og:title" content="Coruna 沙箱逃逸技术详解">
+<meta property="og:description" content="Coruna 沙箱逃逸：GPU/ANGLE 攻击面、IOGPUDevice 内核驱动漏洞、与 DarkSword 逃逸路径对比">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a40.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 40 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 沙箱逃逸技术详解</h1>
+<blockquote><p>编制日期：2026-10-13 数据来源：Google Project Zero、Apple Security Advisory、公开安全研究 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>Coruna 沙箱逃逸阶段</strong>是攻击链中连接 WebKit RCE 与内核提权的关键桥梁。攻击者在 WebContent 进程内获得代码执行后，必须<strong>脱离沙箱限制</strong>才能访问系统资源和进一步提权。</p>
+<p>Coruna 的沙箱逃逸主要依赖 <strong>GPU/ANGLE 层漏洞</strong>，通过 IOGPUDevice 用户态接口触发内核驱动缺陷，实现从 WebContent 沙箱到系统级权限的跃迁。</p>
+<p><strong>核心内容</strong>：</p>
+<ol><li>WebContent 沙箱限制分析</li><li>GPU/ANGLE 攻击面</li><li>IOGPUDevice 漏洞利用原理</li><li>从沙箱逃逸到内核提权的过渡</li><li>与 DarkSword 逃逸路径对比</li></ol>
+<p><strong>风险等级：严重（Critical）</strong>。</p>
+<hr>
+<h2>2. WebContent 沙箱限制</h2>
+<h3>2.1 Seatbelt 沙箱 Profile</h3>
+<p>WebContent 进程的沙箱 profile（简化）：</p>
+<pre><code>(version 1)
+(deny default)
+(allow process-exec)
+(allow file-read* (subpath &quot;/usr/lib&quot;))
+(allow mach-lookup (global-name &quot;com.apple.network.*&quot;))
+(allow iokit-open (user-client &quot;IOGPUDevice&quot;))  ; ← 允许 GPU
+(deny file-read* (subpath &quot;/private/var/mobile&quot;))
+(deny network*)</code></pre>
+<h3>2.2 关键限制</h3>
+<table><thead><tr><th>限制</th><th>说明</th><th>影响</th></tr></thead><tbody><tr><td><strong>文件访问</strong></td><td>不能读取用户数据</td><td>无法窃取照片/消息</td></tr><tr><td><strong>网络访问</strong></td><td>不能直接联网</td><td>需通过系统服务</td></tr><tr><td><strong>进程访问</strong></td><td>不能访问其他进程</td><td>无法横向移动</td></tr><tr><td><strong>IOKit 访问</strong></td><td>仅允许特定 User Client</td><td>GPU 是主要攻击面</td></tr></tbody></table>
+<h3>2.3 允许的 IOKit 接口</h3>
+<pre><code>WebContent 可访问的 User Client：
+  ✓ IOGPUDevice（GPU 驱动）
+  ✓ IOHIDEventService（HID 设备）
+  ✗ 其他内核驱动</code></pre>
+<p><strong>IOGPUDevice 成为沙箱逃逸的主要攻击面</strong>。</p>
+<hr>
+<h2>3. GPU/ANGLE 攻击面</h2>
+<h3>3.1 ANGLE 架构</h3>
+<pre><code>WebKit WebGL/WebGPU API
+        ↓
+ANGLE（OpenGL ES → Metal 转换层）
+        ↓
+Metal API
+        ↓
+IOGPUDevice（内核 GPU 驱动）</code></pre>
+<h3>3.2 攻击面分析</h3>
+<table><thead><tr><th>组件</th><th>攻击面</th><th>风险</th></tr></thead><tbody><tr><td><strong>ANGLE</strong></td><td>Shader 解析、命令处理</td><td>中</td></tr><tr><td><strong>Metal</strong></td><td>缓冲区管理、命令提交</td><td>中</td></tr><tr><td><strong>IOGPUDevice</strong></td><td>IOCTL 处理、内存管理</td><td><strong>高</strong></td></tr></tbody></table>
+<h3>3.3 IOGPUDevice 漏洞类型</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>案例</th></tr></thead><tbody><tr><td><strong>缓冲区溢出</strong></td><td>Shader/命令缓冲区溢出</td><td>Coruna 使用</td></tr><tr><td><strong>整数溢出</strong></td><td>尺寸计算溢出</td><td>历史漏洞</td></tr><tr><td><strong>UAF</strong></td><td>GPU 对象释放后使用</td><td>历史漏洞</td></tr><tr><td><strong>越界访问</strong></td><td>纹理/缓冲区越界</td><td>历史漏洞</td></tr></tbody></table>
+<hr>
+<h2>4. Coruna 沙箱逃逸原理</h2>
+<h3>4.1 攻击流程</h3>
+<pre><code>WebKit RCE（WebContent 内代码执行）
+        ↓
+准备 GPU 攻击：
+  - 构造特制 Shader/命令
+  - 准备堆数据
+        ↓
+通过 ANGLE 提交特制 GPU 命令
+        ↓
+IOGPUDevice 处理时触发漏洞
+        ↓
+在内核 GPU 驱动内代码执行
+        ↓
+脱离 WebContent 沙箱
+        ↓
+获得系统级权限</code></pre>
+<h3>4.2 技术细节（简化）</h3>
+<p><strong>步骤 1：构造恶意 GPU 命令</strong></p>
+<pre><code>攻击者构造特制 Shader 或 GPU 命令缓冲区
+        ↓
+包含恶意数据（超长/格式错误）
+        ↓
+通过 ANGLE 提交到 GPU 驱动</code></pre>
+<p><strong>步骤 2：触发 IOGPUDevice 漏洞</strong></p>
+<pre><code>IOGPUDevice 处理命令
+        ↓
+解析 Shader/命令时缓冲区溢出
+        ↓
+覆写内核堆内存
+        ↓
+劫持控制流</code></pre>
+<p><strong>步骤 3：在内核态执行代码</strong></p>
+<pre><code>获得 GPU 驱动内代码执行
+        ↓
+修改沙箱策略 / 提升权限
+        ↓
+脱离 WebContent 沙箱</code></pre>
+<h3>4.3 关键原语</h3>
+<table><thead><tr><th>原语</th><th>用途</th></tr></thead><tbody><tr><td><strong>内核堆溢出</strong></td><td>覆写关键数据结构</td></tr><tr><td><strong>控制流劫持</strong></td><td>执行攻击者代码</td></tr><tr><td><strong>沙箱策略修改</strong></td><td>解除权限限制</td></tr></tbody></table>
+<hr>
+<h2>5. 从沙箱逃逸到内核提权</h2>
+<h3>5.1 过渡阶段</h3>
+<pre><code>沙箱逃逸成功（系统级权限）
+        ↓
+但仍非 root / 内核读写
+        ↓
+需要内核提权漏洞
+        ↓
+利用 IOKit / 内核漏洞
+        ↓
+获得 root 权限</code></pre>
+<h3>5.2 可能的提权路径</h3>
+<table><thead><tr><th>路径</th><th>组件</th><th>说明</th></tr></thead><tbody><tr><td><strong>IOKit 驱动</strong></td><td>User Client 漏洞</td><td>继续利用驱动缺陷</td></tr><tr><td><strong>内核内存</strong></td><td>XNU 内存管理</td><td>内核堆/栈漏洞</td></tr><tr><td><strong>竞态条件</strong></td><td>内核竞态</td><td>TOCTOU 漏洞</td></tr></tbody></table>
+<hr>
+<h2>6. 与 DarkSword 逃逸路径对比</h2>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td><strong>主要路径</strong></td><td>GPU/ANGLE → IOGPUDevice</td><td>ANGLE → 媒体服务注入</td></tr><tr><td><strong>漏洞组件</strong></td><td>IOGPUDevice（内核驱动）</td><td>mediaserverd（用户态服务）</td></tr><tr><td><strong>逃逸方式</strong></td><td>内核态代码执行</td><td>用户态服务注入</td></tr><tr><td><strong>后续提权</strong></td><td>IOKit/内核漏洞</td><td>内核漏洞</td></tr></tbody></table>
+<p><strong>差异分析</strong>：</p>
+<ul><li><strong>Coruna</strong>：直接攻击内核 GPU 驱动，一步到内核态</li><li><strong>DarkSword</strong>：先逃逸到用户态服务（mediaserverd），再提权到内核</li></ul>
+<p><strong>共同点</strong>：</p>
+<ul><li>都利用 GPU/ANGLE 作为初始跳板</li><li>都需要后续内核提权</li><li>都针对 iOS 16–18</li></ul>
+<hr>
+<h2>7. 防御与检测</h2>
+<h3>7.1 Apple 修复</h3>
+<table><thead><tr><th>版本</th><th>修复内容</th></tr></thead><tbody><tr><td>iOS 17.3+</td><td>修复 IOGPUDevice 漏洞</td></tr><tr><td>iOS 17.4+</td><td>加强 GPU 驱动安全</td></tr></tbody></table>
+<h3>7.2 防御建议</h3>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>及时更新</strong></td><td>修复 GPU 驱动漏洞</td></tr><tr><td><strong>Lockdown Mode</strong></td><td>禁用 WebGL/WebGPU</td></tr><tr><td><strong>运行时检测</strong></td><td>监控异常 GPU 命令</td></tr><tr><td><strong>IOKit 审计</strong></td><td>定期审计 User Client</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<p>Coruna 沙箱逃逸是攻击链的<strong>第三阶段</strong>：</p>
+<table><thead><tr><th>维度</th><th>现状</th></tr></thead><tbody><tr><td><strong>攻击面</strong></td><td>GPU/ANGLE → IOGPUDevice</td></tr><tr><td><strong>漏洞类型</strong></td><td>内核驱动缓冲区溢出</td></tr><tr><td><strong>逃逸方式</strong></td><td>内核态代码执行 → 脱离沙箱</td></tr><tr><td><strong>后续阶段</strong></td><td>内核提权 → 数据窃取</td></tr></tbody></table>
+<p><strong>技术要点</strong>：</p>
+<ol><li>WebContent 沙箱允许访问 IOGPUDevice</li><li>GPU/ANGLE 是主要攻击面</li><li>IOGPUDevice 漏洞实现沙箱逃逸</li><li>需要后续内核提权才能完整沦陷</li></ol>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Apple Security Advisory: iOS 17.3+</li><li>Google Project Zero: iOS sandbox escape research</li><li>Coruna technical analysis reports</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a39.html">← 第 39 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a41.html">第 41 篇 →</a></nav></article>
+</main></body></html>

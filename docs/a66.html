@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 权限模型与隐私指示器的对抗分析：Entitlement、沙箱、TCC 与采集能力 | iOS 安全研究文章库</title>
+<meta name="description" content="四层权限模型、采集能力三条路径、隐私指示器语义、TCC 工件取证价值、时间线矛盾检测与加固清单">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a66.html">
+<meta property="og:title" content="iOS 权限模型与隐私指示器的对抗分析：Entitlement、沙箱、TCC 与采集能力">
+<meta property="og:description" content="四层权限模型、采集能力三条路径、隐私指示器语义、TCC 工件取证价值、时间线矛盾检测与加固清单">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a66.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 66 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 权限模型与隐私指示器的对抗分析：TCC、Entitlement 与采集能力</h1>
+<blockquote><p>编制日期：2026-10-22 数据来源：Apple Platform Security 文档、WWDC 隐私与安全议题、Google Project Zero、Citizen Lab 与 Amnesty 的 Pegasus 取证披露、MVT 检测模块设计、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>&quot;iOS 上麦克风/摄像头要授权，所以间谍软件偷不了&quot;——这是最常见的误解，也是防御预算错配的来源。本文把权限模型拆开，说明它<strong>在哪一阶段有效、在哪一阶段完全失效</strong>。</p>
+<p>四条结论：</p>
+<ol><li>iOS 的&quot;隐私保护&quot;是<strong>四层机制叠加</strong>（Entitlement、沙箱 profile、TCC 运行时授权、硬件级指示器），攻击者不需要&quot;绕过授权弹窗&quot;，只需要拿到<strong>其中一层的更高位置</strong>。</li><li>一旦内核提权成功（#41、#51），TCC 与沙箱层对攻击者基本失去意义——因为 TCC 的判定发生在<strong>用户态服务</strong>，而提权后的代码不必然经过它。</li><li>因此 TCC 加固的真实价值集中在两个阶段：<strong>限制未提权阶段的损害</strong>（#52 的沙箱语义）与<strong>制造可观测痕迹</strong>（授权事件与指示器是工件）。</li><li>隐私指示器（绿点/橙点）是 iOS 上少数<strong>攻击者难以完全消除的物理事件</strong>，但它的强度取决于&quot;采集通路是否必须经过被指示器覆盖的框架&quot;——这也是审计的重点方向。</li></ol>
+<hr>
+<h2>2. 四层机制与各自的判定位置</h2>
+<pre><code>① Entitlement（签名权利）        ← 构建期决定，运行时由 AMFI 校验
+        谁能调用特权 API（如访问某些服务、使用某些能力）
+② 沙箱 profile（Seatbelt/BlastDoor）← 启动期注入，限制文件/IPC/网络可达
+        进程能看到哪些路径、能与哪些 Mach 服务通信（#52、#68）
+③ TCC（透明度/同意/控制）        ← 运行期用户/策略决定
+        麦克风、摄像头、位置、照片、通讯录、日历、健康、屏幕录制等
+④ 硬件/系统级隐私指示与会话控制   ← 与 ③ 并行，面向用户可感知
+        指示点、权限指示会话、录音/拍照的硬件通路约束</code></pre>
+<table><thead><tr><th>层</th><th>判定者</th><th>攻击者最优策略</th><th>需要的能力等级</th></tr></thead><tbody><tr><td>①</td><td>AMFI + 内核</td><td>获得更高权限进程执行，或滥用合法签名进程</td><td>代码执行 + 提权</td></tr><tr><td>②</td><td>内核沙箱</td><td>沙箱逃逸（#40、#43、#52）</td><td>逃逸原语</td></tr><tr><td>③</td><td>用户态 TCC 服务</td><td>不经过 TCC：直接调底层/换宿主进程</td><td>提权或劫持</td></tr><tr><td>④</td><td>框架与硬件通路</td><td>走不被指示的采集通路（若有）</td><td>视通路而定</td></tr></tbody></table>
+<p><strong>核心判断</strong>：③④是&quot;面向用户的同意机制&quot;，①②是&quot;面向代码的能力约束&quot;。商业间谍软件的目标函数是&quot;完成提权后的任意采集&quot;，所以它的工程重心永远在 ①②（逃逸与提权），而不是&quot;想办法骗过授权弹窗&quot;。这与 #49 的&quot;原语升阶梯&quot;结构一致：<strong>权限模型只是阶梯上的一级，不是天花板。</strong></p>
+<hr>
+<h2>3. 攻击者获得采集能力的三条路径</h2>
+<table><thead><tr><th>路径</th><th>做法</th><th>现实使用度</th><th>留下的痕迹</th></tr></thead><tbody><tr><td><strong>A. 提权后旁路</strong></td><td>内核级能力直接访问硬件/文件通路，不经 TCC 服务</td><td><strong>主流</strong>（Pegasus/Coruna 类公开分析均走此路）</td><td>授权记录里没有任何同意事件 → 强工件</td></tr><tr><td><strong>B. 劫持已授权宿主</strong></td><td>注入到一个用户已授权的进程（或被替换/代理），借用其授权</td><td>中等，需要额外逃逸步骤</td><td>授权存在但使用场景异常（前台状态矛盾）</td></tr><tr><td><strong>C. 诱导授权</strong></td><td>社工/UI 欺骗让用户主动给权限（伪装成合规 App 的弹窗、企业配置描述文件）</td><td>低（对国家级投放不必要），但对商业监控类有效</td><td>有正常授权事件 + 用户记忆矛盾</td></tr></tbody></table>
+<p><strong>A 路径的防御含义最容易被误解</strong>：即使 TCC 数据库一条授权都没有，设备也可能在被攻破后持续录音——所以&quot;查看权限列表没发现异常&quot;<strong>不能证明</strong>没有被采集。这条与 #62 的&quot;未发现≠未感染&quot;表述纪律直接对应，也对应 #59 中&quot;防御规避/执行战术架构级不可观测&quot;的结论。</p>
+<p>B 路径值得注意：它把攻击成本从&quot;绕过指示器&quot;转移到&quot;找到一个已授权的合适宿主&quot;。审计时应问：<strong>哪些进程既被授权敏感能力，又处理外部不可信输入？</strong>（消息/媒体/浏览器扩展类是典型答案，与 #44、#65 的解析面重合。）</p>
+<hr>
+<h2>4. 隐私指示器：能守住什么，守不住什么</h2>
+<table><thead><tr><th>机制</th><th>覆盖范围</th><th>攻击者约束</th></tr></thead><tbody><tr><td>绿点（摄像头）/ 橙点（麦克风）</td><td>经框架的标准采集通路</td><td>难以在不使用硬件的情况下采集——指示器与硬件使用有绑定关系</td></tr><tr><td>权限使用提示（位置箭头、剪贴板读取提示）</td><td>框架调用</td><td>同上，若走底层通路可能不触发</td></tr><tr><td>录音/拍照时的系统级状态</td><td>会话期</td><td>提权后可隐藏 UI，但硬件状态仍在</td></tr><tr><td>App 隐私报告 / 访问记录</td><td>应用侧访问统计</td><td>提权后采集不计入应用统计（A 路径的盲区）</td></tr></tbody></table>
+<p><strong>审计要点（防御方最该做的一件事）</strong>：对高危角色的设备型号，明确&quot;哪些传感器采集通路不经过指示器覆盖的框架&quot;。这不是假设性问题——历史上&quot;绕过指示&quot;的讨论反复出现在传感器与协处理器路径上（与 #64 的独立信任域逻辑同构：<strong>能力在哪个域，指示器是否覆盖那个域</strong>）。</p>
+<p>因此正确的表述是：</p>
+<blockquote><p>指示器是&quot;高价值告警&quot;，不是&quot;完整性保证&quot;。看到点亮 → 一定有人在采集；没看到点亮 → 不能证明没有采集。</p></blockquote>
+<hr>
+<h2>5. 授权数据的取证价值</h2>
+<p>TCC 与相关数据库是 iOS 取证里少见的<strong>结构化、时间有序</strong>的工件：</p>
+<table><thead><tr><th>工件</th><th>内容</th><th>用途</th><th>局限</th></tr></thead><tbody><tr><td>TCC 数据库</td><td>每 App × 每权限的授予状态与时间</td><td>判断是否存在&quot;异常授权&quot;或&quot;应有授权缺失&quot;</td><td>提权后采集不留授权记录（A 路径）</td></tr><tr><td>位置/照片等访问日志</td><td>采集发生事件</td><td>与外发时间线做关联（#63 HUNT-01）</td><td>保留期有限、可被清除（#55）</td></tr><tr><td>剪贴板读取提示记录</td><td>谁读了剪贴板</td><td>凭据窃取线索（#53）</td><td>覆盖窄</td></tr><tr><td>配置描述文件清单</td><td>企业策略、权限代理</td><td>路径 C 的主证据（#67）</td><td>合法机制，需与授权过程区分</td></tr><tr><td>系统诊断/崩溃日志</td><td>异常进程活动</td><td>群体基线对比（#63 HUNT-04）</td><td>攻击者可规避崩溃</td></tr></tbody></table>
+<p><strong>时间线矛盾模板</strong>（本文最实用的部分）：</p>
+<pre><code>若 采集发生时刻 ≈ 通知唤醒时刻（#65）
+且 用户当时无前台 App / 屏幕未点亮
+且 TCC 中不存在对应授权事件
+→ 三条同时成立即为&quot;非授权采集&quot;的高置信形态，
+   进入 #48 应急时序与 #62 证据保全流程</code></pre>
+<hr>
+<h2>6. 防御与加固清单</h2>
+<table><thead><tr><th>层</th><th>动作</th><th>覆盖人群</th><th>备注</th></tr></thead><tbody><tr><td>①②</td><td>及时补丁 + 锁定模式</td><td>全部/高危</td><td>攻击者重心在这两层（#61、#34）</td></tr><tr><td>③</td><td>最小授权：撤销非必要权限，禁止&quot;始终允许&quot;位置</td><td>高危</td><td>降低 B 路径的宿主候选</td></tr><tr><td>③</td><td>警惕&quot;要求授权的应用/描述文件&quot;，只从企业正规渠道安装</td><td>全部</td><td>路径 C 唯一有效防御（#67）</td></tr><tr><td>④</td><td>建立&quot;指示灯异常立即上报&quot;的行为约定</td><td>高危个体</td><td>无技术替代（#48）</td></tr><tr><td>组织</td><td>权限状态纳入 MDM 可见项并留痕</td><td>企业</td><td>注意 MDM 无法看到提权后行为</td></tr><tr><td>组织</td><td>传感器采集异常与设备状态联合分析</td><td>SOC</td><td>依赖人员上报，不能纯自动（#63）</td></tr><tr><td>取证</td><td>权限数据库与访问记录纳入提取范围</td><td>调查</td><td>与 #62 的双工具交叉提取一致</td></tr></tbody></table>
+<p><strong>与&quot;定期重启&quot;的联动</strong>（#64）：重启会终止注入型采集会话；若重启后指示器异常立刻再次出现，说明存在<strong>新的触发通路</strong>（推送唤醒、落地驻留或描述文件），这本身就是分类信号。</p>
+<hr>
+<h2>7. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>为什么 TCC 挡不住提权后的代码</td><td>#41（内核提权与 PAC）、#51（KASLR 泄露）</td></tr><tr><td>沙箱与授权层的职责划分</td><td>#52（BlastDoor 与沙箱模型）、#68（Mach IPC/XPC 审计）</td></tr><tr><td>采集模块的实际需求</td><td>#42（数据采集架构）、#54（模块化载荷）、#53（SEP 与钥匙串）</td></tr><tr><td>指示器与信任域</td><td>#64（并行信任域与能力上限）</td></tr><tr><td>唤醒时机</td><td>#65（推送通路）</td></tr><tr><td>检测与证据</td><td>#63（狩猎剧本）、#62（证据链）、#55（反取证）、#47（反检测对比）</td></tr><tr><td>分层加固</td><td>#48（防御与检测指南）、#34（锁定模式）</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>iOS 隐私保护是四层叠加，攻击者不必骗过弹窗，只需在栈上拿到更高位置</td></tr><tr><td>2</td><td>内核提权后 TCC 与沙箱约束基本失效，&quot;权限列表干净&quot;不能证明未被采集</td></tr><tr><td>3</td><td>主流投放走&quot;提权后旁路&quot;，因此授权数据的价值在于<strong>证明缺失</strong>而非证明存在</td></tr><tr><td>4</td><td>隐私指示器是攻击者难以完全消除的物理事件：看到即确定，没看到不确定</td></tr><tr><td>5</td><td>审计的关键问题是&quot;哪些进程既有敏感授权又处理外部不可信输入&quot;</td></tr><tr><td>6</td><td>时间线矛盾（唤醒 + 无前台 + 无授权）是非授权采集最可操作的判定形态</td></tr><tr><td>7</td><td>对高危个体，权限模型的真实增益来自缩小攻击面（撤销授权、锁定模式）而非事后发现</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 的授权模型不是给国家级对手准备的墙，而是给&quot;还没提权的攻击者&quot;和&quot;要留下痕迹的攻击行为&quot;准备的摩擦层——它挡不住 Coruna 与 DarkSword 这类完成内核提权的链条，却决定了它们<strong>必须提权</strong>，也因此在权限记录、指示器与时间线上留下了这类入侵少有的可观测裂缝。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Privacy &amp; Permission Architecture</a></li><li><a href="https://developer.apple.com/videos/" rel="nofollow noopener" target="_blank">WWDC — Privacy &amp; Security 相关议题</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Pegasus 取证与能力披露</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — 检测模块与工件范围</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a65.html">← 第 65 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a67.html">第 67 篇 →</a></nav></article>
+</main></body></html>

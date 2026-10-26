@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 著名漏洞案例系统网络安全文档 | iOS 安全研究文章库</title>
+<meta name="description" content="Pegasus/FORCEDENTRY/Triangulation/checkm8/Coruna/DarkSword 等案例档案、横向对比、TTP 模式提炼">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a24.html">
+<meta property="og:title" content="iOS 著名漏洞案例系统网络安全文档">
+<meta property="og:description" content="Pegasus/FORCEDENTRY/Triangulation/checkm8/Coruna/DarkSword 等案例档案、横向对比、TTP 模式提炼">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a24.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 24 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 著名漏洞案例系统网络安全文档</h1>
+<blockquote><p>编制日期：2026-10-11 数据来源：Citizen Lab、Google Project Zero / Threat Analysis Group、Lookout、Kaspersky、ESET、NSO 诉讼公开文件、Apple 安全公告、CCTV/新闻调查 性质：防御性安全研究文档（Defensive Security Research Compendium） 定位：iOS 安全领域的<strong>著名案例合集</strong>，跨案例横向对比、模式提炼、防御启示，与本仓库单案专题（Coruna / DarkSword / 三角行动 / GHOSTBLADE / 水坑攻击等）互补</p></blockquote>
+<hr>
+<h2>1. 文档定位与使用方式</h2>
+<p>本文档不重复单案例深度分析，而是把 iOS 历史上<strong>已披露、已确认、或广为讨论</strong>的著名漏洞案例作为<strong>系统安全案例库</strong>：</p>
+<ul><li><strong>案例档案（Case Card）</strong>：每个案例一页式档案（时间、影响、CVE、投递、链条、归因、后果）</li><li><strong>横向对比矩阵</strong>：跨案例对比投递方式、CVE 组合、目标类型、检测对抗</li><li><strong>模式提炼</strong>：从案例中提炼 iOS 攻击的共性战术、技术与流程（TTP）</li><li><strong>防御启示</strong>：为每一类案例映射相应防御措施</li></ul>
+<p><strong>阅读顺序建议</strong>：第 2 节案例时间线 → 第 3 节案例档案 → 第 4 节横向对比 → 第 5 节模式提炼 → 第 6 节防御启示。</p>
+<hr>
+<h2>2. 案例时间线</h2>
+<pre><code>2014 ─ WireLurker                 ── macOS 侧信道传播至 iOS
+2015 ─ XAgent (Tailgater)          ── 首个 0-click iMessage 尝试
+2016 ─ Pegasus 早期 (WebKit)       ── NSO 首次亮相
+2017 ─ Trident / Kernel Patch     ── 三漏洞链成型
+2018 ─ Pegasus (ImageIO)           ── iMessage 零点击
+2019 ─ checkm8                    ── A5–A11 不可修补的 BootROM 缺陷
+2019 ─ Pegasus for iMessage       ── ImageIO + CoreGraphics 链条
+2020 ─ iOS 攻击进入 PAC 时代        ── A12+ 强制 PAC，攻击者转向逻辑漏洞
+2021 ─ Pegasus 大规模曝光           ── 公民实验室/ Forbidden Stories 调查
+2021 ─ FORCEDENTRY (CVE-2021-30860)── 复杂 PDF 触发，全链零点击
+2021 ─ BlastDoor 宣布               ── iOS 15 沙箱重构
+2021 ─ Triangulation 首次活动       ── 通过 iPhone  lightning 端口攻击
+2022 ─ 零点击泛滥                   ── 多个商业间谍软件供应商
+2022 ─ Predatory 供应链曝光         ── RCS 类工具
+2022 ─ Quativ / Cytotech 报道      ── 无感染持久化
+2022 ─ Hermes                       ── 通过短信投递的 Android+iOS 混合
+2023 ─ Operation Triangulation 披露 ── Kaspersky，硬件级持久化
+2023 ─ macOS/x86 转 iOS 全链        ── 多个内核提权链
+2023 ─ Pegasus M.O. 演变            ── M1/M2 无感染模式
+2024 ─ CVE-2024-23222 / Coruna 前兆 ── 泄露攻击能力进入犯罪集团
+2024 ─ 商业间谍供应链持续            ── NSO/Intellexa 竞争
+2025 ─ DarkSword 活跃               ── iOS 18 目标
+2025 ─ GHOSTBLADE                   ── 复用泄露链条
+2026 ─ Coruna / DarkSword 公开      ── Google Cloud 披露；多主体扩散</code></pre>
+<hr>
+<h2>3. 案例档案（Case Card）</h2>
+<h3>3.1 Pegasus（NSO Group）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>首次曝光</strong></td><td>2016（阿联酋活动人士 Ahmed Mansour 短信钓鱼）</td></tr><tr><td><strong>归因主体</strong></td><td>以色列 NSO Group，出售给政府客户</td></tr><tr><td><strong>投递方式</strong></td><td>短信/WhatsApp 链接（1-click）→ iMessage 附件（0-click）</td></tr><tr><td><strong>主要 CVE</strong></td><td>CVE-2016-4655/4656/4657（三链）、CVE-2017-2362-2365（Trident）、CVE-2019-6244/6246/8649（ImageIO 链）、CVE-2021-30860 等</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 8 – iOS 15</td></tr><tr><td><strong>链条阶段</strong></td><td>WebKit/JSC → 沙箱逃逸 → 内核提权 → 加密通信</td></tr><tr><td><strong>持久化</strong></td><td>内核 hook + 隐藏 plist + 加密载荷</td></tr><tr><td><strong>能力</strong></td><td>全设备数据、麦克风/摄像头、消息、位置、应用数据、加密通信截获</td></tr><tr><td><strong>暴露事件</strong></td><td>2021 Pegasus Project（180+ 记者/活动人士/政治家）、Amnesty 诉讼、US 商务部实体清单</td></tr><tr><td><strong>关键教训</strong></td><td>商业间谍软件可长期针对民主社会；供应商监管缺位</td></tr></tbody></table>
+<p><strong>技术亮点</strong>：</p>
+<ul><li><strong>三链组合</strong>：WebKit（远程）→ 沙箱逃逸 → 内核提权，每步都独立 0-day</li><li><strong>零点击演进</strong>：从 2016 的钓鱼链接到 2019 的 iMessage 附件（受害者无需交互）</li><li><strong>反取证</strong>：41 天自毁机制，卸载时清理痕迹</li><li><strong>多投递</strong>：短信/iMessage/WhatsApp 均可触发</li></ul>
+<h3>3.2 FORCEDENTRY（CVE-2021-30860）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>首次曝光</strong></td><td>2021-11（Citizen Lab）</td></tr><tr><td><strong>归因主体</strong></td><td>NSO Group（据报）</td></tr><tr><td><strong>投递方式</strong></td><td>iMessage 附件——<strong>零点击、可远程触发</strong></td></tr><tr><td><strong>漏洞类型</strong></td><td>CoreGraphics / PDF 解析中的内存写入</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 13.4.5 – 14.8，iOS 15.0.4</td></tr><tr><td><strong>触发条件</strong></td><td>仅需<strong>接收</strong>特制 PDF 附件，无需打开</td></tr><tr><td><strong>特点</strong></td><td><strong>最复杂的移动端 exploit 之一</strong>——单个 PDF 触发链跨越多个子系统</td></tr><tr><td><strong>后续利用</strong></td><td>与 CVE-2021-30869/30870/30792 组合成全链条</td></tr><tr><td><strong>补丁</strong></td><td>iOS 14.8.1 / 15.1 紧急修补</td></tr><tr><td><strong>关键教训</strong></td><td>消息类 App 附件解析是最高危的远程零点击攻击面</td></tr></tbody></table>
+<p><strong>技术亮点</strong>：</p>
+<ul><li><strong>PDF 复杂度</strong>：利用 CoreGraphics PDF 渲染的<strong>类型混淆 + 内存写入</strong></li><li><strong>跨版本存活</strong>：影响 iOS 13–15，攻击者维护多条变体</li><li><strong>iMessage 无渲染</strong>：附件解析发生在<strong>渲染前的解码阶段</strong>，通知即可触发</li></ul>
+<h3>3.3 Operation Triangulation（三角行动）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>首次曝光</strong></td><td>2023-07（Kaspersky）</td></tr><tr><td><strong>归因主体</strong></td><td>未确认，推测为国家背景</td></tr><tr><td><strong>投递方式</strong></td><td>通过 iPhone <strong>Lightning 端口</strong> + 恶意 USB 配件，或利用网络中间节点重定向流量</td></tr><tr><td><strong>漏洞类型</strong></td><td>内核信息泄露 + 内核代码执行，跨越多个 iOS 版本</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 13 – iOS 16.6</td></tr><tr><td><strong>持久化</strong></td><td><strong>硬件级持久化</strong>——恶意载荷写入 <strong>SEP 之外的 NOR Flash</strong>，重启后仍能重新植入</td></tr><tr><td><strong>能力</strong></td><td>静默监视、数据收集、绕过重启清除</td></tr><tr><td><strong>终止条件</strong></td><td>目前仅在俄罗斯境内目标观察到（据 Kaspersky 报告）</td></tr><tr><td><strong>关键教训</strong></td><td>iOS 首次被公开报告的<strong>硬件级持久化</strong>攻击；重启不再是万能清除手段</td></tr></tbody></table>
+<p><strong>技术亮点</strong>：</p>
+<ul><li><strong>五漏洞链</strong>：WebKit/内核/驱动/文件系统/持久化协同</li><li><strong>物理 + 网络双投递</strong>：既可通过 USB 也可通过流量注入</li><li><strong>NOR Flash 持久化</strong>：绕过 iOS 传统上&quot;重启即清&quot;的信任模型</li></ul>
+<h3>3.4 checkm8（硬件缺陷）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2019-09（axi0mX 披露）</td></tr><tr><td><strong>漏洞类型</strong></td><td><strong>BootROM 缺陷</strong>（S5L8902–S8003 芯片，即 A5–A11）</td></tr><tr><td><strong>影响范围</strong></td><td>iPhone 4S – iPhone X（所有 A5–A11 设备）</td></tr><tr><td><strong>不可修补</strong></td><td>BootROM 在制造时固化，Apple 无法通过固件更新修复</td></tr><tr><td><strong>利用方式</strong></td><td>DFU 模式下通过 USB 发送特殊描述符触发，绕过签名校验</td></tr><tr><td><strong>后果</strong></td><td>越狱（checkra1n）、解锁、取证工具（GrayKey/Cellebrite）依赖</td></tr><tr><td><strong>关键教训</strong></td><td><strong>芯片级硬件缺陷 = 永久性攻击面</strong>，即使系统更新也无法消除</td></tr></tbody></table>
+<p><strong>技术亮点</strong>：</p>
+<ul><li><strong>PwnedDFU</strong>：基于 checkm8 的通用越狱/工具生态</li><li><strong>取证双刃剑</strong>：Law enforcement 与攻击者都能使用</li></ul>
+<h3>3.5 XAgent / Tailgater</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2015（LookingGlass Cybsecurity 披露）</td></tr><tr><td><strong>归因主体</strong></td><td>意大利 RCS Lab / 英国 Gamma 等商业监控供应商</td></tr><tr><td><strong>投递方式</strong></td><td>iMessage 附件 + WebKit（早期尝试零点击）</td></tr><tr><td><strong>主要 CVE</strong></td><td>CVE-2015-7034、CVE-2015-7035、CVE-2015-7036</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 8.4 – iOS 9.1</td></tr><tr><td><strong>能力</strong></td><td>完整监视——通话、消息、位置、摄像头、麦克风</td></tr><tr><td><strong>暴露事件</strong></td><td>针对意大利记者与活动人士</td></tr><tr><td><strong>关键教训</strong></td><td>商业监控工具早期即已具备零点击能力；媒体监督驱动披露</td></tr></tbody></table>
+<h3>3.6 Predator（Intellexa）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2022-07（Verizon Media / Citizen Lab 报道）</td></tr><tr><td><strong>归因主体</strong></td><td>以色列 Intellexa 联盟</td></tr><tr><td><strong>投递方式</strong></td><td>依赖 <strong>Cytotech</strong> 与 <strong>Athena Graph</strong>——通过蜂窝信令/网络拦截</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 15</td></tr><tr><td><strong>主要 CVE</strong></td><td>未完全披露，涉及 WebKit/内核/媒体框架</td></tr><tr><td><strong>能力</strong></td><td>静默监视 + 加密通信截获</td></tr><tr><td><strong>暴露事件</strong></td><td>希腊记者 Thanasis Koukakis 诉讼、欧盟议会针对委员</td></tr><tr><td><strong>关键教训</strong></td><td><strong>网络层投递</strong>（无需用户接触任何链接）成为 iOS 攻击新形态</td></tr></tbody></table>
+<h3>3.7 Coruna（泄露工具包）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2026-03（Google Cloud TI）</td></tr><tr><td><strong>归因主体</strong></td><td>源自国家级/商业供应商，扩散至犯罪集团（UNC6353、UNC6691）</td></tr><tr><td><strong>投递方式</strong></td><td>水坑网站 / 伪造金融门户</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 13 – 17.2.1</td></tr><tr><td><strong>主要 CVE</strong></td><td>CVE-2024-23222、CVE-2022-48503、CVE-2023-43000、CVE-2021-30952、CVE-2023-41974、CVE-2023-32434、CVE-2023-38606</td></tr><tr><td><strong>利用规模</strong></td><td><strong>5 条利用链 × 23 个漏洞</strong>，自适应选择</td></tr><tr><td><strong>能力</strong></td><td>加密密钥窃取、钱包劫持、扫描影像捕获、DGA 外传</td></tr><tr><td><strong>指纹识别</strong></td><td>检测到 Lockdown Mode 等保护设置主动中止</td></tr><tr><td><strong>关键教训</strong></td><td><strong>供应链扩散</strong>——高级攻击能力流入有组织犯罪</td></tr></tbody></table>
+<h3>3.8 DarkSword（Coruna 后继）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2026-03（Google Cloud TI）</td></tr><tr><td><strong>归因主体</strong></td><td>UNC6353 / UNC6748 / PARS Defense（土耳其商业监控公司）</td></tr><tr><td><strong>影响版本</strong></td><td>iOS 18.4 – 18.7、iOS 26 &lt; 26.3</td></tr><tr><td><strong>主要 CVE</strong></td><td>CVE-2025-31277、CVE-2025-43529、CVE-2025-14174、CVE-2026-20700、CVE-2025-43510、CVE-2025-43520</td></tr><tr><td><strong>链条阶段</strong></td><td>JSC 逻辑缺陷 → WebGPU 沙箱逃逸 → dyld 签名绕过 → 内核提权</td></tr><tr><td><strong>持久化</strong></td><td><strong>无持久化</strong>——短暂驻留后清除痕迹</td></tr><tr><td><strong>能力</strong></td><td>全设备沦陷 + 机密数据聚合外传</td></tr><tr><td><strong>AI 加持</strong></td><td>使用 <strong>LLM</strong> 定制行动载荷</td></tr><tr><td><strong>关键教训</strong></td><td>现代攻击的<strong>无痕迹化 + AI 化 + 多主体共享</strong></td></tr></tbody></table>
+<h3>3.9 GHOSTBLADE</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2026（多来源）</td></tr><tr><td><strong>归因主体</strong></td><td>与 Coruna/DarkSword 情报共享</td></tr><tr><td><strong>主要特征</strong></td><td><strong>复用已泄露链条</strong> + 规避 Lockdown Mode</td></tr><tr><td><strong>投递</strong></td><td>网页零日 + 水坑</td></tr><tr><td><strong>主要教训</strong></td><td><strong>锁定模式成为攻击者显式规避目标</strong></td></tr></tbody></table>
+<h3>3.10 Paragon GraphTAP</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2023（404 Media / WaPo 报道）</td></tr><tr><td><strong>归因主体</strong></td><td>以色列 Paragon Solutions</td></tr><tr><td><strong>客户</strong></td><td>美国陆军、HSI 等</td></tr><tr><td><strong>能力</strong></td><td>零点击（iMessage）+ 应用数据全量提取</td></tr><tr><td><strong>主要教训</strong></td><td>商业间谍软件已成为部分国家政府的<strong>常规执法工具</strong></td></tr></tbody></table>
+<h3>3.11 WireLurker（macOS→iOS 侧信道）</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>公开时间</strong></td><td>2014-11（Palo Alto Networks）</td></tr><tr><td><strong>投递方式</strong></td><td>macOS 恶意软件通过 <strong>USB 同步</strong>感染越狱 iOS 设备</td></tr><tr><td><strong>主要教训</strong></td><td>跨平台感染：iOS 不是孤立攻击面，<strong>与 macOS/PC 的连接是攻击通道</strong></td></tr></tbody></table>
+<h3>3.12 Keychain 与备份滥用</h3>
+<table><thead><tr><th>字段</th><th>内容</th></tr></thead><tbody><tr><td><strong>背景</strong></td><td>取证公司（Cellebrite、GrayKey）通过备份文件暴力破解 Keychain</td></tr><tr><td><strong>主要教训</strong></td><td><strong>离线备份</strong>（未加密 iCloud/本地备份）是 iOS 数据的&quot;暗面通道&quot;</td></tr></tbody></table>
+<hr>
+<h2>4. 案例横向对比矩阵</h2>
+<h3>4.1 投递方式对比</h3>
+<table><thead><tr><th>案例</th><th>投递通道</th><th>交互要求</th><th>目标定位</th></tr></thead><tbody><tr><td><strong>Pegasus（早期）</strong></td><td>短信链接</td><td>1-click</td><td>定向个人</td></tr><tr><td><strong>Pegasus（ImageIO）</strong></td><td>iMessage 附件</td><td>0-click</td><td>定向个人</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>iMessage PDF</td><td>0-click</td><td>定向个人</td></tr><tr><td><strong>XAgent</strong></td><td>iMessage 附件</td><td>0-click（早期）</td><td>定向个人</td></tr><tr><td><strong>Operation Triangulation</strong></td><td>USB + 网络重定向</td><td>0-click</td><td>定向个人</td></tr><tr><td><strong>Predator</strong></td><td>蜂窝信令 / 网络中间</td><td>0-click</td><td>定向个人</td></tr><tr><td><strong>Coruna</strong></td><td>水坑 / 伪造门户</td><td>1-click</td><td>广泛目标</td></tr><tr><td><strong>DarkSword</strong></td><td>水坑 / 网页零日</td><td>1-click</td><td>定向 + 广泛</td></tr><tr><td><strong>GHOSTBLADE</strong></td><td>水坑</td><td>1-click</td><td>广泛目标</td></tr><tr><td><strong>checkm8</strong></td><td>物理 + DFU</td><td>需物理访问</td><td>本地</td></tr><tr><td><strong>WireLurker</strong></td><td>USB 同步侧信道</td><td>需物理访问</td><td>广泛目标</td></tr></tbody></table>
+<h3>4.2 CVE 组合对比</h3>
+<table><thead><tr><th>案例</th><th>漏洞数</th><th>涉及子系统</th><th>首次攻击点</th></tr></thead><tbody><tr><td><strong>Pegasus Trident</strong></td><td>3</td><td>WebKit / Sandbox / Kernel</td><td>Safari</td></tr><tr><td><strong>Pegasus ImageIO 2019</strong></td><td>3</td><td>ImageIO / CoreGraphics / Kernel</td><td>iMessage</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>1（+链）</td><td>CoreGraphics/PDF</td><td>iMessage</td></tr><tr><td><strong>Operation Triangulation</strong></td><td>5</td><td>WebKit/IOKit/内核/驱动/持久化</td><td>网络/USB</td></tr><tr><td><strong>Coruna</strong></td><td>7</td><td>WebKit / JSC / 内核 / 类型混淆 / 内存管理 / MMIO</td><td>Safari</td></tr><tr><td><strong>DarkSword</strong></td><td>6</td><td>JSC / WebGPU / dyld / 内存管理</td><td>Safari (WebGPU)</td></tr><tr><td><strong>checkm8</strong></td><td>1</td><td>BootROM（硬件）</td><td>DFU 模式</td></tr></tbody></table>
+<h3>4.3 归因与动机</h3>
+<table><thead><tr><th>案例</th><th>归因</th><th>客户</th><th>动机</th></tr></thead><tbody><tr><td><strong>Pegasus (NSO)</strong></td><td>商业供应商</td><td>政府客户</td><td>情报/执法/异见监控</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>疑 NSO</td><td>政府客户</td><td>定向情报</td></tr><tr><td><strong>Triangulation</strong></td><td>国家背景（推测）</td><td>单一使用方</td><td>高级情报</td></tr><tr><td><strong>XAgent</strong></td><td>RCS / Gamma</td><td>政府客户</td><td>情报/执法</td></tr><tr><td><strong>Predator</strong></td><td>Intellexa 联盟</td><td>政府客户</td><td>情报/反恐</td></tr><tr><td><strong>Coruna</strong></td><td>供应商→犯罪集团</td><td>UNC6353/6691</td><td>加密货币盗窃 + 间谍</td></tr><tr><td><strong>DarkSword</strong></td><td>多主体共享</td><td>UNC6353/6748/PARS</td><td>间谍 + 商业监控 + 社会操纵</td></tr><tr><td><strong>checkm8</strong></td><td>学术披露</td><td>越狱/取证双用</td><td>越狱 + 执法取证</td></tr></tbody></table>
+<h3>4.4 攻击能力对比</h3>
+<table><thead><tr><th>案例</th><th>初始执行</th><th>沙箱逃逸</th><th>内核提权</th><th>持久化</th><th>数据窃取</th><th>反检测</th></tr></thead><tbody><tr><td>Pegasus</td><td>✔</td><td>✔</td><td>✔</td><td>内核 hook</td><td>全设备</td><td>41 天自毁</td></tr><tr><td>Triangulation</td><td>✔</td><td>✔</td><td>✔</td><td><strong>NOR Flash 硬件</strong></td><td>全设备</td><td>静默 + 硬件隐藏</td></tr><tr><td>Coruna</td><td>✔</td><td>✔</td><td>✔</td><td>嵌入特权进程</td><td>加密密钥/钱包/影像</td><td>指纹识别中止</td></tr><tr><td>DarkSword</td><td>✔</td><td>✔</td><td>✔</td><td><strong>无持久化</strong></td><td>全设备</td><td>内存驻留 + 痕迹清除</td></tr><tr><td>Predator</td><td>✔</td><td>✔</td><td>✔</td><td>未披露</td><td>全设备</td><td>网络层投递</td></tr><tr><td>FORCEDENTRY</td><td>✔</td><td>✔</td><td>组合链</td><td>未披露</td><td>全设备</td><td>iMessage 无痕</td></tr></tbody></table>
+<hr>
+<h2>5. 模式提炼：iOS 攻击共性 TTP</h2>
+<h3>5.1 投递模式（MITRE ATT&amp;CK T1598/T1566/T1189）</h3>
+<table><thead><tr><th>战术</th><th>描述</th><th>案例</th></tr></thead><tbody><tr><td><strong>水坑攻击</strong></td><td>compromise 目标常访问的合法网站</td><td>Coruna、DarkSword、GHOSTBLADE</td></tr><tr><td><strong>定向链接投递</strong></td><td>通过短信/邮件/社交发送 URL</td><td>早期 Pegasus</td></tr><tr><td><strong>消息附件零点击</strong></td><td>利用消息 App 自动渲染触发</td><td>Pegasus (2019)、FORCEDENTRY、XAgent</td></tr><tr><td><strong>网络中间注入</strong></td><td>蜂窝信令 / DNS 重定向</td><td>Predator、Triangulation</td></tr><tr><td><strong>物理 + USB</strong></td><td>Lightning 端口 / DFU</td><td>Triangulation、checkm8</td></tr></tbody></table>
+<h3>5.2 初始执行技术</h3>
+<table><thead><tr><th>技术</th><th>组件</th><th>案例</th></tr></thead><tbody><tr><td><strong>JIT 类型混淆</strong></td><td>JavaScriptCore DFG/FTL 优化器</td><td>Pegasus、Coruna、多个</td></tr><tr><td><strong>图像解析缺陷</strong></td><td>ImageIO / CoreGraphics</td><td>Pegasus (2019)、FORCEDENTRY</td></tr><tr><td><strong>媒体编解码器缺陷</strong></td><td>libavcodec / 视频处理</td><td>多条链</td></tr><tr><td><strong>JSC 逻辑缺陷</strong></td><td>JavaScriptCore 逻辑漏洞</td><td>DarkSword</td></tr><tr><td><strong>BootROM 缺陷</strong></td><td>checkm8 类硬件</td><td>checkm8</td></tr></tbody></table>
+<h3>5.3 沙箱逃逸技术</h3>
+<table><thead><tr><th>技术</th><th>描述</th><th>案例</th></tr></thead><tbody><tr><td><strong>媒体服务 IPC 缺陷</strong></td><td>恶意载荷经 WebContent → 媒体进程</td><td>多条链</td></tr><tr><td><strong>WebGPU / GPU 渲染缺陷</strong></td><td>通过 GPU 进程跳出沙箱</td><td>DarkSword</td></tr><tr><td><strong>XPC/Mach IPC 缺陷</strong></td><td>利用进程间通信的内存破坏</td><td>历史案例</td></tr><tr><td><strong>驱动接口缺陷</strong></td><td>IOKit 用户态接口内存破坏</td><td>多条链</td></tr></tbody></table>
+<h3>5.4 内核提权技术</h3>
+<table><thead><tr><th>技术</th><th>描述</th><th>案例</th></tr></thead><tbody><tr><td><strong>IOKit UAF</strong></td><td>内核驱动对象生命周期缺陷</td><td>多条链</td></tr><tr><td><strong>内核堆溢出</strong></td><td>vm_map / kalloc 破坏</td><td>多条链</td></tr><tr><td><strong>dyld 签名绕过</strong></td><td>禁用 AMFI/页面所有权保护</td><td>DarkSword (CVE-2026-20700)</td></tr><tr><td><strong>MMIO 保护绕过</strong></td><td>破坏内核硬件保护</td><td>Coruna (CVE-2023-38606)</td></tr></tbody></table>
+<h3>5.5 持久化模式</h3>
+<table><thead><tr><th>模式</th><th>说明</th><th>案例</th></tr></thead><tbody><tr><td><strong>文件持久化</strong></td><td>写入隐蔽文件</td><td>早期 Pegasus</td></tr><tr><td><strong>内核 hook</strong></td><td>挂钩内核函数</td><td>Pegasus</td></tr><tr><td><strong>LaunchDaemon</strong></td><td>注册系统服务</td><td>部分工具</td></tr><tr><td><strong>NOR Flash</strong></td><td>写入设备闪存分区</td><td><strong>Triangulation</strong></td></tr><tr><td><strong>无持久化</strong></td><td>短暂驻留后清除</td><td><strong>DarkSword、GHOSTBLADE</strong></td></tr></tbody></table>
+<p><strong>趋势</strong>：从&quot;追求持久化&quot;转向&quot;无持久化 + 短时高价值&quot;——因为<strong>取证与检测都依赖持久化特征</strong>。</p>
+<h3>5.6 反检测与规避</h3>
+<table><thead><tr><th>技术</th><th>说明</th><th>案例</th></tr></thead><tbody><tr><td><strong>Lockdown Mode 检测中止</strong></td><td>目标启用保护时不发起攻击</td><td>Coruna、DarkSword、GHOSTBLADE</td></tr><tr><td><strong>虚拟机/沙箱检测</strong></td><td>拒绝在分析环境中执行</td><td>多数现代工具</td></tr><tr><td><strong>自毁/时间限制</strong></td><td>到期或发现分析后清除</td><td>Pegasus 41 天</td></tr><tr><td><strong>域名 DGA</strong></td><td>动态生成 C2 域名</td><td>Coruna、DarkSword</td></tr><tr><td><strong>加密通道</strong></td><td>TLS + 应用层加密</td><td>所有现代工具</td></tr><tr><td><strong>LLM 定制载荷</strong></td><td>按目标画像动态生成</td><td>DarkSword</td></tr></tbody></table>
+<hr>
+<h2>6. 目标类型与影响人群</h2>
+<h3>6.1 目标画像</h3>
+<table><thead><tr><th>案例群</th><th>目标</th><th>动机</th></tr></thead><tbody><tr><td><strong>国家级情报（Pegasus/XAgent/Predator/Paragon）</strong></td><td>记者、活动人士、政治对手、外交官、异见者</td><td>情报监控</td></tr><tr><td><strong>执法取证（checkm8 + GrayKey 生态）</strong></td><td>犯罪嫌疑人</td><td>数据取证</td></tr><tr><td><strong>犯罪集团（Coruna / DarkSword 部分主体）</strong></td><td>加密货币持有者、金融用户</td><td>财务盗窃</td></tr><tr><td><strong>地区间谍（Triangulation / UNC6353）</strong></td><td>东欧目标、沙特用户</td><td>政治/军事情报</td></tr><tr><td><strong>商业监控（PARS Defense 等）</strong></td><td>企业竞争对手、内部员工</td><td>商业情报</td></tr></tbody></table>
+<h3>6.2 高危人群</h3>
+<ul><li><strong>记者/异见人士/活动人士</strong>：Pegasus 案例中最主要的目标群体</li><li><strong>加密货币持有者</strong>：Coruna/DarkSword 定向攻击</li><li><strong>政府/外交/军事</strong>：Triangulation、UNC6353、UNC6748 目标</li><li><strong>企业高管</strong>：商业监控供应商工具</li><li><strong>国防承包商人员</strong>：Coruna 与UNC6353 情报关联</li></ul>
+<hr>
+<h2>7. 防御启示</h2>
+<h3>7.1 从案例看防线被击穿的层次</h3>
+<table><thead><tr><th>层</th><th>击穿案例数</th><th>说明</th></tr></thead><tbody><tr><td><strong>WebKit / JSC</strong></td><td>极高（几乎所有远程案例）</td><td>iOS 攻击的<strong>必争之地</strong></td></tr><tr><td><strong>沙箱</strong></td><td>高（媒体/GPU/驱动 IPC）</td><td>WebContent 逃逸必选环节</td></tr><tr><td><strong>PAC</strong></td><td>中（逻辑缺陷绕过，A12+）</td><td>硬件保护被&quot;绕行&quot;而非&quot;击碎&quot;</td></tr><tr><td><strong>内核 / IOKit</strong></td><td>极高（提权必经）</td><td>攻击者投入最多的层</td></tr><tr><td><strong>签名校验（AMFI/dyld）</strong></td><td>中（DarkSword 明确绕过）</td><td>近年成为独立攻击面</td></tr><tr><td><strong>硬件持久化（NOR Flash）</strong></td><td>低（Triangulation 首例）</td><td>未来值得关注的方向</td></tr><tr><td><strong>Lockdown Mode</strong></td><td>显式规避</td><td>攻击者已内置中止逻辑</td></tr></tbody></table>
+<h3>7.2 对应防御优先级</h3>
+<table><thead><tr><th>优先级</th><th>措施</th><th>依据</th></tr></thead><tbody><tr><td>★★★★★</td><td><strong>及时更新 iOS</strong></td><td>所有案例都利用<strong>已知版本漏洞</strong></td></tr><tr><td>★★★★★</td><td><strong>启用 Lockdown Mode</strong>（高危）</td><td>Coruna/DarkSword 检测到主动中止</td></tr><tr><td>★★★★☆</td><td><strong>运行时行为检测</strong></td><td>无持久化时代，特征检测失效</td></tr><tr><td>★★★★☆</td><td><strong>网络 DGA 域名监控</strong></td><td>Coruna/DarkSword 外传依赖</td></tr><tr><td>★★★★☆</td><td><strong>限制 USB 配件 / 关闭辅助访问</strong></td><td>Triangulation 类物理投递</td></tr><tr><td>★★★☆☆</td><td><strong>iMessage/短信附件最小化</strong></td><td>FORCEDENTRY 类零点击</td></tr><tr><td>★★★☆☆</td><td><strong>备份加密与访问控制</strong></td><td>Keychain 滥用防线</td></tr><tr><td>★★☆☆☆</td><td><strong>资产清点与版本基线</strong></td><td>组织层面降低暴露</td></tr></tbody></table>
+<h3>7.3 检测信号库（案例驱动）</h3>
+<table><thead><tr><th>信号</th><th>关联案例</th><th>检测方法</th></tr></thead><tbody><tr><td>iMessage 收到畸形 PDF/图片后立即崩溃</td><td>FORCEDENTRY、Pegasus 2019</td><td>崩溃日志 + 附件哈希</td></tr><tr><td>Safari 加载特定站点后 WebContent 崩溃并重启</td><td>Pegasus 早期、Coruna</td><td>崩溃聚类 + URL 情报</td></tr><tr><td>WebGPU 调用异常（着色器编译/内存映射）</td><td>DarkSword</td><td>端点事件 + GPU 进程遥测</td></tr><tr><td>dyld 加载未签名 dylib</td><td>DarkSword (CVE-2026-20700)</td><td>内核审计</td></tr><tr><td>Keychain 大量项被读取</td><td>Triangulation、Pegasus</td><td>Keychain 访问日志</td></tr><tr><td>设备重启后仍出现异常进程</td><td>Triangulation（硬件持久化）</td><td>启动链完整性校验</td></tr><tr><td>DGA 风格域名请求</td><td>Coruna、DarkSword</td><td>DNS 流量 ML 分析</td></tr><tr><td>短暂驻留型异常 HTTPS 上传</td><td>DarkSword</td><td>流量基线异常</td></tr></tbody></table>
+<hr>
+<h2>8. 案例反映的行业演进</h2>
+<h3>8.1 攻击能力的&quot;民主化&quot;</h3>
+<pre><code>2010 早期    极少数国家级实验室
+    │
+2015–2019    商业供应商垄断（NSO / Hacking Team / Gamma）
+    │
+2020–2023    多供应商竞争（Intellexa 联盟 / Paragon / Cytotech）
+    │
+2024–2026    供应链扩散：泄露工具进入犯罪集团
+    │
+2026+ 展望   AI 加持下的低成本定制，攻击能力持续下沉</code></pre>
+<h3>8.2 反取证能力的演进</h3>
+<pre><code>2016 特征文件         易被检测
+2019 内核 hook         难被文件特征检测
+2021 加密 C2 + DGA    网络层难检测
+2023 硬件持久化         重启无法清除
+2026 无持久化 + 痕迹清除   传统取证失效
+2027+ LLM 定制载荷         每目标唯一，特征库失效</code></pre>
+<h3>8.3 防御方的对应演进</h3>
+<pre><code>2016 IOC 黑名单        早期够用
+2019 EDR 移动端         引入行为检测
+2021 BlastDoor 沙箱      iOS 15 系统层重构
+2022 Lockdown Mode     系统级攻击面收缩
+2024 MDM+运行时 AI 检测   组织级协同
+2026+ 硬件信任根 + 全链监控  未来方向</code></pre>
+<hr>
+<h2>9. 结论</h2>
+<p>著名 iOS 漏洞案例集合揭示了移动安全的<strong>三大铁律</strong>：</p>
+<ol><li><strong>没有不可击穿的层</strong>——每一层（WebKit/沙箱/PAC/内核/签名/硬件）都有被绕过或击穿的记录</li><li><strong>攻击链是&quot;最薄弱环节&quot;拼接的结果</strong>——单点防御再强也需与整链协同</li><li><strong>防御演进永远滞后攻击创新约 12–24 个月</strong>——补丁竞速与工具扩散使&quot;及时更新&quot;永远是最高优先级</li></ol>
+<p><strong>核心建议</strong>：</p>
+<ul><li><strong>个人</strong>：升级 + Lockdown Mode（如高风险）+ 谨慎点击未知链接</li><li><strong>组织</strong>：MDM + 运行时检测 + DGA 网络监控 + 资产可视化 + 版本基线</li><li><strong>行业</strong>：推动供应链透明化、漏洞披露规范、商业监控工具问责</li><li><strong>研究</strong>：关注无持久化模式检测、硬件级攻击面、LLM 定制载荷识别</li></ul>
+<p>本仓库的其他文章（Coruna / DarkSword / GHOSTBLADE / 三角行动 / WebKit / PAC / 沙箱 / 内核 / 无文件 / 载荷 / 硬件 / 数据类别 / 采集能力 等）为本文档提供了各案例与各子系统的<strong>深度技术细节</strong>，本案例合集负责<strong>跨案横向对照</strong>与<strong>规律提炼</strong>，两者互为补充。</p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://citizenlab.ca/tag/pegasus-project/" rel="nofollow noopener" target="_blank">Citizen Lab — Pegasus Project</a></li><li><a href="https://citizenlab.ca/2021/11/the-curious-case-of-the-cryptic-forcedentry/" rel="nofollow noopener" target="_blank">Citizen Lab — FORCEDENTRY</a></li><li><a href="https://googleprojectzero.blogspot.com/" rel="nofollow noopener" target="_blank">Google Project Zero — Pegasus</a></li><li><a href="https://securelist.com/operation-triangulation/" rel="nofollow noopener" target="_blank">Kaspersky — Operation Triangulation</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit" rel="nofollow noopener" target="_blank">Google Cloud TI — Coruna</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">Google Cloud TI — DarkSword</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2022/07/global-spyware-scandal/" rel="nofollow noopener" target="_blank">Amnesty International — Predator Scandal</a></li><li><a href="https://www.404media.co/" rel="nofollow noopener" target="_blank">404 Media — Paragon</a></li><li><a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li><li><a href="https://attack.mitre.org/matrices/enterprise/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK — Mobile Matrix</a></li><li><a href="https://en.wikipedia.org/wiki/Coruna_(exploit_kit" rel="nofollow noopener" target="_blank">Coruna (exploit kit) — Wikipedia</a>)</li><li><a href="https://www.loogle.org/" rel="nofollow noopener" target="_blank">LookingGlass — XAgent</a></li><li><a href="https://checkra.in/" rel="nofollow noopener" target="_blank">checkm8 / checkra1n project</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a23.html">← 第 23 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a25.html">第 25 篇 →</a></nav></article>
+</main></body></html>

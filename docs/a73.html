@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>代码签名、库验证与 dyld 加载链：iOS 应用完整性的边界在哪里失效 | iOS 安全研究文章库</title>
+<meta name="description" content="签名校验链与判定者、五种完整性失效形态、宿主借用审计三步法、签名有效≠未被注入的取证表述纪律">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a73.html">
+<meta property="og:title" content="代码签名、库验证与 dyld 加载链：iOS 应用完整性的边界在哪里失效">
+<meta property="og:description" content="签名校验链与判定者、五种完整性失效形态、宿主借用审计三步法、签名有效≠未被注入的取证表述纪律">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a73.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 73 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>代码签名、库验证与 dyld 加载链：iOS 应用完整性的边界在哪里失效</h1>
+<blockquote><p>编制日期：2026-10-24 数据来源：Apple Platform Security 与代码签名文档、Apple 开源 dyld/security 组件、Google Project Zero 关于签名与库验证的公开研究、Citizen Lab 关于商业间谍软件注入手法的披露、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>iOS 上&quot;只能运行经过签名的代码&quot;通常被当作一条绝对事实，但它在防御分析里的正确表述是：<strong>任意未经 Apple 认可的字节不能成为可执行页，但已签名的代码可以被合法地组合、替换参数、注入与劫持</strong>。攻击工程里大量&quot;看起来违反直觉&quot;的动作，其实都发生在这一句话留下的缝隙里。</p>
+<p>四条结论：</p>
+<ol><li>签名不是&quot;一次校验&quot;，而是<strong>一条链</strong>：CDHash/TeamID → 描述文件与 entitlements → AMFI 授权 → 内核页级校验（cs_validate）→ 库验证（library validation）→ dyld 闭包与共享缓存。链上每一环的判定条件不同，<strong>&quot;签名有效&quot;与&quot;行为受限&quot;是两件事</strong>。</li><li>真实入侵里最常见的滥用不是&quot;绕过签名&quot;，而是<strong>借用合法签名的宿主</strong>：注入到一个已签名、已授权、已联网的进程，让它替攻击者执行采集与外发。这与 #66 的&quot;路径 B（劫持已授权宿主）&quot;是同一次攻击的两个视角。</li><li>共享缓存与 dyld 闭包把&quot;加载&quot;变成了高度受控的操作，因此历史上应用完整性缺陷集中在<strong>特殊豁免</strong>：允许动态加载的场景（扩展、WebView/JS 引擎、脚本与配置驱动的组件、企业托管组件）以及内核校验的<strong>旁路条件</strong>。</li><li>对防御方，签名层提供的最大价值不是阻止入侵，而是<strong>约束入侵者必须借用已有能力</strong>——这个约束是可审计的：被注入的进程会表现出&quot;能力使用与用户意图不一致&quot;（时间线矛盾，#65/#66/#71 的通用模板）。</li></ol>
+<hr>
+<h2>2. 校验链与判定者</h2>
+<pre><code>构建期
+  开发者签名（CDHash + TeamID）+ 描述文件（entitlements）
+        │
+安装/启动期
+  AMFI：这个进程可以带哪些 entitlement？是否需要 kill？
+        │
+执行期（每一次）
+  内核：页缺失时校验该页哈希是否属于该签名（cs_validate）
+        │
+加载期
+  library validation：允许加载的库是否属于同一 TeamID/经豁免？
+        │
+  dyld 闭包 + 共享缓存（系统库固定；App 私有 framework）
+        │
+运行期
+  JIT/可写可执行页：需要显式 entitlement（与 #44 的 JIT 风险同源）</code></pre>
+<table><thead><tr><th>环节</th><th>判定问题</th><th>攻击者最优解</th><th>需要的能力等级</th></tr></thead><tbody><tr><td>签名有效性</td><td>这页字节属于这个可执行文件吗</td><td><strong>不伪造签名</strong>，而是让已签名进程去执行攻击者数据</td><td>代码执行原语</td></tr><tr><td>entitlement</td><td>该进程被允许做什么</td><td>选择 entitlement 多的宿主（系统服务、扩展宿主）</td><td>提权或注入</td></tr><tr><td>AMFI</td><td>是否放行特殊加载</td><td>走被豁免的加载路径</td><td>中—高</td></tr><tr><td>库验证</td><td>能不能加载外来库</td><td>同 TeamID 的合法库、或存在豁免标志</td><td>中</td></tr><tr><td>dyld 闭包</td><td>依赖关系能否满足</td><td>借用系统已有组件（不引入新文件）</td><td>低—中</td></tr><tr><td>JIT/W^X</td><td>能否拥有可写可执行内存</td><td>借用有 JIT 权限的进程（渲染/JS 引擎）</td><td>高</td></tr></tbody></table>
+<p><strong>核心判断</strong>：这一整条链的设计目标是&quot;没有 Apple 认可就得不到可执行内存&quot;，而不是&quot;没有 Apple 认可就得不到任意行为&quot;。因此攻击工程在签名层的问题被转化为一个<strong>组合问题</strong>：用哪些已签名的合法组件，把攻击者控制的数据变成行为。这解释了为什么 Coruna/DarkSword 类链条在提权成功后并不植入新二进制，而是采用<strong>借用 + 配置驱动</strong>的形态（与 #45 的文件less 驻留一致）。</p>
+<hr>
+<h2>3. 应用完整性失效的四种形态</h2>
+<table><thead><tr><th>形态</th><th>机理</th><th>攻击成本</th><th>工件特征</th><th>现实使用度</th></tr></thead><tbody><tr><td><strong>I1 进程注入借用宿主</strong></td><td>在已签名已授权进程内执行攻击者逻辑</td><td>需要写入原语 + 绕过库验证</td><td>宿主进程出现与其职责不符的行为（外发、传感器访问）</td><td><strong>高</strong>（商业间谍软件公开分析主线）</td></tr><tr><td><strong>I2 动态库/插件加载滥用</strong></td><td>利用豁免或同 TeamID 组件加载非预期代码</td><td>中</td><td>加载路径异常、组件出现在容器内</td><td>中</td></tr><tr><td><strong>I3 配置/数据驱动的合法执行</strong></td><td>不改代码，改配置、描述文件或托管载荷</td><td>低（多为合法通道，见 #67）</td><td>安装数据库/描述文件变化</td><td>中—高</td></tr><tr><td><strong>I4 JIT/W^X 借权</strong></td><td>在有可执行内存权限的进程内构造代码</td><td>高（需要该权限）</td><td>渲染进程异常、崩溃形态</td><td>中（与 #44 重合）</td></tr><tr><td><strong>I5 签名验证旁路缺陷</strong></td><td>校验实现本身的缺陷</td><td>极高</td><td>与具体缺陷绑定，难通用</td><td>低但影响大</td></tr></tbody></table>
+<p><strong>防御优先级</strong>：I3 是唯一&quot;完全合法且无技术缺陷&quot;的形态，因此它靠流程防御（#67）；I1/I2/I4 靠架构与最小授权（收紧豁免、缩小 entitlement 面、把解析放进隔离域 #52）；I5 靠补丁与内存安全语言迁移（#61、#64）。</p>
+<hr>
+<h2>4. 借用宿主的审计方法</h2>
+<p>对防御方来说，最可操作的检查是&quot;宿主能力清单&quot;：</p>
+<pre><code>Step 1  枚举：哪些已签名进程同时具备以下三项？
+        (a) 处理外部不可信输入（网络、附件、下载内容）
+        (b) 拥有敏感能力（传感器、文件、网络、钥匙串访问）
+        (c) 存在动态加载或脚本驱动路径
+Step 2  排序：a×b×c 三项皆成立的宿主即高价值注入目标
+Step 3  核对 entitlement 实际值（而非文档值），以设备生效版本为准
+Step 4  与 #68 的 IPC 可达清单交叉：注入后能否进一步穿越沙箱
+Step 5  输出可 diff 的基线，随 iOS 版本回归（#61）</code></pre>
+<table><thead><tr><th>宿主类型（示例分类，非具体清单）</th><th>(a) 外部输入</th><th>(b) 敏感能力</th><th>(c) 动态路径</th><th>综合</th></tr></thead><tbody><tr><td>网页/消息渲染类进程</td><td>高</td><td>中</td><td>高（JS/JIT）</td><td><strong>最高</strong>（#44、#71 同点）</td></tr><tr><td>媒体解析类守护进程</td><td>高</td><td>中—高</td><td>中</td><td>高（#44）</td></tr><tr><td>通知服务扩展宿主</td><td>高</td><td>中</td><td>中</td><td>高（#65）</td></tr><tr><td>安装/配置类服务</td><td>中</td><td>高</td><td>中</td><td>高（#67）</td></tr><tr><td>普通用户 App</td><td>中</td><td>低（受 TCC 约束）</td><td>低</td><td>低（#66）</td></tr></tbody></table>
+<p>这张表的真正用途是<strong>把&quot;补丁优先级&quot;从 CVE 顺序改为架构顺序</strong>：同一 CVSS 分下，处理不可信输入且能力多的宿主进程里的缺陷更值得优先修（与 #63 的狩猎优先级、#61 的补丁工程呼应）。</p>
+<hr>
+<h2>5. 完整性破坏的取证信号</h2>
+<table><thead><tr><th>信号</th><th>含义</th><th>局限</th><th>对应取证动作</th></tr></thead><tbody><tr><td>合法进程出现异常外发目标</td><td>I1 注入后的借用</td><td>若走合规通道（#69）则不可区分</td><td>出口指标比对（#47）</td></tr><tr><td>进程存活期与用户动作矛盾</td><td>无前台却有采集</td><td>需系统日志联合</td><td>时间线矛盾模板（#65/#66/#71）</td></tr><tr><td>容器内出现非预期组件文件</td><td>I2</td><td>成熟载荷不落盘（#45）</td><td>备份提取 + 哈希保全（#62）</td></tr><tr><td>描述文件/托管组件变化</td><td>I3</td><td>可能是 IT 正常操作</td><td>清单归属核对（#67）</td></tr><tr><td>代码签名相关拒绝日志（AMFI kill）</td><td>攻击探测/失败尝试</td><td>覆盖面有限</td><td>诊断日志聚合（#63 HUNT-04）</td></tr><tr><td>崩溃在渲染/解析进程聚类</td><td>I4/I5</td><td>载荷可规避崩溃</td><td>群体基线（#70 第 6 节）</td></tr></tbody></table>
+<p><strong>表述纪律</strong>：签名校验通过<strong>不能</strong>用于&quot;该进程未被注入&quot;的论证——注入使用已签名宿主的权限，不改变签名状态。因此在报告中&quot;所有可执行文件签名校验有效&quot;只能表述为&quot;未发现第三方落盘载荷&quot;，不能表述为&quot;未发现入侵&quot;（与 #62 一致）。</p>
+<hr>
+<h2>6. 加固清单</h2>
+<table><thead><tr><th>层</th><th>动作</th><th>覆盖</th><th>备注</th></tr></thead><tbody><tr><td>系统</td><td>及时更新，优先修渲染/解析/IPC 缺陷</td><td>I1/I2/I4/I5</td><td>按第 4 节的架构顺序排优先级（#61）</td></tr><tr><td>系统</td><td>锁定模式收紧动态路径与预览</td><td>I1/I2/I4</td><td>#34</td></tr><tr><td>组织</td><td>entitlement 与宿主能力纳入审计基线</td><td>全部</td><td>用生效值而非文档值</td></tr><tr><td>组织</td><td>描述文件/托管组件白名单与归属核对</td><td>I3</td><td>#67</td></tr><tr><td>个人</td><td>撤销非必要授权，缩小宿主候选集</td><td>I1</td><td>#66</td></tr><tr><td>取证</td><td>保全进程行为证据后再处置设备</td><td>全部</td><td>顺序纪律见 #48、#62</td></tr><tr><td>架构</td><td>内存安全语言迁移与并行信任域</td><td>I5</td><td>长期，#64</td></tr></tbody></table>
+<hr>
+<h2>7. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>借用已授权宿主（本文是其在签名层的展开）</td><td>#66（权限模型与隐私指示器）</td></tr><tr><td>注入后的沙箱可达性</td><td>#52（沙箱/BlastDoor）、#68（IPC/XPC 审计）</td></tr><tr><td>渲染/JIT 与媒体解析</td><td>#44（渲染与图形攻击面）、#71（消息通路）</td></tr><tr><td>不落盘与配置驱动驻留</td><td>#45（内存驻留）、#54（模块化载荷）</td></tr><tr><td>合法通道形态 I3</td><td>#67（企业分发与 MDM 滥用）</td></tr><tr><td>提权后签名层失效的层级</td><td>#41（内核提权与 PAC）、#49（原语升阶梯）</td></tr><tr><td>补丁顺序与检测</td><td>#61（事件响应与补丁工程）、#63（狩猎手册）</td></tr><tr><td>证据表述</td><td>#62（取证证据链）、#70（工件目录）</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>代码签名是一条多环校验链，&quot;签名有效&quot;与&quot;行为受限&quot;是两个不同命题</td></tr><tr><td>2</td><td>攻击工程的实际重心不是伪造签名，而是组合已签名组件、让合法宿主执行攻击者控制的数据</td></tr><tr><td>3</td><td>失效形态集中在特殊豁免与借用：注入、动态加载、配置驱动、JIT 借权、校验实现缺陷</td></tr><tr><td>4</td><td>宿主审计（外部输入 × 敏感能力 × 动态路径）应成为补丁优先级排序的架构依据</td></tr><tr><td>5</td><td>签名校验通过不能证明未被注入；报告表述必须限于&quot;未发现落盘第三方载荷&quot;</td></tr><tr><td>6</td><td>注入的可行检测来自&quot;能力使用与用户意图不一致&quot;的时间线矛盾，而非完整性校验本身</td></tr><tr><td>7</td><td>长期收敛路径是缩小豁免面 + 内存安全迁移 + 并行信任域，而非在链上继续加校验点</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 的代码签名让 Coruna 与 DarkSword 这类攻击无法&quot;装一个自己的程序进来&quot;，从而把它们逼进了&quot;必须借用系统已有的合法程序&quot;这条成本更高、痕迹更多的路——防御方的正确策略不是反复确认签名有效，而是主动清点谁值得被借用（外部输入多、能力大、可动态加载的宿主），把补丁与隔离资源按这份清单而不是按漏洞分数排列。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Code Signing &amp; Runtime Validation</a></li><li><a href="https://opensource.apple.com/" rel="nofollow noopener" target="_blank">Apple Open Source — dyld / security 组件</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 代码签名与库验证研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 商业间谍软件注入手法披露</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a72.html">← 第 72 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a74.html">第 74 篇 →</a></nav></article>
+</main></body></html>

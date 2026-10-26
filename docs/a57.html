@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS WebKit JIT 硬化与 Coruna/DarkSword 利用对抗演进 | iOS 安全研究文章库</title>
+<meta name="description" content="JSC 四级管线与投机优化缺陷、Gigacage/指针膨胀/CoW 页保护、锁定模式禁用 JIT 的移除型防御">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a57.html">
+<meta property="og:title" content="iOS WebKit JIT 硬化与 Coruna/DarkSword 利用对抗演进">
+<meta property="og:description" content="JSC 四级管线与投机优化缺陷、Gigacage/指针膨胀/CoW 页保护、锁定模式禁用 JIT 的移除型防御">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a57.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 57 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS WebKit JIT 硬化与 Coruna/DarkSword 利用对抗演进</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：WebKit 项目文档、Google Project Zero、Apple 安全公告、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>JIT（即时编译）</strong> 是 WebKit 攻击面中最肥沃的一片土壤：为了性能，浏览器必须在运行时生成可执行代码，而这打破了&quot;数据不可执行&quot;这一最基本的内存安全假设。</p>
+<p>Coruna 与 DarkSword 的初始立足点都在 JSC（JavaScriptCore）的 JIT 编译器中：前者依赖<strong>类型混淆</strong>，后者依赖 <strong>DFG 层 GC 缺陷</strong>。理解 Apple 为封堵这类缺陷所做的<strong>JIT 硬化工程</strong>，是理解现代 iOS 攻击链成本结构的必要条件。</p>
+<p>本文梳理：</p>
+<ol><li>JSC 四级 JIT 管线为何天然产生可利用缺陷</li><li>Apple 的五类 JIT 硬化措施及其实际效果</li><li>Coruna / DarkSword 如何绕过硬化取得原语</li><li><strong>锁定模式禁用 JIT</strong> 为什么是迄今最有效的单点防御</li><li>防御者如何评估&quot;JIT 相关 CVE&quot;的真实风险等级</li></ol>
+<hr>
+<h2>2. JSC 的 JIT 管线与缺陷成因</h2>
+<h3>2.1 四级执行管线</h3>
+<pre><code>JavaScript 源码
+   ↓ 解析
+[1] LLInt（低级解释器）        ← 冷代码，逐条解释
+   ↓ 热点计数
+[2] Baseline JIT               ← 快速、简单的机器码
+   ↓ 更多执行
+[3] DFG JIT（DataFlowGraph）   ← 激进优化：内联、逃逸分析、类型推测
+   ↓ 最热路径
+[4] FTL / B3 JIT               ← 基于 LLVM 的进一步优化</code></pre>
+<p><strong>关键点</strong>：DFG 与 FTL 是<strong>投机优化（speculative optimization）</strong>——编译器假设某变量始终是某类型，生成针对该类型优化的机器码。一旦假设被打破，代码会读到错误类型的数据。</p>
+<h3>2.2 为什么 JIT 必然产生类型混淆</h3>
+<pre><code>DFG 假设: obj 是 Int32Array
+   ↓ 生成优化的加载指令（假设元素为 4 字节整数）
+运行时: obj 实际是 DoubleBlock（8 字节浮点）
+   ↓ 按错误布局解读内存
+读取到相邻字段的原始位模式 = 把数据当指针 / 把指针当数据
+   ↓
+addrof（读对象地址） / fakeObj（伪造对象）</code></pre>
+<p><strong>这是结构性问题，不是实现疏忽</strong>。只要 JIT 需要类型推测 + 投机执行，就必须依赖&quot;假设破坏时正确失效（OSR exit）&quot;的逻辑，而该逻辑本身极易出错。</p>
+<h3>2.3 JIT 提供的三类攻击增益</h3>
+<table><thead><tr><th>增益</th><th>说明</th></tr></thead><tbody><tr><td><strong>可执行内存</strong></td><td>JIT 页天然 <code>PROT_EXEC</code>，攻击者获得无需绕 NX 的执行位置</td></tr><tr><td><strong>强类型原语</strong></td><td>类型混淆直接给出 addrof/fakeObj，比栈溢出更强大</td></tr><tr><td><strong>可控内存布局</strong></td><td>JS 对象由攻击者用脚本大量创建，堆塑形门槛低</td></tr></tbody></table>
+<hr>
+<h2>3. Apple 的 JIT 硬化工程</h2>
+<h3>3.1 Gigacage（巨大笼）</h3>
+<table><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody><tr><td><strong>原理</strong></td><td>把所有 JS 堆对象放进一个巨大的预留虚拟地址区域（历史上 1TB 预留）</td></tr><tr><td><strong>效果</strong></td><td>JS 堆内指针可用<strong>窄偏移（32 位）</strong>表示而非完整 64 位指针</td></tr><tr><td><strong>攻击影响</strong></td><td>一个越界写只能落在 Gigacage 内，<strong>无法直接指向任意内存</strong></td></tr><tr><td><strong>局限</strong></td><td>若同时存在&quot;读 Gigacage 基址&quot;的泄露，绕过重新可行</td></tr></tbody></table>
+<h3>3.2 Pointer Bloating（指针膨胀）</h3>
+<table><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody><tr><td><strong>原理</strong></td><td>在 JS 对象内部把指针存储为&quot;索引 + 基数&quot;或带标记形式，而非裸地址</td></tr><tr><td><strong>效果</strong></td><td>弱化为&quot;相对读写&quot;，攻击者必须先获得绝对地址泄露</td></tr><tr><td><strong>攻击影响</strong></td><td>迫使链条增加一步（泄露基址），提高成本</td></tr></tbody></table>
+<h3>3.3 copy-on-write JIT 页保护</h3>
+<table><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody><tr><td><strong>原理</strong></td><td>JIT 生成的代码页写权限与执行权限分离；写完后设为只读可执行</td></tr><tr><td><strong>效果</strong></td><td>攻击者不能直接改写 JIT 机器码注入 shellcode</td></tr><tr><td><strong>攻击影响</strong></td><td>迫使使用 ROP/JOP 或寻找其他可写执行路径</td></tr></tbody></table>
+<h3>3.4 强化 OSR Exit 与调试检查</h3>
+<table><thead><tr><th>项目</th><th>说明</th></tr></thead><tbody><tr><td><strong>原理</strong></td><td>更严格校验类型假设破坏路径；加入断言与不变式检查</td></tr><tr><td><strong>效果</strong></td><td>部分类型混淆缺陷在触发时先崩溃而非静默错误解读</td></tr><tr><td><strong>副作用</strong></td><td>崩溃会生成 Crash Report——<strong>对防御者是证据，对攻击者是暴露风险</strong></td></tr></tbody></table>
+<h3>3.5 移除/限制高危 Web API</h3>
+<table><thead><tr><th>措施</th><th>效果</th></tr></thead><tbody><tr><td>收紧 <code>WebAssembly</code> 可写代码</td><td>减少另一条 JIT 执行路径</td></tr><tr><td>强化 <code>ArrayBuffer</code>/<code>TypedArray</code> 边界检查</td><td>削弱越界读写</td></tr><tr><td>减少跨进程 IPC 参数信任</td><td>削弱链内跳转</td></tr></tbody></table>
+<hr>
+<h2>4. Coruna 与 DarkSword 如何绕过硬化</h2>
+<h3>4.1 共同的必要步骤：泄露基址</h3>
+<p>两类硬化都把问题转化为&quot;<strong>你必须先知道基址</strong>&quot;。因此链条第一步都变成<strong>信息泄露</strong>（详见本仓库 #51）：</p>
+<pre><code>类型混淆 / GC 缺陷
+   ↓ 获得相对读写
+扫描相邻内存找系统库/引擎指针
+   ↓ 计算 Gigacage 基址 / dyld shared cache slide
+把相对读写升级为绝对读写
+   ↓
+后续逃逸</code></pre>
+<h3>4.2 Coruna 的做法</h3>
+<table><thead><tr><th>特征</th><th>说明</th></tr></thead><tbody><tr><td>多链分版本适配</td><td>老版本（iOS 13–14）硬化弱，链更直接；新版本需组合多个 CVE</td></tr><tr><td>用 CVE 数量换硬化绕过</td><td>23 个 CVE 中相当比例是&quot;泄露类&quot;，专为基础原语服务</td></tr><tr><td>复用稳定组件</td><td>一旦在某版本取得可用的泄露 + 写组合，长期复用</td></tr></tbody></table>
+<h3>4.3 DarkSword 的做法</h3>
+<table><thead><tr><th>特征</th><th>说明</th></tr></thead><tbody><tr><td>选择 DFG GC 缺陷</td><td>GC 的 free/move 时序错乱产生的悬垂引用，比纯类型检查错误更难在硬化中根除</td></tr><tr><td>利用<strong>已释放块的可控复用</strong></td><td>攻击者可精确决定&quot;释放后被什么对象填充&quot;，直接控制读到什么</td></tr><tr><td>不依赖改写 JIT 码</td><td>走 ROP/JOP + 合法签名指针，规避 CoW 页保护</td></tr></tbody></table>
+<p><strong>关键洞察</strong>：硬化没有消灭 JSC 漏洞，只是<strong>改变了漏洞的形态</strong>——从&quot;直接任意写&quot;变为&quot;必须先泄露、再相对写、再升级绝对写&quot;。<strong>链条变长了，成本变高了，但并未失效。</strong></p>
+<hr>
+<h2>5. 锁定模式：从根上移除攻击面</h2>
+<h3>5.1 为什么&quot;禁用 JIT&quot;是最强单点防御</h3>
+<table><thead><tr><th>逻辑</th><th>说明</th></tr></thead><tbody><tr><td>无 JIT → 无 DFG/FTL 投机优化</td><td>类型推测错误这一整类缺陷<strong>不可能存在</strong></td></tr><tr><td>无 JIT → 无可执行内存页生成</td><td>攻击者失去现成的执行位置</td></tr><tr><td>无 JIT → 硬化不再是&quot;加密钥&quot;而是&quot;拆门&quot;</td><td>不是提高成本，而是消除成本</td></tr></tbody></table>
+<pre><code>禁用 JIT 后：
+  需要新的原生代码执行漏洞（非 JIT 类）
+    → 面收窄到解析器（ImageIO/CoreText/媒体）
+    → 而这些面同时受 BlastDoor / 附件限制约束
+    → 攻击链可行性断崖式下降</code></pre>
+<h3>5.2 实际效果佐证</h3>
+<ul><li>已公开的多条高级链在<strong>环境探测阶段检测到锁定模式即主动中止</strong>（避免在无收益场景消耗并暴露零日）</li><li>Apple 明确指出多数高级威胁针对极少数人，并建议其开启</li></ul>
+<h3>5.3 代价</h3>
+<table><thead><tr><th>代价</th><th>说明</th></tr></thead><tbody><tr><td>Web App 性能显著下降</td><td>复杂 JS 应用变慢</td></tr><tr><td>部分 Web 功能不可用</td><td>WASM、部分游戏/协作工具</td></tr><tr><td>WebGPU/WebGL 禁用</td><td>3D/地图/部分可视化功能失效</td></tr><tr><td>消息附件限制</td><td>图片/链接预览功能减弱</td></tr></tbody></table>
+<blockquote><p><strong>这是典型的&quot;以功能换攻击面&quot;</strong>——对绝大多数用户代价不可接受，对 T0 人群则极其划算。</p></blockquote>
+<hr>
+<h2>6. 其他降低 JIT 暴露的手段</h2>
+<table><thead><tr><th>手段</th><th>效果</th><th>可行性</th></tr></thead><tbody><tr><td><strong>完全禁用 JavaScript</strong></td><td>彻底消除 JSC 攻击面</td><td>高（Safari 设置，但很多网站不可用）</td></tr><tr><td><strong>改用非 WebKit 内核浏览器</strong></td><td>⚠️ <strong>iOS 上无效</strong>——所有 iOS 浏览器都用 WebKit</td><td>❌</td></tr><tr><td><strong>不访问不明站点</strong></td><td>减少触发机会</td><td>中（水坑正是针对&quot;你会访问的正规站点&quot;）</td></tr><tr><td><strong>及时升级</strong></td><td>修补已知 JIT 缺陷</td><td><strong>高（性价比第一）</strong></td></tr><tr><td><strong>企业限制 WebKit 用途</strong></td><td>减少暴露场景</td><td>中</td></tr></tbody></table>
+<p><strong>重要纠正</strong>：在 iOS 上&quot;换浏览器&quot;不能规避 WebKit 漏洞——这是与桌面平台的关键差异。</p>
+<hr>
+<h2>7. 防御者实用指南</h2>
+<h3>7.1 如何评估 JIT 相关 CVE 的真实风险</h3>
+<table><thead><tr><th>CVE 描述特征</th><th>风险评级</th><th>理由</th></tr></thead><tbody><tr><td>&quot;Type confusion in JavaScriptCore&quot;</td><td><strong>极高</strong></td><td>直接给出攻击原语起点</td></tr><tr><td>&quot;Improper access control in JSC&quot;</td><td>高</td><td>常可用于绕过硬化</td></tr><tr><td>&quot;Out-of-bounds read/write in WebKit&quot;</td><td><strong>极高</strong></td><td>相对读写 → 绝对读写升级路径</td></tr><tr><td>&quot;Use-after-free in WebKit/WebGL&quot;</td><td>高</td><td>GC/生命周期缺陷，DarkSword 型起点</td></tr><tr><td>&quot;Processing maliciously crafted web content may lead to memory corruption&quot;</td><td><strong>极高</strong></td><td>Apple 的 RCE 标准措辞</td></tr><tr><td>仅性能类、无内存语义</td><td>低</td><td>不构成链条组件</td></tr></tbody></table>
+<h3>7.2 补丁优先级判断法</h3>
+<pre><code>1. 该 CVE 是否属于&quot;初始执行&quot;环节（JSC/解析器）？
+2. 该 CVE 是否属于&quot;泄露&quot;环节（信息泄露）？
+3. 该 CVE 是否与已公开在野利用链的组件重合？
+   → 三者任一为&quot;是&quot;，应列为最高优先级
+4. Apple 使用 &quot;actively exploited&quot; 措辞 → 立即部署</code></pre>
+<h3>7.3 关键统计认知</h3>
+<p>历史上被在野利用的 iOS 漏洞中，<strong>初始执行 + 信息泄露两类合计占比极高</strong>。这意味着：</p>
+<blockquote><p>组织的补丁优先级如果只看&quot;有没有 RCE&quot;，会系统性低估泄露类 CVE——而泄露缺失时链条同样无法成立（见 #51）。</p></blockquote>
+<hr>
+<h2>8. 演化预测</h2>
+<table><thead><tr><th>趋势</th><th>判断</th></tr></thead><tbody><tr><td>JIT 硬化继续但不会根除缺陷</td><td>✅ 投机优化的本质决定缺陷持续产生</td></tr><tr><td>攻击向非 JIT 解析器迁移</td><td>✅ CoreText/ImageIO/媒体/字体（但受 BlastDoor 压制）</td></tr><tr><td><strong>WebAssembly 成为新的 JIT 类面</strong></td><td>⚠️ 值得高度关注——同样有编译期投机优化</td></tr><tr><td>逃逸面权重上升（GPU/驱动）</td><td>✅ 已在 DarkSword 中显现</td></tr><tr><td>锁定模式成为高危人群标准配置</td><td>✅ 唯一能移除该面的手段</td></tr></tbody></table>
+<p><strong>最值得关注的新面</strong>：WebAssembly 的运行时编译与 AOT 机制在语义上与 JSC JIT 同构，同样依赖边界检查与类型正确性。历史上每次新执行模型引入都会带来一段高缺陷密度期——这符合本系列反复出现的规律：<strong>攻击者总在选择&quot;功能必需 + 实现新 + 审计少&quot;的组件</strong>（见 #52）。</p>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>JIT 的性能收益与内存安全假设天然冲突，投机优化必然持续产生类型混淆类缺陷</td></tr><tr><td><strong>2</strong></td><td>Apple 的硬化（Gigacage、指针膨胀、CoW 页保护）没有消除漏洞，而是<strong>把&quot;直接任意写&quot;变成&quot;需先泄露的多步链条&quot;</strong></td></tr><tr><td><strong>3</strong></td><td>Coruna 用 CVE 数量堆过硬化，DarkSword 用 GC 时序缺陷绕开硬化检查——两者都是对硬化成本的工程响应</td></tr><tr><td><strong>4</strong></td><td><strong>禁用 JIT 是全链条中唯一的&quot;移除型&quot;防御</strong>，效果远超任何检测与控制措施</td></tr><tr><td><strong>5</strong></td><td>iOS 上换浏览器无效（共享 WebKit），这一常见误解会误导防御投资决策</td></tr><tr><td><strong>6</strong></td><td>WebAssembly 是下一个符合&quot;新实现 + 审计不足&quot;判据的执行面，应提前纳入风险评估</td></tr><tr><td><strong>7</strong></td><td>泄露类 CVE 应与 RCE 类同等优先修补——缺任一环链条不成立，但补齐一环远比补齐全部容易</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>JIT 硬化把 iOS 攻击链从&quot;两三个漏洞&quot;推到&quot;六七个漏洞&quot;，这就是防御的价值——<strong>不是阻止攻击，而是让攻击贵到值得怀疑</strong>。 而锁定模式更进一步：它直接取消了这个市场。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>WebKit Project: <a href="https://webkit.org/security-faq/" rel="nofollow noopener" target="_blank">JIT / DFG / FTL &amp; Security Hardening</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/" rel="nofollow noopener" target="_blank">Gigacage / Pointer Bloating 相关分析</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna JSC 漏洞与 CVE 覆盖</a></li><li>Apple: <a href="https://support.apple.com/en-us/105098" rel="nofollow noopener" target="_blank">About Lockdown Mode</a></li><li>Apple Security Updates: <a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li><li>8ksec: <a href="https://blog.8ksec.com/" rel="nofollow noopener" target="_blank">JavaScriptCore Exploitation Series</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a56.html">← 第 56 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a58.html">第 58 篇 →</a></nav></article>
+</main></body></html>

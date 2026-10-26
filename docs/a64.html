@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 安全启动链与固件完整性：间谍软件的能力上限在哪里 | iOS 安全研究文章库</title>
+<meta name="description" content="七层信任链与并行信任域、内核镜像安全强度变体、为何商业套件不打启动链、重启重置效力、机型代际与排除性取证用途">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a64.html">
+<meta property="og:title" content="iOS 安全启动链与固件完整性：间谍软件的能力上限在哪里">
+<meta property="og:description" content="七层信任链与并行信任域、内核镜像安全强度变体、为何商业套件不打启动链、重启重置效力、机型代际与排除性取证用途">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a64.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 64 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 安全启动链与固件完整性：间谍软件的能力上限在哪里</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Apple Platform Security 文档、WWDC 内核镜像与系统完整性议题、Google Project Zero、checkm8 公开研究、Citizen Lab 与 Lookout 案例披露、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>前面各篇（#39、#43、#58）讨论的是攻击者<strong>在系统内</strong>怎么走；本文讨论一个更根本的问题：<strong>哪些能力是 iOS 架构层面就不给他的</strong>。</p>
+<p>安全启动链是所有&quot;运行时防护&quot;的信任地基。它的意义不在于&quot;能不能被攻破&quot;，而在于<strong>攻破它的成本与回报结构，决定了商业间谍软件的形态</strong>：</p>
+<table><thead><tr><th>观察</th><th>解释</th></tr></thead><tbody><tr><td>Coruna 与 DarkSword 都<strong>不触及</strong>启动链</td><td>启动层利用成本极高、复用性差、无法采购成规模</td></tr><tr><td>两套体系都接受&quot;重启即失效&quot;（#45）</td><td>因为跨重启的驻留必须进入启动/固件层，代价不划算</td></tr><tr><td>0-click 若要解锁前触发，必须下沉到基带（#60）</td><td>应用侧链无法绕过首次解锁的数据保护（#53）</td></tr><tr><td>越狱生态长期存在而间谍软件极少用同类技术</td><td>目标函数不同：越狱求&quot;永久可改&quot;，间谍软件求&quot;最小暴露&quot;</td></tr></tbody></table>
+<p>三条防御结论先给出：</p>
+<ol><li><strong>启动链被攻破在真实商业间谍案件中是小概率事件</strong>，把防御预算按&quot;固件级入侵&quot;来配置是资源错配。</li><li>但一旦对手需要<strong>跨重启驻留</strong>或<strong>解锁前访问</strong>，启动/固件层就成为唯一路径——这两项需求就是识别&quot;新一代能力&quot;的早期信号。</li><li>启动链的完整性在取证中是<strong>最强的排除性证据之一</strong>：如果度量与镜像变体正常，就可以有把握地把&quot;持久化型入侵&quot;这一类假设降权（配合 #62 的表述纪律）。</li></ol>
+<hr>
+<h2>2. 启动链分层与信任传递</h2>
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│ ① Secure Boot ROM（出厂固化，不可软件更新）                   │  根信任
+│    验证下一阶段签名；与设备唯一密钥绑定个性化                  │
+├──────────────────────────────────────────────────────────────┤
+│ ② 引导加载器（LLB / iBoot）                                   │  固件级，随系统更新
+│    继续验证链，决定可加载的内核镜像变体                        │
+├──────────────────────────────────────────────────────────────┤
+│ ③ 内核缓存 / 内核镜像（KernelCache → KernelCollection/IM4P）  │  签名 + 变体选择
+│    携带完整性与安全策略度量；与 SEP 协同建立运行时约束         │
+├──────────────────────────────────────────────────────────────┤
+│ ④ 系统卷与只读信任（签名系统卷、数据卷保护类）                │  运行时完整性
+├──────────────────────────────────────────────────────────────┤
+│ ⑤ 安全协处理器（SEP）：密钥、生物特征、数据保护根             │  独立信任域
+├──────────────────────────────────────────────────────────────┤
+│ ⑥ 运行时执行控制：PAC / KTRR / PPL → SPTM(EL2) / TXM          │  由内核引导时建立
+├──────────────────────────────────────────────────────────────┤
+│ ⑦ 用户态与沙箱：AMFI、Seatbelt、BlastDoor（#52）              │
+└──────────────────────────────────────────────────────────────┘
+      （基带处理器：独立固件、独立更新通道，与主 CPU 分属不同信任域）</code></pre>
+<p><strong>要点：这不是&quot;一条锁链&quot;，而是&quot;多条链 + 多个独立信任域&quot;</strong>。基带与 SEP 各自有固件与更新机制，与主启动链并行而非串联——这正是 #60 里&quot;基带类 0-click 可以解锁前触发&quot;的架构原因：它绕开了主链，也绕开了主链上的所有运行时缓解。</p>
+<hr>
+<h2>3. 完整性机制到底防住了哪三件事</h2>
+<table><thead><tr><th>目标攻击动作</th><th>对应机制</th><th>实际强度</th><th>备注</th></tr></thead><tbody><tr><td>加载未签名/被改动的内核或引导组件</td><td>逐级签名验证 + 设备个性化绑定</td><td>很强</td><td>单点缺陷即全盘失守，因此攻击价值极高</td></tr><tr><td><strong>回滚到旧版本</strong>（利用已知已修漏洞）</td><td>版本单调递增（nonce/personalization ticket）</td><td>很强</td><td>越狱界历史上的&quot;nonce 陷阱&quot;类技术是为绕这一机制而生</td></tr><tr><td>运行时改写只读代码/页表</td><td>KTRR/PPL → SPTM/TXM（#27、#41、#67）</td><td>代际相关</td><td>老机型无 SPTM 覆盖，防线本质不同</td></tr><tr><td>篡改 SEP 持有的密钥逻辑</td><td>SEP 独立固件 + 安全存储</td><td>很强</td><td>未见公开的大规模在野利用</td></tr><tr><td>破坏启动阶段的度量/策略选择</td><td>引导阶段的策略决策</td><td><strong>中</strong>（配置面）</td><td>见第 4 节&quot;变体选择&quot;，这是最现实的攻击面</td></tr></tbody></table>
+<p><strong>第四行是防御者最容易误解的地方</strong>：签名链本身在公开记录里几乎没被真实攻破过，被反复攻击的其实是<strong>链末端交出去的运行时配置有多宽松</strong>——即&quot;合法签名镜像之下，允许加载什么、以什么策略启动&quot;。这也是为什么 Apple 近年把力气花在&quot;同一系统提供不同强度的启动配置&quot;上。</p>
+<hr>
+<h2>4. 内核镜像变体与安全强度等级：被低估的防御面</h2>
+<p>从公开的 WWDC 材料可知，现代 iOS 的内核镜像不再是&quot;一个签名文件&quot;，而是<strong>一组按安全强度分级、分别签名的变体</strong>（业界常以内核镜像 4 与其中的安全强度等级代称），启动时按当前设备的策略选择其一加载。</p>
+<p>这带来的防御含义比签名链本身更实际：</p>
+<table><thead><tr><th>含义</th><th>说明</th></tr></thead><tbody><tr><td><strong>攻击面可以按启动配置分级</strong></td><td>高安全等级变体可以拒绝或缩减某些驱动/子系统加载</td></tr><tr><td><strong>锁定模式在这里生效</strong>（#13、#34）</td><td>选择更严格变体 → 部分内核侧攻击面（含驱动与调试通道）直接不可用</td></tr><tr><td><strong>企业/MDM 可验证生效状态</strong></td><td>启动配置反映在设备上报信息里，可作合规检查（#63 的数据源）</td></tr><tr><td><strong>取证可用它做排除性证明</strong></td><td>若度量与变体正常，可显著降低&quot;内核级持久化&quot;假设的权重（#62）</td></tr></tbody></table>
+<p>对攻击者一侧：这形成一种新的<strong>&quot;降级需求&quot;</strong>——不是降级固件版本（受回滚保护），而是<strong>诱使设备以较低安全等级的变体启动</strong>。这解释了为什么高价值目标的锁定模式开关状态对攻击方如此重要（#50 的画像维度里就包含它）。</p>
+<blockquote><p>表述纪律：本文对该机制只描述架构含义，不涉及具体绕过方法。已公开的技术细节请参考 Apple 官方文档与 WWDC 议题。</p></blockquote>
+<hr>
+<h2>5. 为什么商业间谍软件不打启动链</h2>
+<p>成本—收益的四项判断，每一项都指向&quot;不值得&quot;：</p>
+<table><thead><tr><th>维度</th><th>启动/固件层</th><th>应用层链（WebKit/JSC，#39、#43）</th></tr></thead><tbody><tr><td>目标代码可见性</td><td>Boot ROM 不公开、无源码</td><td>WebKit 完全开源，可持续审计找缺陷</td></tr><tr><td>调试环境</td><td>需要特殊硬件与受限工具链</td><td>普通开发环境即可迭代</td></tr><tr><td>单条能力价格</td><td>极高（且供应方极少）</td><td>中高，市场可采购（#65）</td></tr><tr><td>复用与规模</td><td>与机型/固件版本强绑定，换代即失效</td><td>跨机型、跨版本可适配</td></tr><tr><td>暴露风险</td><td>一旦触发即影响整机，容易大规模暴露</td><td>可精准投放、可控失败</td></tr><tr><td>需求匹配</td><td>间谍软件多数不需要跨重启</td><td>一次会话内即可完成采集（#42）</td></tr></tbody></table>
+<p><strong>关键洞察：不是不能，而是不需要。</strong>商业间谍软件的产品需求是&quot;这段时间持续观测这个目标&quot;，而不是&quot;永久改造这台设备&quot;。前者用内存驻留 + 频繁重投即可满足（#45、#60 的重启成本分析），后者才是越狱/持久控制类产品的需求。</p>
+<p>这条判断可以直接转化为<strong>预警信号</strong>：</p>
+<pre><code>若在一次事件里观察到以下任一项，立即提升能力等级评估：
+  ① 入侵后重启仍存活（且非落地驻留可解释）
+  ② 设备锁屏/从未解锁状态下即被入侵（L3，见 #60）
+  ③ 固件版本被降级或安全启动配置被改动（#63 的 MDM 记录可查）
+  ④ 同一批目标设备的机型/固件高度同质 → 攻击者在等待硬件批次窗口</code></pre>
+<hr>
+<h2>6. 独立信任域：基带、SEP 与&quot;跨域&quot;问题</h2>
+<table><thead><tr><th>域</th><th>更新通道</th><th>与主链关系</th><th>0-click 意义</th></tr></thead><tbody><tr><td>应用处理器（AP）</td><td>iOS 整包</td><td>主启动链</td><td>需要解锁窗口才能读多数数据（#53）</td></tr><tr><td>基带处理器</td><td>独立固件更新</td><td>并行、跨核边界</td><td>可解锁前触发；攻击后可再寻求 AP 侧链</td></tr><tr><td>SEP</td><td>独立安全固件</td><td>持密钥与数据保护根</td><td>直接目标价值极高，公开在野利用极少</td></tr><tr><td>安全隔区/协处理器类扩展能力</td><td>随系统</td><td>受主链策略约束</td><td>长期看是新的隔离与攻击面并存区（#67）</td></tr></tbody></table>
+<p><strong>跨域是&quot;能力稀缺&quot;的第二重原因</strong>：即使攻破基带，仍需 AP 侧链条把权限扩展到能读用户数据；即使攻破 AP，SEP 里的密钥仍受类保护约束。因此所谓&quot;完美 0-click 跨重启&quot;实际上是<strong>多条独立链的串联</strong>，采购与工程成本叠加——这解释了 #65 中供应方分层的稳定形态：<strong>能同时具备多域能力的组织极少，且不会外销。</strong></p>
+<hr>
+<h2>7. 与&quot;重启&quot;这一防御动作的关系</h2>
+<p>启动链的强度决定了&quot;重启&quot;能带来多大的安全重置效果：</p>
+<table><thead><tr><th>攻击驻留形态</th><th>重启是否清除</th><th>重启后攻击者需付出</th></tr></thead><tbody><tr><td>应用层内存注入（#45）</td><td>✅ 完全清除</td><td>需要重新一条可用的初始访问漏洞</td></tr><tr><td>应用层落地驻留（Coruna 型，#42）</td><td>❌ 部分保留</td><td>依赖合法机制自启，重启影响小</td></tr><tr><td>配置/描述文件级驻留</td><td>❌ 保留</td><td>需要 MDM/用户层处置（#63 检测）</td></tr><tr><td>启动/固件级驻留</td><td>❌ 且难以发现</td><td>极罕见，需固件完整性验证</td></tr></tbody></table>
+<p>由此得到两条可执行的防御动作（与 #60、#63 一致）：</p>
+<ol><li><strong>对高危角色实行强制定期重启</strong>（如每日一次），把驻留型攻击的成本从&quot;一次性&quot;抬为&quot;周期性&quot;。</li><li><strong>重启后立即做工件扫描</strong>：若重启后仍能发现攻击工件，说明存在落地或配置级驻留，其信号强度远高于普通命中——因为内存驻留在重启后不可能残留。</li></ol>
+<p>这两项都以<strong>启动链未被攻破为前提</strong>。因此第 4 节的安全配置校验是它们的必要配套：不确认启动配置正常，&quot;重启即失效&quot;的推理就不成立。</p>
+<hr>
+<h2>8. 启动链完整性的验证与取证用途</h2>
+<table><thead><tr><th>检查项</th><th>数据来源</th><th>能证明什么</th><th>局限</th></tr></thead><tbody><tr><td>OS 版本 + 构建号</td><td>MDM、备份元数据</td><td>补丁是否达标（#61 的 PED）</td><td>不反映启动配置</td></tr><tr><td>安全强度等级/变体状态</td><td>sysdiagnose、设备上报字段</td><td>是否以严格配置启动（锁定模式关联）</td><td>字段可用性随版本变化</td></tr><tr><td>固件/基带版本单调性</td><td>sysdiagnose、更新记录</td><td>是否存在降级迹象</td><td>需历史基线对比</td></tr><tr><td>系统卷完整性状态</td><td>设备诊断信息</td><td>运行时完整性是否被改动</td><td>攻击者可能不触碰此层</td></tr><tr><td>启动阶段日志连续性</td><td>sysdiagnose</td><td>是否存在缺失/异常启动序列</td><td>日志本身可被清除（#55）</td></tr></tbody></table>
+<p><strong>取证价值分级</strong>：这些检查在多数案件中是<strong>排除性证据</strong>（用来排除&quot;极低概率但极高影响&quot;的假设），而不是<strong>指证性证据</strong>。正确用法是：把&quot;启动层被攻破&quot;作为一个需要主动排除的备择假设写进报告（配合 #62 的四源印证与&quot;未发现≠未感染&quot;表述），而不是把它当作结论。</p>
+<hr>
+<h2>9. 防御配置清单（按人群）</h2>
+<table><thead><tr><th>人群</th><th>启动链相关动作</th><th>理由</th></tr></thead><tbody><tr><td>一般员工</td><td>保持最新版；不做固件级假设</td><td>攻击者用应用层链已足够，无需为固件层配置预算</td></tr><tr><td>高价值岗位</td><td>校验补丁达标 + 记录安全配置状态 + 每日重启</td><td>低成本获得&quot;重启即重置&quot;的推定效力</td></tr><tr><td>极高价值（CEO、法务负责人、安全团队）</td><td>上述 + 机型代际管理（避免旧硬件） + 锁定模式</td><td>旧机型缺失 SPTM/TXM 类保护（#67）</td></tr><tr><td>事件中的目标设备</td><td>sysdiagnose 采集 + 启动配置与固件版本记录 + 保持断电前状态</td><td>提供排除性证据（#62 时序）</td></tr></tbody></table>
+<blockquote><p><strong>机型代际为什么属于启动链议题</strong>：根信任在 Boot ROM，而 Boot ROM 不可更新。老硬件若存在未公开的 ROM 级缺陷，软件更新永远无法修复——这是唯一一类&quot;无法靠补丁消除&quot;的风险，因此只能靠代际更换（与 #61 第 5 节、#67 的代际结论一致）。</p></blockquote>
+<hr>
+<h2>10. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>启动链决定的是攻击者&quot;能不能拿到跨重启与解锁前能力&quot;，不是他会不会进来</td></tr><tr><td>2</td><td>Coruna 与 DarkSword 都止步于应用层与内核层，原因是成本—收益而非能力不足</td></tr><tr><td>3</td><td>真正被反复攻击的是链末端交出的运行时配置，签名链本身在公开记录中几乎未破</td></tr><tr><td>4</td><td>内核镜像安全强度变体机制让&quot;攻击面可按启动配置分级&quot;，锁定模式在此生效</td></tr><tr><td>5</td><td>基带与 SEP 属并行独立信任域，多域串联能力是&quot;最稀缺 0-click&quot;的结构性原因</td></tr><tr><td>6</td><td>定期重启 + 重启后扫描是以启动链完好为前提的高性价比手段，需配套配置校验</td></tr><tr><td>7</td><td>启动层完整性在取证中主要用于排除假设，不能替代四源印证的正面指证</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 的安全启动链不是让间谍软件&quot;进不来&quot;，而是让它<strong>待不久、拿不到解锁前的数据</strong>——理解了这条边界，才知道为什么 Coruna 与 DarkSword 都把工程力量投在初始访问与逃逸上，也才知道&quot;强制重启 + 启动配置校验 + 机型代际管理&quot;这三件低成本动作为什么恰好打在对手最疼的地方。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Secure Boot / Secure Storage / SEP</a></li><li><a href="https://developer.apple.com/videos/" rel="nofollow noopener" target="_blank">WWDC — Kernel Image 4 与安全强度等级议题</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 案例研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Research</a></li><li><a href="https://nvd.nist.gov/" rel="nofollow noopener" target="_blank">CVE / NVD 记录</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a63.html">← 第 63 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a65.html">第 65 篇 →</a></nav></article>
+</main></body></html>

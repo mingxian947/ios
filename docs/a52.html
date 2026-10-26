@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword BlastDoor 与沙箱模型对抗分析 | iOS 安全研究文章库</title>
+<meta name="description" content="Seatbelt 沙箱结构、BlastDoor 设计与 0-click 经济学、功能必需通道为何无法闭合、GPU 栈逃逸与锁定模式效果">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a52.html">
+<meta property="og:title" content="Coruna 与 DarkSword BlastDoor 与沙箱模型对抗分析">
+<meta property="og:description" content="Seatbelt 沙箱结构、BlastDoor 设计与 0-click 经济学、功能必需通道为何无法闭合、GPU 栈逃逸与锁定模式效果">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a52.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 52 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 沙箱模型与 BlastDoor 对抗分析</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Apple 安全架构文档、Google Project Zero、Citizen Lab、Synacktiv、WWDC 安全议题、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>iOS 的防御纵深在很大程度上是一个<strong>沙箱层次结构</strong>：每个进程被限制在一组明确的权限边界内，攻击者必须<strong>逐层打破边界</strong>才能取得实际价值。</p>
+<p>Coruna 与 DarkSword 都起始于同一个受沙箱约束的进程——<strong>Safari WebContent</strong>。本文从 iOS 沙箱模型出发，分析：</p>
+<ol><li>Seatbelt 沙箱的实际结构与约束粒度</li><li><strong>BlastDoor</strong> 的设计目标、覆盖范围与真实效果（含常被误解的部分）</li><li>为什么 BlastDoor <strong>未能阻止</strong> WebKit 类链条的成功</li><li>Coruna 与 DarkSword 各自的逃逸路径与沙箱设计弱点选择</li><li>沙箱模型给防御者的三条实用结论</li></ol>
+<hr>
+<h2>2. iOS 沙箱模型基础</h2>
+<h3>2.1 Seatbelt（sandboxd / Sandbox System Call Filter）</h3>
+<p>iOS 使用基于 <strong>Seatbelt</strong> 的强制访问控制（MAC）：每个进程启动时载入一份 <strong>sandbox profile</strong>，以内核系统调用过滤器的形式约束该进程可执行的操作。</p>
+<pre><code>进程 exec
+   ↓
+sandbox_init(profile_name)
+   ↓
+内核安装 per-process MAC policy
+   ↓
+每次 syscall 经过过滤检查（deny by default + allowlist）</code></pre>
+<h3>2.2 profile 的约束维度</h3>
+<table><thead><tr><th>维度</th><th>约束内容</th><th>攻击者关注点</th></tr></thead><tbody><tr><td><strong>文件路径</strong></td><td>可读写的具体路径前缀</td><td>能碰到哪些配置/缓存/容器</td></tr><tr><td><strong>Mach 端口</strong></td><td>可 lookup / 可发送消息的服务名</td><td>能与哪些特权服务通信（<strong>逃逸主入口</strong>）</td></tr><tr><td><strong>POSIX 共享内存</strong></td><td>可访问的 shm 区段</td><td>跨进程通信通道</td></tr><tr><td><strong>IOKit</strong></td><td>可打开的服务类（<code>IOReturn</code>）</td><td>驱动接口可达性（<strong>逃逸主入口</strong>）</td></tr><tr><td><strong>网络</strong></td><td>可否建立连接、绑定的接口</td><td>外传通道</td></tr><tr><td><strong>系统调用</strong></td><td>禁用的高危调用（如 <code>fork</code>、<code>ptrace</code>）</td><td>进程创建与注入能力</td></tr><tr><td><strong>URL scheme / 服务</strong></td><td>可打开的 scheme</td><td>跨应用触发</td></tr></tbody></table>
+<h3>2.3 WebContent 沙箱的特征</h3>
+<p>Safari 的渲染进程（<code>com.apple.WebKit.WebContent</code>）承载不可信内容，其 profile 极为严格：</p>
+<table><thead><tr><th>能力</th><th>WebContent 是否允许</th></tr></thead><tbody><tr><td>直接读取用户数据（照片/通讯录/消息）</td><td>❌</td></tr><tr><td>访问其他 App 容器</td><td>❌</td></tr><tr><td>建立任意网络连接</td><td>⚠️ 通过 Networking 服务代理，非直连</td></tr><tr><td>打开任意 IOKit 服务</td><td>❌（白名单内可打开，<strong>GPU 相关在列</strong>）</td></tr><tr><td>与 WindowServer / 图形栈通信</td><td>✅ <strong>必须允许</strong>（否则无法渲染页面）</td></tr><tr><td><code>fork</code> / <code>exec</code></td><td>❌</td></tr><tr><td>访问钥匙串</td><td>❌（需通过其他进程）</td></tr><tr><td>相机 / 麦克风</td><td>❌（需用户授权且经其他服务）</td></tr></tbody></table>
+<p><strong>这是攻击链的根本约束</strong>：WebContent 内的代码执行<strong>几乎无直接价值</strong>——它看不到用户数据。因此<strong>逃逸是必经环节</strong>。</p>
+<hr>
+<h2>3. BlastDoor：设计目标与真实定位</h2>
+<h3>3.1 为什么 Apple 造 BlastDoor</h3>
+<p>iOS 15 之前，<strong>消息类应用的不可信解析在应用主进程内进行</strong>。这带来一个致命结构问题：</p>
+<pre><code>[远端发送者] → iMessage 附件/富文本
+                     ↓
+             Messages.app 主进程直接解析
+                     ↓
+        一个解析器漏洞 = 完整 Messages 权限的代码执行</code></pre>
+<p>Messages 进程权限相当高（可访问完整消息库、附件、可触达多个服务）。<strong>一个 0-click 解析器 bug 就能直接获得高权限立足点</strong>。</p>
+<p>BlastDoor 的目标是把这件事拆成两层：</p>
+<pre><code>[远端发送者] → 原始消息载荷
+                     ↓
+        ┌──────────────────────────┐
+        │  BlastDoor 沙箱服务       │  ← 在独立、极严格沙箱内
+        │  解析不可信内容 → 转成     │     完成所有危险解析
+        │  安全的数据结构            │
+        └──────────────────────────┘
+                     ↓ 只输出已结构化的安全数据
+             Messages.app（高权限）
+                     ↓
+             只消费安全数据，不再接触原始字节</code></pre>
+<h3>3.2 设计要点</h3>
+<table><thead><tr><th>要点</th><th>说明</th></tr></thead><tbody><tr><td><strong>默认拒绝（deny-by-default）</strong></td><td>profile 只放行解析所需最小能力</td></tr><tr><td><strong>无网络</strong></td><td>BlastDoor 沙箱内不允许建立网络连接（切断逃逸后的外传与 C2 下载）</td></tr><tr><td><strong>无持久化</strong></td><td>不能写文件，攻击者即使控制它也无法落地</td></tr><tr><td><strong>强进程隔离</strong></td><td>与 Messages 主进程完全分离，漏洞不直接等于消息数据访问</td></tr><tr><td><strong>输出净化</strong></td><td>只输出经过校验的结构化数据（受控 schema）</td></tr></tbody></table>
+<h3>3.3 真实效果：0-click 经济学的改变</h3>
+<p>BlastDoor 的最大价值不在于&quot;完全防住&quot;，而在于<strong>大幅提高攻击成本</strong>：</p>
+<table><thead><tr><th>指标</th><th>BlastDoor 之前</th><th>BlastDoor 之后</th></tr></thead><tbody><tr><td>一个解析器 0-day 的价值</td><td>直接获得高权限立足点</td><td>仅获得受限沙箱内立足点</td></tr><tr><td>需要的漏洞数量</td><td>1–2 个</td><td>至少：解析器漏洞 + BlastDoor 逃逸 + 提权</td></tr><tr><td>是否具备网络</td><td>立足即有</td><td>沙箱内无网络（需逃逸才能外传）</td></tr><tr><td>0-click 链条成本</td><td>相对低</td><td><strong>显著升高</strong></td></tr></tbody></table>
+<p><strong>现实印证</strong>：iOS 15 之后公开归因的 0-click iMessage 链数量明显下降，而 1-click WebKit 水坑链持续为主流。这是架构性防御改变攻击者经济模型的典型案例。</p>
+<h3>3.4 常被误解的部分（重要）</h3>
+<p><strong>误解一：&quot;BlastDoor 保护了 iOS 免受 WebKit 攻击&quot;</strong></p>
+<blockquote><p>❌ 完全不成立。BlastDoor 只保护<strong>消息解析路径</strong>。Safari/WebKit 的攻击面与它无关。这解释了为什么 Coruna 与 DarkSword <strong>绕开了消息面，选择 WebKit</strong>——那里 BlastDoor 不参与。</p></blockquote>
+<p><strong>误解二：&quot;BlastDoor 是无懈可击的&quot;</strong></p>
+<blockquote><p>❌ Project Zero 与多家研究机构已披露 BlastDoor 沙箱逃逸研究；其内部解析器（如正则、plist、归档解析）本身也是攻击面。</p></blockquote>
+<p><strong>误解三：&quot;有 BlastDoor 就不需要其他防护&quot;</strong></p>
+<blockquote><p>❌ 它解决的是<strong>特定高价值入口</strong>（消息 0-click），不解决设备总体暴露。</p></blockquote>
+<hr>
+<h2>4. 为什么 WebKit 链条仍然成功</h2>
+<h3>4.1 结构性原因：渲染必须被放行</h3>
+<p>WebKit 链之所以<strong>不受 BlastDoor 影响且难以在架构层阻断</strong>，根本原因是：</p>
+<blockquote><p><strong>网页渲染需要与图形栈高频、低延迟通信。这是功能必需，不能禁止。</strong></p></blockquote>
+<pre><code>WebContent 进程
+   ├─ 必须提交 GPU 命令缓冲          →  IOGPU / AGX 接口可达
+   ├─ 必须与 WindowServer 合成       →  图形服务可达
+   ├─ 必须使用 shared memory 传纹理  →  跨进程共享内存可达
+   └─ 必须调用 libGFXShared / IOSurface → 内核对象映射可达</code></pre>
+<p><strong>每一条&quot;功能必需&quot;都是一条潜在逃逸通道。</strong> 沙箱设计者的难题是：<strong>不能为了安全砍掉功能</strong>，因此只能对通道做参数校验——而校验逻辑本身就是攻击面。</p>
+<h3>4.2 攻击面选择的通用逻辑</h3>
+<p>从 Coruna / DarkSword 的实践中可提炼出攻击者的通道选择判据：</p>
+<table><thead><tr><th>判据</th><th>说明</th><th>典型结果</th></tr></thead><tbody><tr><td><strong>沙箱必须放行</strong></td><td>功能必需，不可能禁止</td><td>GPU、WindowServer、shared memory</td></tr><tr><td><strong>实现复杂度高</strong></td><td>语义复杂，验证易遗漏</td><td>ANGLE 的 WebGPU → GL 转译层</td></tr><tr><td><strong>代码相对年轻</strong></td><td>审计密度低</td><td>WebGPU（新 API）、ANGLE 移植</td></tr><tr><td><strong>C/C++ 实现</strong></td><td>内存安全缺陷概率高</td><td>ANGLE、图形驱动</td></tr><tr><td><strong>跨进程/跨权限边界</strong></td><td>缺陷后果波及高权限侧</td><td>GPU 服务、内核驱动</td></tr><tr><td><strong>输入不受上层约束</strong></td><td>参数由攻击者完全控制</td><td>命令流、缓冲区句柄</td></tr></tbody></table>
+<p><strong>DarkSword 的 ANGLE/WebGPU 选择是这六项判据的完全命中</strong>——这并非偶然，而是系统性攻击面评估的结果。</p>
+<h3>4.3 iOS 沙箱层级的完整攻击地图</h3>
+<pre><code>Layer 0  WebContent (Safari 渲染)
+   │  受限：无网络、无文件、无数据访问
+   │  可达：图形栈、部分 IPC
+   ↓ [逃逸 A: GPU/ANGLE/WebGPU → IOGPUDevice 内核驱动]
+Layer 1  GPU 服务 / 内核驱动上下文
+   │  获得：内核侧内存操作能力
+   ↓ [逃逸 B: XPC / Mach IPC 校验缺陷 → 特权守护进程]
+Layer 1' 特权守护进程（如 networking / media）
+   │  获得：系统级 API 访问
+   ↓ [提权: 内核读写 + PAC 绕过 + KTRR/PPL/SPTM 对抗]
+Layer 2  内核 root
+   │  获得：任意进程控制、文件系统全域、Keychain 访问
+   ↓
+Layer 3  目标数据采集与外传</code></pre>
+<p><strong>Coruna 与 DarkSword 都走 Layer 0 → Layer 2 的路径，但选择了不同的逃逸通道（见下节）。</strong></p>
+<hr>
+<h2>5. Coruna 与 DarkSword 的逃逸路径对比</h2>
+<h3>5.1 逃逸通道选择</h3>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>主要逃逸通道</td><td>GPU/ANGLE + IOGPUDevice 内核驱动（部分链使用其他 IPC 面）</td><td>ANGLE/WebGPU 两阶段逃逸</td></tr><tr><td>涉及 CVE 数量</td><td>多（每版本一条链，23 个 CVE 总量）</td><td>少（集中 GPU 栈）</td></tr><tr><td>是否借助媒体服务</td><td>主要靠内核提权后直接操作</td><td><strong>是</strong>，注入 mediaserverd 获取采集能力</td></tr><tr><td>逃逸与提权是否分离</td><td>分离（不同组件）</td><td>部分耦合（同一驱动接口）</td></tr><tr><td>对 BlastDoor 的依赖</td><td>无（不经过消息面）</td><td>无</td></tr></tbody></table>
+<h3>5.2 DarkSword 的两阶段逃逸结构</h3>
+<pre><code>阶段 1：ANGLE 层（用户态图形转译）
+  ├─ WebGPU API 调用被 ANGLE 转译为 Metal/GL 命令
+  ├─ 构造非法参数触发转译层内存缺陷
+  └─ 获得向 GPU 服务/驱动提交恶意命令的能力
+
+阶段 2：IOGPUDevice / 内核驱动层
+  ├─ 通过驱动接口的参数校验缺陷
+  ├─ 触发内核侧越界读写
+  └─ 获得内核读写原语 → 逃逸完成 + 提权基础</code></pre>
+<p><strong>设计巧妙之处</strong>：WebContent 被允许&quot;提交 GPU 命令&quot;，但<strong>命令的语义校验分布在多个层</strong>。跨层的信任假设不一致，是这类逃逸的通用成因。</p>
+<h3>5.3 媒体服务注入的沙箱逻辑</h3>
+<p>DarkSword 在取得内核能力后注入 <code>mediaserverd</code>，这符合<strong>最小自持原则</strong>：</p>
+<table><thead><tr><th>为什么不直接在受控内核里采集？</th></tr></thead><tbody><tr><td>内核态执行复杂业务逻辑风险高（易 panic，暴露明显）</td></tr><tr><td>借合法进程执行可复用其已有权限与 entitlements</td></tr><tr><td>进程行为与正常媒体使用混同，检测难度大</td></tr><tr><td>采集逻辑在用户态更易实现与调试</td></tr></tbody></table>
+<p><strong>这也说明</strong>：沙箱的价值不止是&quot;限制攻击者&quot;，还包括&quot;限制受害组件的失陷后果&quot;。当 mediaserverd 被滥用，其权限范围即成为攻击者的能力范围。</p>
+<hr>
+<h2>6. 其他沙箱机制在链条中的位置</h2>
+<h3>6.1 与沙箱协同的其他约束</h3>
+<table><thead><tr><th>机制</th><th>对链条的约束</th><th>攻击者应对</th></tr></thead><tbody><tr><td><strong>AMFI / 代码签名</strong></td><td>未签名代码不能执行</td><td>复用合法代码（ROP/JOP）、利用 JIT 页、绕过 AMFI 的缺陷</td></tr><tr><td><strong>PAC</strong></td><td>跳转需合法签名</td><td>寻找签名预言机、复用已签名指针</td></tr><tr><td><strong>KTRR / PPL</strong></td><td>内核文本与页表只读</td><td>ROP/JOP、寻找可写但影响安全的数据</td></tr><tr><td><strong>SPTM / TXM</strong></td><td>EL2/EL3 强制隔离</td><td>转向受信任组件本身的缺陷</td></tr><tr><td><strong>BlastDoor</strong></td><td>消息解析隔离</td><td><strong>绕开</strong>（选择 WebKit 面）</td></tr><tr><td><strong>Exclaves</strong></td><td>敏感操作独立执行域</td><td>目前相关攻击公开信息少</td></tr><tr><td><strong>Data Protection / SEP</strong></td><td>静态数据加密</td><td>需解锁状态 + 密钥包路径</td></tr></tbody></table>
+<h3>6.2 Lockdown Mode 如何改变沙箱格局</h3>
+<table><thead><tr><th>措施</th><th>对沙箱/攻击面的影响</th></tr></thead><tbody><tr><td><strong>禁用 JIT</strong></td><td>移除 JSC 缺陷这一最常见 L1 入口</td></tr><tr><td><strong>禁用 WebGPU / WebGL</strong></td><td><strong>直接关闭 DarkSword 所依赖的整个逃逸通道</strong></td></tr><tr><td><strong>限制消息附件与预览</strong></td><td>收紧 BlastDoor 上游输入面</td></tr><tr><td><strong>阻断未知 iMessage 载荷</strong></td><td>消除自动解析路径</td></tr><tr><td><strong>关闭不需要的网络服务</strong></td><td>限制外传</td></tr></tbody></table>
+<blockquote><p><strong>结论</strong>：锁定模式对 DarkSword 类链条的打击是<strong>结构性</strong>的——它不是加固校验，而是<strong>移除被允许的通道</strong>。这正是&quot;减少攻击面&quot;优于&quot;增强检测&quot;的典型案例。</p></blockquote>
+<hr>
+<h2>7. 防御启示</h2>
+<h3>7.1 架构层面（Apple 已采用，值得自有产品借鉴）</h3>
+<table><thead><tr><th>原则</th><th>说明</th><th>BlastDoor 是范例</th></tr></thead><tbody><tr><td><strong>把不可信解析推到最小权限沙箱</strong></td><td>让单个解析器 bug 不直接等于高权限立足</td><td>✅</td></tr><tr><td><strong>净化输出，而非仅校验输入</strong></td><td>输出结构化安全数据，阻断&quot;控制即高权限&quot;</td><td>✅</td></tr><tr><td><strong>沙箱内禁网络、禁持久化</strong></td><td>即使被控制也无法外传或驻留</td><td>✅</td></tr><tr><td><strong>分层信任要明确校验责任</strong></td><td>跨层假设不一致是逃逸根因</td><td>⚠️ 仍需改进（GPU 栈）</td></tr><tr><td><strong>减少功能必需的暴露通道</strong></td><td>图形栈最难，故需强化驱动侧校验</td><td>⚠️ 当前主要弱点区</td></tr></tbody></table>
+<h3>7.2 组织/用户层面</h3>
+<table><thead><tr><th>建议</th><th>理由</th></tr></thead><tbody><tr><td><strong>启用锁定模式（高危人群）</strong></td><td>直接移除 WebGPU/JIT 通道，效果优于任何检测</td></tr><tr><td><strong>优先修补 GPU/图形栈 CVE</strong></td><td>当前逃逸主战场，泄露类同样优先</td></tr><tr><td><strong>异构部署降低单点风险</strong></td><td>若全员同一 iOS 版本，一次泄露即全员暴露</td></tr><tr><td><strong>限制 WebKit 使用面</strong></td><td>关闭 JS/预览等能减少入口</td></tr><tr><td><strong>理解&quot;沙箱不等于安全边界全部&quot;</strong></td><td>逃逸只需一条被放行的通道，防御需守住全部</td></tr></tbody></table>
+<h3>7.3 检测视角（沙箱突破的可观测信号）</h3>
+<table><thead><tr><th>信号</th><th>含义</th></tr></thead><tbody><tr><td><strong>WebContent 大量 GPU 资源创建/销毁</strong></td><td>堆塑形或驱动接口试探</td></tr><tr><td><strong>WebContent 出现非渲染目的的异常系统调用</strong></td><td>逃逸活动</td></tr><tr><td><strong>IOGPU/AGX 驱动异常返回或崩溃</strong></td><td>驱动侧利用尝试（<strong>高价值证据</strong>）</td></tr><tr><td><strong>mediaserverd 出现非媒体用途的线程/网络连接</strong></td><td>注入成功后的行为</td></tr><tr><td><strong>守护进程产生网络连接</strong></td><td>沙箱边界已被打破</td></tr><tr><td><strong>内核 panic / 异常日志含 GPU 相关符号</strong></td><td>驱动利用失败的痕迹</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>结论</th><th>内容</th></tr></thead><tbody><tr><td><strong>1. iOS 的防御纵深本质是沙箱层次</strong></td><td>攻击链的每个阶段对应打破一层边界；不存在&quot;一个漏洞通吃&quot;</td></tr><tr><td><strong>2. BlastDoor 是架构性防御的成功范例</strong></td><td>它改变的是攻击成本结构（0-click 经济学），而非依赖检测</td></tr><tr><td><strong>3. BlastDoor 不覆盖 WebKit，这被攻击者精确利用了</strong></td><td>Coruna/DarkSword 全部选择 1-click 网页面，绕开消息面</td></tr><tr><td><strong>4. &quot;功能必需&quot;是沙箱无法闭合的裂缝</strong></td><td>渲染必须触达图形栈，因此 GPU 成为当前最高价值逃逸面</td></tr><tr><td><strong>5. 跨层信任假设不一致是逃逸通用成因</strong></td><td>ANGLE → GPU 服务 → 内核驱动，每层都假设上一层已校验</td></tr><tr><td><strong>6. 减少攻击面优于检测攻击面</strong></td><td>锁定模式移除 WebGPU/JIT，比任何运行时检测都更彻底</td></tr><tr><td><strong>7. 驱动与图形栈是未来攻防主战场</strong></td><td>修补优先级与检测投入应向此倾斜</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>BlastDoor 证明了一件正确的事——<strong>把不可信的输入放进最小权限的沙箱，比在沙箱外加强检测更有效</strong>。 Coruna 与 DarkSword 证明了另一件事——<strong>只要存在一条&quot;功能必需&quot;的暴露通道（图形栈），攻击者就会找到它</strong>。 防御的下一步，是把 BlastDoor 的设计哲学应用到那些&quot;最难收紧&quot;的通道上。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Apple: <a href="https://www.apple.com/business/docs/resources/iOS_Security_Guide.pdf" rel="nofollow noopener" target="_blank">iOS Security Guide</a></li><li>Apple: <a href="https://support.apple.com/en-us/105098" rel="nofollow noopener" target="_blank">About Lockdown Mode</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/" rel="nofollow noopener" target="_blank">BlastDoor 相关研究与 iOS 15 安全分析</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna 逃逸链与 CVE 覆盖分析</a></li><li>Synacktiv: <a href="https://www.synacktiv.com/publications/escaping-safari-sandbox-tour-of-webkit-ipc" rel="nofollow noopener" target="_blank">Escaping the Safari Sandbox: a tour of WebKit IPC</a></li><li>WWDC: <a href="https://developer.apple.com/videos/" rel="nofollow noopener" target="_blank">Advances in iOS Security / Preparing for future exploits</a></li><li>8ksec: <a href="https://blog.8ksec.com/" rel="nofollow noopener" target="_blank">iOS Sandbox &amp; IOKit Research</a></li><li>Apple Security Updates: <a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a51.html">← 第 51 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a53.html">第 53 篇 →</a></nav></article>
+</main></body></html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 内核提权分析文章 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 4 · 内核提权">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a06.html">
+<meta property="og:title" content="iOS 内核提权分析文章">
+<meta property="og:description" content="阶段 4 · 内核提权">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a06.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 6 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 内核提权（Kernel Privilege Escalation）· 分析文章</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Google Project Zero / Threat Intelligence、Jamf、Trend Micro、CSA、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 为什么内核提权是攻击链的&quot;最后一道门&quot;</h2>
+<p>在 iOS 全链条攻击中，攻击者依次突破：</p>
+<pre><code>WebKit RCE (WebContent)  →  沙箱逃逸  →  [内核提权]  →  完整设备沦陷</code></pre>
+<p>即便完成沙箱逃逸，攻击者通常仍只是<strong>一个高权限用户态进程</strong>，无法：</p>
+<ul><li>读写任意应用数据 / 钥匙串</li><li>关闭完整性保护、安装持久化 implant</li><li>绕过代码签名运行任意代码</li></ul>
+<p><strong>内核（XNU）掌控一切</strong>：内存管理、进程凭证、驱动、完整性策略。因此<strong>内核提权（把权限提升到 root / 获得内核读写）是达成&quot;完整设备沦陷&quot;的最终且必需的一步</strong>。</p>
+<hr>
+<h2>2. iOS 内核的多层保护（提权要逐层击穿）</h2>
+<p>Apple 在内核层叠加了多道缓解，提权漏洞往往需要<strong>组合突破</strong>：</p>
+<table><thead><tr><th>保护机制</th><th>作用</th><th>被绕过时的影响</th></tr></thead><tbody><tr><td><strong>KASLR</strong></td><td>内核地址随机化</td><td>需信息泄露定位内核</td></tr><tr><td><strong>PAC（指针认证）</strong></td><td>控制流指针签名</td><td>绕过后可劫持控制流</td></tr><tr><td><strong>PPL（Page Protection Layer）</strong></td><td>保护内核页表/关键内存不被任意改写</td><td>绕过后可改内核结构</td></tr><tr><td><strong>KTRR / SPTM</strong></td><td>限制内核文本/页表可写性、隔离特权监控</td><td>绕过后可注入/改代码</td></tr><tr><td><strong>代码签名 + AMFI</strong></td><td>仅允许签名代码执行</td><td>绕过后可运行任意代码</td></tr><tr><td><strong>W^X / 页权限</strong></td><td>内存页不可同时可写可执行</td><td>绕过后可执行注入代码</td></tr></tbody></table>
+<p><strong>提权的典型子步骤</strong>：信息泄露（破 KASLR）→ 内核内存破坏（获得内核读写）→ 绕过 PPL/KTRR/PAC → 覆写进程凭证（cred）提权至 root / 关闭完整性检查。</p>
+<hr>
+<h2>3. 内核提权的主要漏洞类型与代表 CVE</h2>
+<table><thead><tr><th>类型</th><th>说明</th><th>代表 CVE</th></tr></thead><tbody><tr><td><strong>内核/驱动内存破坏</strong></td><td>UAF、越界写、类型混淆，位于 XNU 或 IOKit 驱动</td><td>CVE-2023-32434、CVE-2025-43510、CVE-2025-43520</td></tr><tr><td><strong>硬件/MMIO 保护绕过</strong></td><td>绕过 GPU/硬件 MMIO 映射保护，获得越权内存访问</td><td>CVE-2023-38606</td></tr><tr><td><strong>动态链接/签名校验缺陷</strong></td><td>dyld 等加载器弱点，禁用签名校验与页所有权保护</td><td>CVE-2026-20700</td></tr><tr><td><strong>内存管理缺陷</strong></td><td>页管理/对象缓存缺陷，用于提权或内核读写</td><td>CVE-2025-43510/43520、CVE-2021-30952 等</td></tr><tr><td><strong>IPC/Mach 内核接口缺陷</strong></td><td>Mach 陷阱、voucher 等处理错误</td><td>历史在野链条组件</td></tr></tbody></table>
+<p><strong>DarkSword 的内核阶段（示例）</strong>：</p>
+<ol><li>经 <strong>dyld 弱点（CVE-2026-20700）</strong> 禁用 Apple 签名校验与页所有权保护</li><li>再以<strong>内存管理缺陷（CVE-2025-43510 / CVE-2025-43520）</strong> 提权至 <strong>root</strong></li><li>获得内核读写后注入系统服务、窃取机密、清除痕迹</li></ol>
+<p><strong>Coruna 的内核阶段（示例）</strong>：组合 CVE-2023-32434（内核内存破坏）与 CVE-2023-38606（MMIO 保护绕过）等完成提权与持久化。</p>
+<hr>
+<h2>4. 攻防趋势</h2>
+<ul><li><strong>单漏洞提权越来越难</strong>：PPL/KTRR/PAC/签名多层叠加，攻击者需&quot;泄露 + 破坏 + 绕过&quot;多原语组合。</li><li><strong>转向驱动与加载器</strong>：IOKit 驱动、dyld/加载器、硬件映射（MMIO）成为高价值提权面。</li><li><strong>与零日组合</strong>：内核零日通常与 Web 零日、沙箱逃逸零日打包成全链条（Coruna/DarkSword）。</li><li><strong>无持久化配合</strong>：提权后短时完成目标即清除，减少被取证发现（DarkSword）。</li></ul>
+<hr>
+<h2>5. 检测与防护建议</h2>
+<h3>个人 / 高危用户</h3>
+<ol><li><strong>保持系统最新</strong>：内核提权修复依赖系统更新（如 DarkSword 相关修复于 iOS 18.7.x / 26.3）。</li><li><strong>高危时启用 Lockdown Mode</strong>：收紧攻击面，使多数全链条（含提权前置环节）失效。</li></ol>
+<h3>企业 / 组织</h3>
+<ol><li>补丁管理覆盖全部 Apple 设备与 BYOD；建立版本基线。</li><li>移动端 EDR/MTD 关注：异常内核级行为迹象（完整性校验异常、异常 dyld 加载、签名校验被绕过的迹象、钥匙串异常批量访问）。</li><li>对高价值人群分层防护（Lockdown Mode + 专用网络 + 行为监控）。</li></ol>
+<h3>研究 / 防御团队</h3>
+<ol><li>威胁建模聚焦：IOKit 驱动、dyld/加载器、MMIO/硬件映射、Mach 内核接口。</li><li>回归测试 Project Zero / 厂商披露的内核提权 CVE 补丁；跟踪全链条零日组合情报。</li></ol>
+<hr>
+<h2>6. 结论</h2>
+<p>内核提权是 iOS 攻击链的<strong>最终闸门</strong>：只有击穿 KASLR/PAC/PPL/KTRR/代码签名等多层保护、获得内核读写或 root，攻击者才能从&quot;受限进程&quot;变为&quot;掌控设备&quot;。提权漏洞以<strong>内核/驱动内存破坏、MMIO 绕过、加载器/签名缺陷、内存管理缺陷</strong>为主，且几乎总是与 Web 零日、沙箱逃逸零日组合使用。Apple 的多层内核缓解持续抬高门槛，推动攻击向&quot;多零日 + 多原语组合 + 无持久化&quot;演进。<strong>防御要点：及时补丁 + Lockdown Mode + 针对内核级异常行为的运行时检测。</strong></p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://projectzero.google/2019/08/a-very-deep-dive-into-ios-exploit.html" rel="nofollow noopener" target="_blank">A very deep dive into iOS Exploit chains found in the wild — Google Project Zero</a></li><li><a href="https://www.jamf.com/blog/running-code-in-the-context-of-ios-kernel-part-i-lpe-poc-on-ios-137/" rel="nofollow noopener" target="_blank">Running code in the context of iOS Kernel: LPE PoC — Jamf</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud Threat Intelligence</a></li><li><a href="https://www.trendmicro.com/en_us/research/22/l/diving-into-an-old-exploit-chain-and-discovering-3-new-sip-bypas.html" rel="nofollow noopener" target="_blank">Diving into an Old Exploit Chain and Discovering 3 new SIP bypasses — Trend Micro</a></li><li><a href="https://www.centripetal.ai/threat-research/coruna-ios-exploit-kit" rel="nofollow noopener" target="_blank">Coruna iOS Exploit Kit: Observed Traffic — Centripetal</a></li><li><a href="https://en.wikipedia.org/wiki/Coruna_(exploit_kit" rel="nofollow noopener" target="_blank">Coruna (exploit kit) — Wikipedia</a>)</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a05.html">← 第 5 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a07.html">第 7 篇 →</a></nav></article>
+</main></body></html>

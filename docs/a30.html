@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS WebKit 漏洞：从 JavaScriptCore 到 JIT 利用原理 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 1 · JSC 执行管线、JIT 投机优化、类型混淆/OOB/UAF、addrof/fakeobj 原语与 JIT 硬化">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a30.html">
+<meta property="og:title" content="iOS WebKit 漏洞：从 JavaScriptCore 到 JIT 利用原理">
+<meta property="og:description" content="阶段 1 · JSC 执行管线、JIT 投机优化、类型混淆/OOB/UAF、addrof/fakeobj 原语与 JIT 硬化">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a30.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 30 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS WebKit 漏洞：从 JavaScriptCore 到 JIT 利用原理</h1>
+<blockquote><p>编制日期：2026-10-13 数据来源：Apple 安全公告、Google Project Zero、WebKit 开源代码、公开 CVE 情报、安全研究论文 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>JavaScriptCore（JSC）</strong> 是 WebKit 的 JavaScript 引擎，也是 iOS 上所有网页 JavaScript 执行的唯一入口。JSC 内部采用<strong>多层 JIT（Just-In-Time）编译管线</strong>将 JavaScript 动态编译为机器码——这一设计在追求极致性能的同时，也引入了 iOS 攻击面中<strong>最关键、最高频</strong>的漏洞类别。</p>
+<p>本文从 JSC 内部架构出发，逐层解析：</p>
+<ol><li><strong>JSC 执行管线</strong>：Interpreter → Baseline JIT → DFG JIT → FTL JIT</li><li><strong>JIT 编译器的安全假设与违反</strong>：类型推断、边界检查消除、 speculation</li><li><strong>核心漏洞类型</strong>：类型混淆（Type Confusion）、越界读写（OOB）、释放后使用（UAF）</li><li><strong>从漏洞到原语</strong>：addrof / fakeobj / 任意地址读写</li><li><strong>从原语到 RCE</strong>：伪造 JS 对象、劫持控制流、突破 WebContent 沙箱</li><li><strong>真实 CVE 案例映射</strong></li></ol>
+<p><strong>核心结论</strong>：JSC JIT 漏洞是 iOS 远程攻击的<strong>最高频初始入口</strong>。防御关键在于：Lockdown Mode（禁用 JIT）、JIT 硬化（W^X、Caging）、类型系统加固、运行时行为检测。</p>
+<p><strong>风险等级：严重（Critical）</strong>。</p>
+<hr>
+<h2>2. JavaScriptCore 架构总览</h2>
+<h3>2.1 JSC 在 WebKit 中的位置</h3>
+<pre><code>Safari / WKWebView
+        │
+        ↓
+WebKit 框架
+        │
+  ┌─────┴─────┐
+  │           │
+WebCore    JavaScriptCore (JSC)
+(DOM/CSS)  (JavaScript 引擎)
+                │
+          ┌─────┴─────┐
+          │           │
+       解析器      JIT 编译器
+     (Parser)   (LLInt/DFG/FTL)
+          │           │
+          └─────┬─────┘
+                ↓
+          字节码 / 机器码
+                ↓
+           CPU 执行</code></pre>
+<h3>2.2 JSC 核心组件</h3>
+<table><thead><tr><th>组件</th><th>职责</th></tr></thead><tbody><tr><td><strong>Lexer / Parser</strong></td><td>将 JavaScript 源码解析为 AST</td></tr><tr><td><strong>Bytecode Generator</strong></td><td>将 AST 编译为 JSC 字节码</td></tr><tr><td><strong>LLInt（Low Level Interpreter）</strong></td><td>字节码解释器，首次执行</td></tr><tr><td><strong>Baseline JIT</strong></td><td>简单编译，快速生成机器码</td></tr><tr><td><strong>DFG JIT</strong></td><td>数据流图优化，类型推断 + speculation</td></tr><tr><td><strong>FTL JIT</strong></td><td>高级优化，内联、逃逸分析、寄存器分配</td></tr><tr><td><strong>GC（垃圾回收器）</strong></td><td>MarkedSpace + CopiedSpace + 大对象堆</td></tr><tr><td><strong>Heap</strong></td><td>管理所有 JS 对象的内存分配</td></tr></tbody></table>
+<h3>2.3 JS 对象内部表示</h3>
+<p>JSC 使用 <strong>Nan-boxing</strong>（Not-a-Number 装箱）在 64 位中表示所有 JS 值：</p>
+<pre><code>64 位值布局：
+┌──────────────────────────────────────────────────┐
+│  类型标签（高 16 位）  │  值/指针（低 48 位）       │
+└──────────────────────────────────────────────────┘
+
+类型标签示例：
+  0x0001  →  整数（Int32）
+  0x0002  →  双精度浮点（Double）
+  0x0003  →  布尔值
+  0x0004  →  空值（Null/Undefined）
+  0xFFxx  →  对象指针（JSCell*）</code></pre>
+<p><strong>JSCell</strong>（JS 单元）是所有堆对象的基类：</p>
+<pre><code>JSCell 结构（简化）：
+  ┌─ StructureID    (4 bytes)  → 指向结构体描述（隐藏类）
+  ├─ IndexingType   (1 byte)   → 数组类型（连续/非连续/字典）
+  ├─ TypeInfo flags (2 bytes)  → 类型信息（对象/数组/函数等）
+  ├─ GC 标记位      (1 byte)
+  └─ 对象特定数据...           → 属性存储、函数代码等</code></pre>
+<p><strong>Structure（隐藏类）</strong> 是 JSC 类型系统的核心：</p>
+<ul><li>描述对象的&quot;形状&quot;：有哪些属性、属性偏移、类型</li><li>对象通过 StructureID 关联其 Structure</li><li>属性值存储在对象内联属性或属性存储（PropertyStorage）中</li></ul>
+<hr>
+<h2>3. JIT 编译管线详解</h2>
+<h3>3.1 执行管线升级</h3>
+<p>JSC 采用<strong>投机优化（Speculative Optimization）</strong>策略：</p>
+<pre><code>JavaScript 源码
+      │
+      ↓  解析
+  字节码（Bytecode）
+      │
+      ↓  [首次执行] LLInt 解释器
+      │   慢但安全，收集类型反馈
+      │
+      ↓  [执行次数 &gt; 阈值] Baseline JIT
+      │   快速编译，无优化
+      │
+      ↓  [执行次数 &gt; 阈值] DFG JIT
+      │   基于类型反馈做投机优化
+      │   假设类型不变，消除检查
+      │
+      ↓  [执行次数 &gt; 阈值] FTL JIT
+      │   高级优化：内联、逃逸分析、寄存器分配
+      │   最强优化，最高风险
+      │
+      ↓  [投机失败] 去优化（Deoptimization）
+          回退到低层级重新执行</code></pre>
+<h3>3.2 DFG JIT：投机优化的核心</h3>
+<p>DFG（Data Flow Graph）JIT 是漏洞最高发的组件：</p>
+<p><strong>核心思想</strong>：</p>
+<ol><li><strong>类型推断</strong>：根据历史执行数据推断变量类型</li><li><strong>投机假设</strong>：假设未来执行类型不变</li><li><strong>消除检查</strong>：删除类型检查/边界检查以提升性能</li><li><strong>去优化</strong>：假设失败时回退到解释器</li></ol>
+<p><strong>示例</strong>：</p>
+<pre><code>function add(a, b) {
+    return a + b;  // DFG 推断 a, b 始终是 Int32
+}
+
+// 前 100 次调用：add(1, 2) → Int32 加法（优化后）
+// 第 101 次调用：add(&quot;hello&quot;, &quot;world&quot;) → 类型不匹配
+//                → 触发去优化 → 回退到 LLInt</code></pre>
+<p><strong>安全检查消除</strong>：</p>
+<pre><code>function getElem(arr, i) {
+    return arr[i];  // DFG 推断 arr 是 Int32 数组，i 在范围内
+}
+
+// 优化后（伪代码）：
+//   省略类型检查（假设 arr 是 Int32Array）
+//   省略边界检查（假设 i &lt; arr.length）
+//   直接读取 arr[i]
+
+// 如果 arr 实际是对象数组，或 i 越界 → 内存破坏</code></pre>
+<h3>3.3 FTL JIT：高级优化的风险</h3>
+<p>FTL（Faster Than Light）JIT 在 DFG 基础上进一步：</p>
+<table><thead><tr><th>优化</th><th>说明</th><th>风险</th></tr></thead><tbody><tr><td><strong>函数内联</strong></td><td>将小函数体嵌入调用点</td><td>类型推断错误被放大</td></tr><tr><td><strong>逃逸分析</strong></td><td>判断对象是否&quot;逃逸&quot;出作用域</td><td>错误判断导致提前释放</td></tr><tr><td><strong>寄存器分配</strong></td><td>将变量映射到 CPU 寄存器</td><td>寄存器溢出导致内存覆盖</td></tr><tr><td><strong>循环优化</strong></td><td>循环展开、向量化</td><td>边界检查消除风险</td></tr></tbody></table>
+<hr>
+<h2>4. 核心漏洞类型</h2>
+<h3>4.1 类型混淆（Type Confusion）</h3>
+<p><strong>最高频的 JSC 漏洞类型</strong>。</p>
+<p><strong>原理</strong>：JIT 编译器错误假设对象类型，导致按错误类型解释内存：</p>
+<pre><code>JIT 假设：变量 x 始终是 JSArray（Int32 类型）
+实际执行：x 被赋值为 JSObject
+
+后续操作：按 JSArray 布局读取 x 的内存
+          → 读取的&quot;元素&quot;实际是 JSObject 的属性指针
+          → 类型混淆 → 信息泄露 / 任意地址读写</code></pre>
+<p><strong>典型场景</strong>：</p>
+<pre><code>function confuse(arr) {
+    // JIT 推断 arr 是 Int32 数组
+    let val = arr[0];  // 按 Int32 读取
+    return val;
+}
+
+// 通过原型污染或 __proto__ 修改，使 arr 的实际类型改变
+// JIT 未检测到类型变化 → 按错误类型读取 → 类型混淆</code></pre>
+<p><strong>代表 CVE</strong>：</p>
+<table><thead><tr><th>CVE</th><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>CVE-2024-23222</td><td>类型混淆</td><td>在野利用，Coruna 组件</td></tr><tr><td>CVE-2023-41974</td><td>类型混淆</td><td>在野利用</td></tr><tr><td>CVE-2023-32434</td><td>类型混淆</td><td>在野利用，多条链条组件</td></tr><tr><td>CVE-2021-30860</td><td>类型混淆</td><td>FORCEDENTRY 组件</td></tr></tbody></table>
+<h3>4.2 越界读写（Out-of-Bounds Read/Write）</h3>
+<p><strong>原理</strong>：数组/缓冲区边界检查被 JIT 错误消除：</p>
+<pre><code>JIT 推断：i 始终 &lt; arr.length
+消除边界检查：直接 arr[i]
+
+实际执行：i &gt;= arr.length
+          → 越界读取 → 信息泄露
+          → 越界写入 → 内存破坏</code></pre>
+<p><strong>典型场景</strong>：</p>
+<pre><code>function oob(arr, i) {
+    // JIT 优化消除边界检查
+    return arr[i];  // 可能越界
+}
+
+// 通过长度修改或类型转换触发越界</code></pre>
+<p><strong>代表 CVE</strong>：</p>
+<table><thead><tr><th>CVE</th><th>类型</th><th>说明</th></tr></thead><tbody><tr><td>CVE-2025-24201</td><td>越界写</td><td>WebKit 沙箱逃逸组件</td></tr><tr><td>CVE-2022-22640</td><td>越界读</td><td>在野利用</td></tr></tbody></table>
+<h3>4.3 释放后使用（Use-After-Free）</h3>
+<p><strong>原理</strong>：对象被 GC 回收后仍被引用，访问已释放内存：</p>
+<pre><code>let obj = createObject();
+let ref = obj;
+
+// GC 回收 obj（如果 ref 未被正确跟踪）
+// ref 仍指向已释放内存
+
+// 后续访问 ref → UAF → 可能读取已重用内存中的新对象</code></pre>
+<p><strong>典型场景</strong>：</p>
+<ul><li>GC 竞态条件</li><li>WeakRef 处理缺陷</li><li>原型链修改导致引用跟踪错误</li></ul>
+<h3>4.4 JIT 编译器逻辑缺陷</h3>
+<p><strong>原理</strong>：JIT 编译器的优化 pass 存在逻辑错误：</p>
+<table><thead><tr><th>缺陷类型</th><th>说明</th></tr></thead><tbody><tr><td><strong>类型推断错误</strong></td><td>错误推断变量类型范围</td></tr><tr><td><strong>Phi 节点错误</strong></td><td>SSA 形式中 Phi 节点处理错误</td></tr><tr><td><strong>去优化遗漏</strong></td><td>应触发去优化但未触发</td></tr><tr><td><strong>内联错误</strong></td><td>函数内联时语义改变</td></tr></tbody></table>
+<hr>
+<h2>5. 从漏洞到原语（Primitives）</h2>
+<h3>5.1 关键原语</h3>
+<p>从 JSC 漏洞到完整 RCE，需要构建以下原语：</p>
+<table><thead><tr><th>原语</th><th>说明</th><th>用途</th></tr></thead><tbody><tr><td><strong>addrof(obj)</strong></td><td>获取对象的堆地址</td><td>信息泄露</td></tr><tr><td><strong>fakeobj(addr)</strong></td><td>在指定地址伪造对象</td><td>控制流劫持</td></tr><tr><td><strong>任意地址读</strong></td><td>读取任意内存地址</td><td>信息泄露 / 指针追踪</td></tr><tr><td><strong>任意地址写</strong></td><td>写入任意内存地址</td><td>代码执行 / 数据篡改</td></tr></tbody></table>
+<h3>5.2 addrof 原语构建</h3>
+<p><strong>目标</strong>：获取 JS 对象的堆地址（JSCell 指针）。</p>
+<p><strong>原理</strong>（类型混淆示例）：</p>
+<pre><code>// 1. 创建两个数组
+let arr1 = [1.1, 2.2, 3.3];  // Double 数组
+let arr2 = [{}, {}, {}];      // Object 数组
+
+// 2. 通过类型混淆使 arr1 按 Object 数组解释
+//    （或通过原型链修改）
+
+// 3. 将目标对象放入 arr2
+arr2[0] = targetObject;
+
+// 4. 通过 arr1 读取 arr2[0]
+//    arr1 按 Double 解释 → 读取的是指针值（作为 Double）
+let addr_as_double = arr1[0];
+
+// 5. 将 Double 转换回地址
+let addr = doubleToAddr(addr_as_double);
+// → 获得 targetObject 的堆地址</code></pre>
+<h3>5.3 fakeobj 原语构建</h3>
+<p><strong>目标</strong>：让 JSC 认为指定地址处有一个 JS 对象。</p>
+<p><strong>原理</strong>（与 addrof 对称）：</p>
+<pre><code>// 1. 创建两个数组（同上）
+let arr1 = [1.1, 2.2, 3.3];  // Double 数组
+let arr2 = [{}, {}, {}];      // Object 数组
+
+// 2. 通过类型混淆使 arr2 按 Double 数组解释
+
+// 3. 将目标地址（作为 Double）写入 arr1
+arr1[0] = addrToDouble(targetAddr);
+
+// 4. 通过 arr2 读取 arr1[0]
+//    arr2 按 Object 解释 → 将地址值视为对象指针
+let fakeObj = arr2[0];
+// → fakeObj 是指向 targetAddr 的&quot;对象&quot;</code></pre>
+<h3>5.4 任意地址读写构建</h3>
+<p><strong>组合 addrof + fakeobj</strong>：</p>
+<pre><code>// 1. 伪造一个 JSArray 对象（fakeobj）
+//    控制其 butterfly 指针指向目标地址
+
+// 2. 通过该数组的元素访问实现任意地址读写
+//    fakeArr[0] → 读取目标地址处的值
+//    fakeArr[0] = val → 写入目标地址
+
+// 关键：需要控制伪造数组的：
+//   - StructureID（匹配数组类型）
+//   - IndexingType（元素类型）
+//   - Butterfly 指针（指向目标地址）</code></pre>
+<hr>
+<h2>6. 从原语到 RCE</h2>
+<h3>6.1 控制流劫持</h3>
+<p>获得任意地址读写后，攻击者需要<strong>劫持控制流</strong>：</p>
+<p><strong>方法一：覆写函数指针</strong></p>
+<pre><code>1. 找到 JS 函数的 JIT 代码指针
+   （JSCell → JSFunction → Executable → JITCode）
+2. 覆写 JIT 代码指针 → 指向攻击者控制的内存
+3. 调用该函数 → 执行攻击者代码</code></pre>
+<p><strong>方法二：覆写虚表指针（vtable）</strong></p>
+<pre><code>1. 找到对象的 vtable 指针
+   （JSCell → Structure → 某些对象有 vtable）
+2. 覆写 vtable 指针 → 指向伪造 vtable
+3. 触发虚函数调用 → 执行攻击者代码</code></pre>
+<p><strong>方法三：覆写 GOT/PLT（如适用）</strong></p>
+<pre><code>在 WebContent 进程中：
+1. 找到动态链接的全偏移表（GOT）
+2. 覆写 GOT 条目 → 指向攻击者代码
+3. 调用对应函数 → 执行攻击者代码</code></pre>
+<h3>6.2 WebContent 进程内 RCE</h3>
+<pre><code>JSC 漏洞 → 类型混淆/OOB
+        ↓
+addrof / fakeobj 原语
+        ↓
+任意地址读写
+        ↓
+覆写函数指针 / vtable
+        ↓
+在 WebContent 进程内执行任意代码
+        ↓
+仍受沙箱限制 → 需要沙箱逃逸（下一环节）</code></pre>
+<h3>6.3 JIT 代码页利用</h3>
+<p><strong>JIT 代码页</strong>是 JSC 分配的<strong>可执行内存</strong>（W^X 例外）：</p>
+<pre><code>JIT 代码页布局：
+  ┌─────────────────────────┐
+  │  JIT 编译的机器码        │  ← 可执行
+  │  （JavaScript 函数）     │
+  ├─────────────────────────┤
+  │  数据区（常量池等）      │  ← 可读写
+  └─────────────────────────┘</code></pre>
+<p><strong>攻击</strong>：</p>
+<ul><li>将 shellcode 写入 JIT 数据区</li><li>覆写函数指针指向数据区</li><li>执行 shellcode（因为 JIT 页可执行）</li></ul>
+<p><strong>防御</strong>：</p>
+<ul><li><strong>W^X（Write XOR Execute）</strong>：JIT 页不能同时可写和可执行</li><li><strong>Caging</strong>：JIT 页限制在特定地址范围内</li><li><strong>PAC</strong>：JIT 代码指针需签名</li></ul>
+<hr>
+<h2>7. JIT 硬化与绕过</h2>
+<h3>7.1 Apple 的 JIT 硬化措施</h3>
+<table><thead><tr><th>措施</th><th>说明</th><th>引入版本</th></tr></thead><tbody><tr><td><strong>W^X</strong></td><td>JIT 页不能同时可写和可执行</td><td>iOS 13+</td></tr><tr><td><strong>JIT Caging</strong></td><td>JIT 代码限制在特定地址范围</td><td>iOS 14+</td></tr><tr><td><strong>PAC for JIT</strong></td><td>JIT 代码指针使用 PAC 签名</td><td>A12+</td></tr><tr><td><strong>Type 硬化</strong></td><td>加强类型检查，减少 speculation</td><td>持续更新</td></tr><tr><td><strong>GC 硬化</strong></td><td>加强 GC 引用跟踪</td><td>持续更新</td></tr><tr><td><strong>Lockdown Mode</strong></td><td>禁用 JIT（仅使用解释器）</td><td>iOS 16+</td></tr></tbody></table>
+<h3>7.2 W^X 绕过</h3>
+<p><strong>问题</strong>：W^X 阻止 JIT 页同时可写和可执行。</p>
+<p><strong>绕过思路</strong>：</p>
+<ol><li><strong>利用非 JIT 可执行内存</strong>：找到其他可执行区域（如 dyld、系统库）</li><li><strong>ROP（Return-Oriented Programming）</strong>：不注入代码，复用现有代码片段</li><li><strong>JIT 页切换</strong>：在写入和执行之间切换页权限（需找到权限切换缺陷）</li></ol>
+<h3>7.3 PAC 绕过</h3>
+<p><strong>问题</strong>：JIT 代码指针有 PAC 签名，无法直接覆写。</p>
+<p><strong>绕过思路</strong>：</p>
+<ol><li><strong>签名泄露</strong>：泄露 PAC 签名密钥/上下文</li><li><strong>签名绕过</strong>：找到不检查 PAC 的代码路径</li><li><strong>PAC 预言</strong>：通过侧信道预测有效签名</li><li><strong>XPAC 攻击</strong>：利用 PAC 高位未签名的特性（指针异或攻击）</li></ol>
+<h3>7.4 Lockdown Mode 影响</h3>
+<p><strong>Lockdown Mode</strong> 禁用 JIT，仅使用 LLInt 解释器：</p>
+<table><thead><tr><th>影响</th><th>说明</th></tr></thead><tbody><tr><td><strong>JIT 漏洞失效</strong></td><td>无 JIT → 无 JIT 类型推断缺陷</td></tr><tr><td><strong>性能下降</strong></td><td>解释器比 JIT 慢 10–100 倍</td></tr><tr><td><strong>仍需解释器漏洞</strong></td><td>LLInt 也可能有漏洞（但攻击面小得多）</td></tr></tbody></table>
+<p><strong>结论</strong>：Lockdown Mode 大幅降低 JSC JIT 攻击面。</p>
+<hr>
+<h2>8. 真实 CVE 案例深度解析</h2>
+<h3>8.1 CVE-2024-23222（Coruna 组件）</h3>
+<p><strong>类型</strong>：类型混淆（Type Confusion）</p>
+<p><strong>原理</strong>（简化）：</p>
+<pre><code>// JSC 在优化某些数组操作时
+// 错误假设数组元素类型不变
+
+// 攻击者通过原型链修改触发类型变化
+// JIT 未检测到 → 按错误类型读取
+// → 获得堆地址信息泄露（addrof 原语）
+// → 构建 fakeobj → 任意地址读写
+// → 覆写函数指针 → RCE</code></pre>
+<p><strong>影响</strong>：iOS 16.0–17.2.1（Coruna 利用链初始访问组件）</p>
+<h3>8.2 CVE-2025-43529（DarkSword 组件）</h3>
+<p><strong>类型</strong>：DFG JIT GC 缺陷</p>
+<p><strong>原理</strong>（简化）：</p>
+<pre><code>// DFG JIT 在优化 GC 相关操作时
+// 错误处理某些对象的引用跟踪
+
+// 导致对象被提前回收（UAF）
+// 或 GC 标记位错误 → 类型混淆
+// → 提供 WebContent 内 RCE 与内存原语</code></pre>
+<p><strong>影响</strong>：iOS 18.6–18.7（DarkSword 链条基础）</p>
+<h3>8.3 CVE-2021-30860（FORCEDENTRY）</h3>
+<p><strong>类型</strong>：类型混淆</p>
+<p><strong>原理</strong>：</p>
+<ul><li>NSO Group Pegasus 利用</li><li>通过恶意 PDF 触发 CoreText 漏洞</li><li>但初始 JavaScript 执行可能涉及 JSC 类型混淆</li><li>提供初始代码执行原语</li></ul>
+<p><strong>影响</strong>：iOS 12–14.x（Pegasus FORCEDENTRY 链）</p>
+<hr>
+<h2>9. 防御体系</h2>
+<h3>9.1 架构层防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th></tr></thead><tbody><tr><td><strong>W^X</strong></td><td>JIT 页不可同时可写可执行</td></tr><tr><td><strong>JIT Caging</strong></td><td>JIT 代码限制在特定范围</td></tr><tr><td><strong>PAC</strong></td><td>JIT 指针签名</td></tr><tr><td><strong>SPTM/TXM</strong></td><td>硬件级页表监控（A17+）</td></tr></tbody></table>
+<h3>9.2 引擎层防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th></tr></thead><tbody><tr><td><strong>类型硬化</strong></td><td>减少 speculation，增加运行时检查</td></tr><tr><td><strong>GC 硬化</strong></td><td>加强引用跟踪，减少 UAF</td></tr><tr><td><strong>边界检查</strong></td><td>保留关键边界检查，不盲目消除</td></tr><tr><td><strong>模糊测试</strong></td><td>持续 fuzzing JSC 发现漏洞</td></tr></tbody></table>
+<h3>9.3 运行时防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th></tr></thead><tbody><tr><td><strong>Lockdown Mode</strong></td><td>禁用 JIT，仅用解释器</td></tr><tr><td><strong>行为检测</strong></td><td>监控异常 JS 执行模式</td></tr><tr><td><strong>内存监控</strong></td><td>检测异常内存访问模式</td></tr></tbody></table>
+<h3>9.4 防御建议</h3>
+<p><strong>对个人用户</strong>：</p>
+<ol><li><strong>及时更新 iOS</strong>：获取 JSC 安全补丁</li><li><strong>高危用户启用 Lockdown Mode</strong>：禁用 JIT</li><li><strong>避免访问不可信网站</strong>：减少攻击面</li></ol>
+<p><strong>对企业/组织</strong>：</p>
+<ol><li><strong>MDM 管控</strong>：强制启用 Lockdown Mode（高风险岗位）</li><li><strong>网络过滤</strong>：阻止已知恶意网站</li><li><strong>运行时检测</strong>：监控 WebContent 异常行为</li></ol>
+<p><strong>对安全研究者</strong>：</p>
+<ol><li><strong>JSC 模糊测试</strong>：持续 fuzzing 发现新漏洞</li><li><strong>JIT 优化审计</strong>：审查 DFG/FTL 优化 pass</li><li><strong>硬化绕过研究</strong>：评估 W^X/PAC 绕过可能性</li></ol>
+<hr>
+<h2>10. 总结</h2>
+<p>JSC JIT 漏洞是 iOS 远程攻击的<strong>最高频初始入口</strong>：</p>
+<table><thead><tr><th>环节</th><th>关键点</th></tr></thead><tbody><tr><td><strong>JIT 管线</strong></td><td>LLInt → Baseline → DFG → FTL，投机优化引入风险</td></tr><tr><td><strong>核心漏洞</strong></td><td>类型混淆（最高频）、OOB、UAF、JIT 逻辑缺陷</td></tr><tr><td><strong>原语构建</strong></td><td>addrof → fakeobj → 任意地址读写</td></tr><tr><td><strong>控制流劫持</strong></td><td>覆写函数指针/vtable/GOT</td></tr><tr><td><strong>JIT 硬化</strong></td><td>W^X、Caging、PAC、Lockdown Mode</td></tr><tr><td><strong>防御核心</strong></td><td>及时补丁 + Lockdown Mode + 运行时检测</td></tr></tbody></table>
+<p><strong>对攻击链的意义</strong>：</p>
+<ul><li>JSC JIT 漏洞是&quot;访问网页 → 代码执行&quot;的关键</li><li>需要<strong>第二个漏洞</strong>（沙箱逃逸）才能完整沦陷</li><li>Lockdown Mode 大幅降低攻击面</li></ul>
+<p><strong>未来展望</strong>：</p>
+<ul><li>JIT 优化越来越激进，攻击面持续存在</li><li>PAC/W^X 提高攻击成本，但非绝对</li><li>需要持续 fuzzing + 硬化 + 运行时检测</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li>WebKit Open Source: https://webkit.org/</li><li>JavaScriptCore Internals (Apple WWDC sessions)</li><li>Google Project Zero: JSC exploit analysis</li><li>Synacktiv: JSC exploitation techniques</li><li>Apple Security Updates: WebKit CVE details</li><li>Academic papers on JIT security</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a29.html">← 第 29 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a31.html">第 31 篇 →</a></nav></article>
+</main></body></html>

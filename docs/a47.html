@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 反检测机制对比 | iOS 安全研究文章库</title>
+<meta name="description" content="六维工件面对比、主动清除型 vs 天然无痕型、MVT 与网络检测有效性、攻防权衡与检测分层策略">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a47.html">
+<meta property="og:title" content="Coruna 与 DarkSword 反检测机制对比">
+<meta property="og:description" content="六维工件面对比、主动清除型 vs 天然无痕型、MVT 与网络检测有效性、攻防权衡与检测分层策略">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a47.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 47 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 反检测机制对比</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Google Project Zero、Citizen Lab、Amnesty International、MVT (Mobile Verification Toolkit)、Lookout、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>反检测（Anti-Detection）</strong> 是商业间谍软件能否长期存活的关键能力。一款利用套件即便拥有完美的零日利用链，若能在一次例行取证扫描中被识别，其战术价值将急剧下降。</p>
+<p>Coruna 与 DarkSword 代表了反检测设计的两条不同技术路线：</p>
+<ul><li><strong>Coruna</strong>：<strong>主动清除型（Active Scrubbing）</strong>——会落地、会持久化，因此必须具备精细的痕迹管理能力，主动删除已产生的工件</li><li><strong>DarkSword</strong>：<strong>天然无痕型（Inherent Ephemeral）</strong>——不落地、不持久化，通过架构设计本身消除大部分工件来源</li></ul>
+<p>本文从<strong>工件面（Artifact Surface）</strong>这一取证核心视角出发，逐层对比两套体系在文件系统、进程、内存、网络、日志、启动项六个维度上留下的可检测痕迹，并结合 MVT 等公开检测工具的实际能力，分析各自的有效性与失效场景。</p>
+<hr>
+<h2>2. 检测体系概览：防御者在看什么</h2>
+<p>理解反检测，必须先理解检测方的信息源。当前 iOS 商业间谍软件检测主要依赖四类工件：</p>
+<h3>2.1 备份取证工件（Backup Artifacts）</h3>
+<table><thead><tr><th>信息源</th><th>说明</th><th>典型价值</th></tr></thead><tbody><tr><td><strong>iCloud 备份</strong></td><td>用户主动云备份，包含 App 数据、短信、通话记录、部分设置</td><td>无需接触设备即可远程取证</td></tr><tr><td><strong>iTunes/Finder 本地备份</strong></td><td>未加密备份可含 Keychain 与更多 App 数据</td><td>内容最丰富的单一来源</td></tr><tr><td><strong>iMazing / AFC 提取</strong></td><td>通过 USB 直接读取 App 容器与系统目录</td><td>可发现未备份文件</td></tr></tbody></table>
+<p><strong>MVT（Mobile Verification Toolkit）</strong> 是 Amnesty International 开源的自动化备份解析工具，核心机制是<strong> IOC 匹配 + 工件异常检查</strong>：在备份中搜索已知恶意文件路径、域名、进程名。</p>
+<h3>2.2 设备运行时工件（Live Artifacts）</h3>
+<table><thead><tr><th>信息源</th><th>说明</th></tr></thead><tbody><tr><td>进程列表与线程枚举</td><td>发现异常进程/异常线程</td></tr><tr><td>打开的文件句柄</td><td>发现未记录的落地文件</td></tr><tr><td>网络连接表</td><td>发现隐蔽外连</td></tr><tr><td>内存转储</td><td>发现注入代码、字符串、C2 配置</td></tr></tbody></table>
+<h3>2.3 系统日志与分析工件</h3>
+<table><thead><tr><th>信息源</th><th>说明</th></tr></thead><tbody><tr><td><strong>Crash Report</strong>（<code>/private/var/mobile/Library/Logs/CrashReporter/</code>）</td><td>进程崩溃记录含调用栈与内存映射，价值极高</td></tr><tr><td><strong>PowerLog / Analytics</strong></td><td>进程生命周期、CPU 使用异常</td></tr><tr><td><strong>sysdiagnose</strong></td><td>综合诊断包，含内核日志、网络状态、进程表</td></tr><tr><td><strong>netlog / DNS 缓存</strong></td><td>外连域名记录</td></tr></tbody></table>
+<h3>2.4 网络侧工件</h3>
+<table><thead><tr><th>信息源</th><th>说明</th></tr></thead><tbody><tr><td>DNS 解析日志（路由器/企业网关）</td><td>记录被访问域名，含已失效的 C2</td></tr><tr><td>TLS 握手元数据（JA3/JA4 指纹）</td><td>识别非标准 TLS 实现</td></tr><tr><td>出口流量画像</td><td>异常外传量、异常时间分布</td></tr></tbody></table>
+<p><strong>关键洞察</strong>：攻击者无法控制防御者的<strong>网络侧工件</strong>与 <strong>iCloud 备份的服务端留存</strong>——这是反检测能力的天然上限。</p>
+<hr>
+<h2>3. Coruna 的反检测机制</h2>
+<h3>3.1 设计前提</h3>
+<p>Coruna 采用<strong>部分持久化 + 多链复用</strong>架构，这意味着它必然在文件系统上留下痕迹。其反检测策略因此围绕&quot;<strong>产生后清除</strong>&quot;展开。</p>
+<h3>3.2 具体技术</h3>
+<h4>3.2.1 落地文件最小化</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td>载荷集中于单一目录</td><td>避免散布到多路径，便于一次性清除</td></tr><tr><td>使用系统风格命名</td><td>文件名模仿合法缓存/日志，降低人工审查发现率</td></tr><tr><td>混淆扩展名与目录层级</td><td>隐藏在 <code>/Library/Caches/</code> 等低关注路径</td></tr></tbody></table>
+<h4>3.2.2 元数据伪装</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>时间戳伪造</strong></td><td>修改 mtime/ctime 至系统安装或更新时刻，绕过&quot;最近新增文件&quot;检查</td></tr><tr><td><strong>权限设置模仿</strong></td><td>使用与系统文件一致的 owner/mode，避免异常权限告警</td></tr><tr><td><strong>避免可执行位滥用</strong></td><td>部分实现通过解释器加载而非直接 <code>chmod +x</code></td></tr></tbody></table>
+<h4>3.2.3 进程与线程隐藏</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>宿主进程伪装</strong></td><td>不创建新进程，注入到合法系统进程（如 media/图形相关守护进程）</td></tr><tr><td><strong>线程命名对齐</strong></td><td>恶意线程命名与宿主进程合法线程一致</td></tr><tr><td><strong>低活动占空比</strong></td><td>采集任务分片执行，避免持续高 CPU 触发 PowerLog 异常</td></tr></tbody></table>
+<h4>3.2.4 主动痕迹清除</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>崩溃规避</strong></td><td>精心处理异常路径——Crash Report 是 MVT 与人工取证最高价值工件，一次崩溃可能暴露整条链</td></tr><tr><td><strong>日志删除</strong></td><td>在提权后清理相关系统日志条目</td></tr><tr><td><strong>Safari/WebKit 缓存清理</strong></td><td>删除水坑页面的历史记录与缓存（初始访问的直接证据）</td></tr><tr><td><strong>自毁指令</strong></td><td>C2 可下发一次性清除所有工件并卸载</td></tr></tbody></table>
+<h4>3.2.5 网络侧对抗</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>CDN / 云服务混入</strong></td><td>中转层流量与合法云 API 调用不可区分</td></tr><tr><td><strong>标准 TLS 栈</strong></td><td>避免自定义 TLS 实现产生的 JA3 异常</td></tr><tr><td><strong>域名生命周期短</strong></td><td>前端域名使用后即弃，等防御者分析完成时已失效</td></tr></tbody></table>
+<h3>3.3 Coruna 的残留工件（已知泄露点）</h3>
+<p>尽管具备上述能力，Coruna 仍会留下以下可检测痕迹：</p>
+<table><thead><tr><th>工件</th><th>说明</th><th>对备份取证的可见性</th></tr></thead><tbody><tr><td>落地载荷文件</td><td>若清除不彻底或在中途被捕获</td><td>✅ 高（iMazing/AFC 可见）</td></tr><tr><td>持久化启动项</td><td>用于重启后恢复</td><td>⚠️ 部分备份可含 plist</td></tr><tr><td>WebKit 缓存残留</td><td>清除前被备份捕获</td><td>✅ 中</td></tr><tr><td>DNS 缓存条目</td><td>系统 DNS 缓存</td><td>✅ 中（sysdiagnose 更完整）</td></tr><tr><td>采集数据临时文件</td><td>大数据打包瞬间</td><td>⚠️ 短窗口</td></tr><tr><td>崩溃报告</td><td>一旦触发</td><td>✅ 极高（含栈与模块基址）</td></tr></tbody></table>
+<hr>
+<h2>4. DarkSword 的反检测机制</h2>
+<h3>4.1 设计前提</h3>
+<p>DarkSword 的核心决策是<strong>不在文件系统上留下任何持久化痕迹</strong>。这使得它的反检测更多来自<strong>架构选择</strong>而非<strong>清除动作</strong>——不产生，自然无需清除。</p>
+<h3>4.2 具体技术</h3>
+<h4>4.2.1 架构级无痕</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>零文件写入</strong></td><td>所有代码通过匿名内存页执行，不创建文件</td></tr><tr><td><strong>无启动项</strong></td><td>不注册 LaunchDaemon/LaunchAgent，启动项检查完全失效</td></tr><tr><td><strong>不修改配置</strong></td><td>不写 plist、不改系统设置，完整性校验无从触发</td></tr><tr><td><strong>备份不可捕获</strong></td><td>内存中内容不进入任何备份通道——iCloud/iTunes 备份看不到</td></tr></tbody></table>
+<h4>4.2.2 内存层反取证</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>用后覆写</strong></td><td>敏感数据外传后立即覆写并释放</td></tr><tr><td><strong>加密驻留</strong></td><td>模块在内存中以加密形态保存，执行时按需解密</td></tr><tr><td><strong>短生命周期模块</strong></td><td>每段代码执行完即卸载，缩短内存捕获窗口</td></tr><tr><td><strong>禁用 core dump</strong></td><td>防止异常时将内存写入磁盘</td></tr></tbody></table>
+<h4>4.2.3 网络与会话层</h4>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>短会话</strong></td><td>单次连接数秒至数分钟，网络分析窗口极窄</td></tr><tr><td><strong>DGA 域名</strong></td><td>域名按算法生成，黑名单在生效时已过期</td></tr><tr><td><strong>系统原生 TLS</strong></td><td>使用设备自身 TLS 框架，JA3 指纹与正常 Safari 完全一致</td></tr><tr><td><strong>API 路径伪装</strong></td><td>请求路径模仿合法 REST 接口</td></tr></tbody></table>
+<h4>4.2.4 时间维度的自我消解</h4>
+<p>DarkSword 最独特的反检测能力是<strong>&quot;重启即清&quot;</strong>：</p>
+<pre><code>攻击执行 → 完成任务 → 用户重启设备 → 所有痕迹物理消失</code></pre>
+<p>这意味着即便防御者事后获得设备，只要期间发生过一次重启，几乎所有运行时证据都已随 DRAM 断电消失。攻击者甚至不需要主动清除。</p>
+<h3>4.3 DarkSword 的残留工件</h3>
+<table><thead><tr><th>工件</th><th>说明</th><th>对备份取证的可见性</th></tr></thead><tbody><tr><td>水坑页面访问记录</td><td>Safari 历史 / WebKit 缓存</td><td>⚠️ 中（重启或清理后消失）</td></tr><tr><td>DNS 解析记录</td><td>路由器/企业网关日志</td><td>✅ <strong>高（攻击者无法控制）</strong></td></tr><tr><td>异常进程行为</td><td>运行时内存取证</td><td>✅ 仅在设备运行时可捕获</td></tr><tr><td>崩溃报告</td><td>若利用失败触发</td><td>⚠️ 可能暴露漏洞细节</td></tr><tr><td>内核状态异常</td><td>重启后消失</td><td>❌ 事后取证不可见</td></tr></tbody></table>
+<p><strong>关键观察</strong>：DarkSword 在设备侧几乎无痕，但<strong>网络侧 DNS 日志与流量元数据仍是其最可靠的暴露途径</strong>。</p>
+<hr>
+<h2>5. 逐维度对比</h2>
+<h3>5.1 六维工件面对比</h3>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th><th>优势方</th></tr></thead><tbody><tr><td><strong>文件系统</strong></td><td>有落地文件，需主动清除</td><td>零文件写入</td><td>DarkSword</td></tr><tr><td><strong>启动项</strong></td><td>有持久化条目</td><td>无</td><td>DarkSword</td></tr><tr><td><strong>进程视图</strong></td><td>注入合法进程，需命名伪装</td><td>同样注入，但不留下可关联的文件映射</td><td>DarkSword</td></tr><tr><td><strong>内存</strong></td><td>载荷驻留时间长，捕获窗口宽</td><td>短生命周期 + 覆写</td><td>DarkSword</td></tr><tr><td><strong>网络</strong></td><td>多通道、长心跳，暴露面大</td><td>单通道、短会话，暴露窗口小</td><td>DarkSword</td></tr><tr><td><strong>备份可捕获性</strong></td><td>✅ 可被 AFC/备份发现</td><td>❌ 内存内容不进备份</td><td>DarkSword</td></tr></tbody></table>
+<h3>5.2 对抗 MVT 类工具</h3>
+<table><thead><tr><th>MVT 检测能力</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>IOC 文件路径匹配</td><td>⚠️ 有效（若清除不彻底）</td><td>❌ 无效（无文件）</td></tr><tr><td>IOC 域名/URL 匹配</td><td>⚠️ 有效（历史/缓存中）</td><td>⚠️ 有限（依赖 DGA 情报新鲜度）</td></tr><tr><td>异常进程名检查</td><td>⚠️ 部分有效（伪装命名）</td><td>⚠️ 部分有效</td></tr><tr><td>Crash Report 分析</td><td>✅ 高价值</td><td>⚠️ 有效（若触发崩溃）</td></tr><tr><td>启动项枚举</td><td>✅ 有效</td><td>❌ 无效</td></tr><tr><td>Keychain 异常访问痕迹</td><td>⚠️ 视实现</td><td>⚠️ 视实现</td></tr></tbody></table>
+<p><strong>结论</strong>：MVT 类基于<strong>备份工件 + IOC 匹配</strong>的检测范式，对 Coruna 有效性显著高于 DarkSword。这也解释了为何 Coruna 系列能被大规模公开归因分析，而 DarkSword 的检测依赖 Project Zero 的<strong>运行时研究</strong>。</p>
+<h3>5.3 对抗网络检测</h3>
+<table><thead><tr><th>网络检测手段</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>域名黑名单</td><td>⚠️ 域名轮换削弱</td><td>⚠️ DGA 削弱</td></tr><tr><td>JA3/JA4 指纹</td><td>✅ 若自定义 TLS 则有效</td><td>❌ 使用系统 TLS，指纹正常</td></tr><tr><td>流量频率分析</td><td>✅ 心跳模式可识别</td><td>⚠️ 短会话难形成统计特征</td></tr><tr><td>DNS 日志回溯</td><td>✅ 有效</td><td>✅ <strong>同样有效（DarkSword 主要弱点）</strong></td></tr><tr><td>出口流量量级</td><td>✅ 大数据外传可告警</td><td>✅ 有效（采集数据仍需传出）</td></tr></tbody></table>
+<h3>5.4 对抗运行时/内存检测</h3>
+<table><thead><tr><th>手段</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>内存转储搜索</td><td>✅ 载荷驻留久，易命中</td><td>⚠️ 窗口短，命中难</td></tr><tr><td>匿名可执行页检测</td><td>⚠️ 有效</td><td>✅ 有效（<strong>DarkSword 主要技术弱点</strong>）</td></tr><tr><td>内核 hook 完整性检查</td><td>✅ 有效</td><td>✅ 有效（若不重启）</td></tr><tr><td>异常线程枚举</td><td>⚠️ 需了解伪装命名</td><td>⚠️ 同</td></tr></tbody></table>
+<hr>
+<h2>6. 战略权衡分析</h2>
+<h3>6.1 隐蔽性 vs 控制力</h3>
+<p>两套体系本质上是同一权衡的两端：</p>
+<pre><code>      长期控制力 ←──────────────────────→ 高隐蔽性
+         ↑                                      ↑
+       Coruna                              DarkSword
+   (持久化+主动清除)                    (无落地+自然消解)
+   暴露面大 / 可回溯                    暴露面小 / 不可回溯</code></pre>
+<table><thead><tr><th>权衡项</th><th>Coruna 的选择</th><th>DarkSword 的选择</th></tr></thead><tbody><tr><td>被检测到后能否快速重建</td><td>✅ 能（多链、多域名、基础设施分层）</td><td>⚠️ 需重新投递全部链</td></tr><tr><td>单次入侵能持续多久</td><td>✅ 数月至数年</td><td>❌ 至多到下次重启</td></tr><tr><td>被公开归因分析的概率</td><td>✅ 高（工件多）</td><td>⚠️ 低（工件少）</td></tr><tr><td>对高警觉目标的适用性</td><td>⚠️ 差</td><td>✅ 好</td></tr><tr><td>运营成本</td><td>低（植入后自运转）</td><td>高（需反复投递）</td></tr></tbody></table>
+<h3>6.2 与目标画像的匹配</h3>
+<p><strong>Coruna 适合</strong>：</p>
+<ul><li>需要长期持续监控的对象（活动人士、政治对手、记者）</li><li>目标设备重启频率低、不易被取证检查</li><li>攻击方拥有充足漏洞储备支撑长期运营</li></ul>
+<p><strong>DarkSword 适合</strong>：</p>
+<ul><li>短期高价值窗口（会议、谈判、特定事件期间）</li><li>目标可能被反复取证扫描（如已被公民社会保护的记者）</li><li>攻击方漏洞储备有限，需节省零日消耗</li></ul>
+<h3>6.3 演化趋势</h3>
+<p>从公开报告时间线可观察到两个方向的趋同：</p>
+<table><thead><tr><th>趋势</th><th>说明</th></tr></thead><tbody><tr><td><strong>Coruna 向 DarkSword 学习</strong></td><td>新一代套件减少文件落地、增强内存驻留比例，降低备份可捕获性</td></tr><tr><td><strong>DarkSword 向 Coruna 学习</strong></td><td>在保持无持久化的同时引入备用信道与轻量重投递协调机制</td></tr><tr><td><strong>共同的新方向</strong></td><td>利用<strong>合法云服务与第三方基础设施</strong>承载数据，使工件天然存在于攻击者无法清除、防御者无法归因的位置</td></tr></tbody></table>
+<hr>
+<h2>7. 攻击者视角的常见失误</h2>
+<p>分析已公开的归因案例，两套体系都曾因以下失误被捕获：</p>
+<table><thead><tr><th>失误</th><th>后果</th><th>案例类型</th></tr></thead><tbody><tr><td><strong>崩溃报告未清理</strong></td><td>泄露漏洞组件、模块基址、部分调用栈</td><td>Coruna 类持久化载荷</td></tr><tr><td><strong>域名跨套件复用</strong></td><td>一次归因暴露多次行动</td><td>基础设施管理失误</td></tr><tr><td><strong>证书复用</strong></td><td>通过证书序列号/公钥关联多个 C2</td><td>通用</td></tr><tr><td><strong>利用失败但留下记录</strong></td><td>水坑页面被完整抓取并分析</td><td>通用（尤其 DarkSword）</td></tr><tr><td><strong>目标误判</strong></td><td>向安全研究人员投递，导致完整分析公开</td><td>目标识别失误</td></tr><tr><td><strong>iOS 版本探测不严谨</strong></td><td>在已修补版本上触发，暴露载荷而不成功</td><td>通用</td></tr><tr><td><strong>清除逻辑有缺陷</strong></td><td>部分路径未覆盖，留下残留</td><td>Coruna 类</td></tr></tbody></table>
+<p><strong>对防御者的启示</strong>：反检测机制的强度取决于<strong>运维纪律</strong>，而非仅代码质量。基础设施管理失误（证书、域名复用）往往是归因突破点。</p>
+<hr>
+<h2>8. 防御建议</h2>
+<h3>8.1 分层检测策略</h3>
+<p>针对两套体系的不同弱点，应采取差异化检测：</p>
+<table><thead><tr><th>检测层</th><th>针对 Coruna</th><th>针对 DarkSword</th></tr></thead><tbody><tr><td><strong>备份/文件系统扫描</strong></td><td>✅ 主力手段</td><td>❌ 无效，不要依赖</td></tr><tr><td><strong>IOC 域名黑名单</strong></td><td>✅ 有效</td><td>⚠️ 需 DGA 情报支持</td></tr><tr><td><strong>运行时行为监控</strong></td><td>✅ 有效</td><td>✅ <strong>主力手段</strong></td></tr><tr><td><strong>内存取证</strong></td><td>✅ 有效</td><td>✅ 唯一可靠设备侧手段</td></tr><tr><td><strong>网络元数据/DNS 日志</strong></td><td>✅ 有效</td><td>✅ <strong>最实用的通用手段</strong></td></tr><tr><td><strong>Crash Report 巡检</strong></td><td>✅ 高价值</td><td>⚠️ 中等价值</td></tr></tbody></table>
+<h3>8.2 具体行动清单</h3>
+<p><strong>对高危个人</strong>：</p>
+<ol><li><strong>启用锁定模式</strong>——直接关闭 WebKit JIT 与 WebGPU，切断两套体系的入口</li><li><strong>定期重启设备</strong>（每日）——强制清除 DarkSword 类内存驻留</li><li><strong>定期导出并检查备份</strong>——用 MVT 扫描，发现 Coruna 类落地痕迹</li><li><strong>避免不明链接</strong>——两套体系主要依赖 1-click 水坑</li></ol>
+<p><strong>对组织/企业</strong>：</p>
+<ol><li><strong>保留 DNS 与流量元数据</strong>——这是发现 DarkSword 类攻击的最实用信号</li><li><strong>部署 TLS 检测</strong>（受控环境）——检查加密通道内容</li><li><strong>建立设备行为基线</strong>——异常外连/进程告警</li><li><strong>MDM 采集 sysdiagnose</strong>——支持快速内存与进程检查</li><li><strong>威胁情报订阅</strong>——Citizen Lab、Amnesty 等公开的 C2 基础设施更新</li><li><strong>对目标设备做前置取证基线</strong>——入侵后差异比对</li></ol>
+<h3>8.3 关键提醒</h3>
+<blockquote><p><strong>DarkSword 类无持久化攻击意味着&quot;扫描干净&quot;不等于&quot;从未被入侵&quot;。</strong> 设备重启后一切证据消失，防御者获得的是&quot;当前无残留&quot;，而非&quot;历史上无入侵&quot;。 唯一能跨越这个盲区的证据来源是<strong>网络侧日志</strong>和<strong>攻击者自身泄露的样本</strong>。</p></blockquote>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>结论</th><th>内容</th></tr></thead><tbody><tr><td><strong>1. 两条路线，一个目标</strong></td><td>Coruna 走&quot;落地+主动清除&quot;，DarkSword 走&quot;不落地+自然消解&quot;，都服务于同一目的：降低被归因分析的概率</td></tr><tr><td><strong>2. 架构优于技巧</strong></td><td>DarkSword 的实践证明：<strong>最好的反检测是不产生工件</strong>，胜过任何精巧的清除逻辑</td></tr><tr><td><strong>3. 检测范式必须升级</strong></td><td>以备份扫描为核心的传统检测（MVT 类）对无持久化攻击基本失效，必须引入运行时与网络层检测</td></tr><tr><td><strong>4. 网络侧是不可控盲区</strong></td><td>攻击者无法清除防御者路由器/网关的 DNS 日志，这是对抗双方共同的&quot;第三方证人&quot;</td></tr><tr><td><strong>5. 权衡不可回避</strong></td><td>极致隐蔽必然牺牲持续控制力；DarkSword 每次重启后失去设备，这是其无持久化架构的硬代价</td></tr></tbody></table>
+<p>从攻防演化看，&quot;无持久化&quot;正在从一种限制转变为一种<strong>设计标准</strong>。下一代商业间谍软件更可能采用&quot;内存驻留为主、按需最小落地&quot;的混合模式——这要求防御体系尽早具备运行时检测能力，仅靠&quot;找文件&quot;的时代已经结束。</p>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Amnesty International: <a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">Mobile Verification Toolkit (MVT)</a></li><li>Amnesty International Security Lab: <a href="https://www.amnesty.org/en/latest/research/2021/07/forensic-methodology-report-how-to-catch-nso-groups-pegasus/" rel="nofollow noopener" target="_blank">The Pegasus Project: Forensic Methodology Report</a></li><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna 相关分析报告</a></li><li>Lookout: <a href="https://www.lookout.com/threat-report" rel="nofollow noopener" target="_blank">iOS Threat Report — Commercial Spyware Detection</a></li><li>Apple Security Updates: <a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a46.html">← 第 46 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a48.html">第 48 篇 →</a></nav></article>
+</main></body></html>

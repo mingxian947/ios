@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iMessage 与端到端消息通路的攻击面分析：0-click 投递面与取证边界 | iOS 安全研究文章库</title>
+<meta name="description" content="送达即解析的三层风险叠加、端到端加密改变与不改变的维度、五种投递形态与前置能力、会话工件取证缺口与表述纪律、锁定模式缓解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a71.html">
+<meta property="og:title" content="iMessage 与端到端消息通路的攻击面分析：0-click 投递面与取证边界">
+<meta property="og:description" content="送达即解析的三层风险叠加、端到端加密改变与不改变的维度、五种投递形态与前置能力、会话工件取证缺口与表述纪律、锁定模式缓解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a71.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 71 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iMessage 与端到端消息通路的攻击面分析：0-click 投递面与取证边界</h1>
+<blockquote><p>编制日期：2026-10-24 数据来源：Apple Platform Security 与 iMessage 安全文档、Google Project Zero（含零点击消息通路相关披露）、Citizen Lab 与 Amnesty 公开报告、CVE 情报库、MVT 工件范围 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>在公开的商业间谍软件案例里，&quot;用户什么都没点就中招&quot;这一形态反复出现，而它最常见的落点不是浏览器，而是<strong>消息通路</strong>：一条送达的报文就能让设备上的解析代码处理攻击者提供的字节。本文把这条通路拆开，说明它为什么天然构成攻击面、端到端加密在其中起了什么作用（以及没起什么作用），以及调查者能从这条链上拿到什么证据。</p>
+<p>四条结论：</p>
+<ol><li>端到端加密保护的是<strong>内容机密性</strong>，不保护<strong>接收端的解析安全</strong>：报文必须在设备上被解码与渲染，因此加密与&quot;0-click 攻击面是否存在&quot;是两件独立的事。</li><li>消息通路的危险不来自&quot;发送者可控内容&quot;这一点本身，而来自三项叠加：<strong>送达即处理（无用户动作）</strong>、<strong>富媒体自动解析（附件、预览、缩略图）</strong>、<strong>扩展参与渲染（通知服务/表情/贴纸类扩展）</strong>。这三点在架构上与其他各篇讨论的解析面同构（#44、#52、#68）。</li><li>因此有效的平台级缓解不是&quot;加密更强&quot;，而是<strong>推迟或隔离解析</strong>：不自动下载远程内容、把解析放进隔离域、限制扩展可触达的能力。#34 的锁定模式正是作用在这三个开关上。</li><li>对调查者而言，消息通路是<strong>双刃</strong>：设备端取证可以拿到会话元数据与本机落地内容，但服务端因端到端而拿不到历史明文；同时&quot;密钥在设备上&quot;意味着一旦设备被攻破（#41、#53），端到端保护对被感染的那一端不提供任何防御。</li></ol>
+<hr>
+<h2>2. 通路的分层与处理时机</h2>
+<pre><code>发送方
+  │  服务端路由（账户/设备标识、推送中继）
+  ▼
+到达层：推送/唤醒  ←──── 与 #65 的推送通路完全重合
+  │
+接收层：报文解码（协议层解析、类型分派）
+  │
+渲染层：文本/附件/预览/链接卡片
+  │        ├─ 自动下载与缩略图生成（媒体解析，#44 同类）
+  │        └─ 扩展参与（通知服务扩展、贴纸/表情类）
+  ▼
+存储层：本机会话数据库（受 Data Protection 保护）</code></pre>
+<table><thead><tr><th>层</th><th>是否需用户动作</th><th>处理攻击者可控字节</th><th>缓解开关</th></tr></thead><tbody><tr><td>到达（推送唤醒）</td><td><strong>否</strong></td><td>少量（负载字段）</td><td>专注模式、通知设置、锁定模式收紧</td></tr><tr><td>协议解码</td><td><strong>否</strong></td><td><strong>是</strong>（报文结构、字段）</td><td>无法由用户关闭（需保持可收件）</td></tr><tr><td>富媒体/预览</td><td>视配置</td><td><strong>是</strong>（图像、音视频、字体等格式解析）</td><td>关闭自动下载、限制预览</td></tr><tr><td>扩展渲染</td><td>多数自动</td><td><strong>是</strong>（扩展进程内的解析）</td><td>沙箱范围与扩展能力限制（#52）</td></tr><tr><td>存储</td><td>否</td><td>内容落地</td><td>Data Protection 类别（#43、#53）</td></tr></tbody></table>
+<p><strong>关键结构点</strong>：与浏览器路径（#40）不同，消息通路在&quot;用户尚未决定要不要看&quot;的时候就已经执行了解析。这就是&quot;无交互（L1）/无渲染（L2）&quot;分层（#43）存在的原因：越靠前的层，用户越没有机会介入，因此防御只能靠架构隔离而非用户习惯。</p>
+<hr>
+<h2>3. 端到端加密改变了什么、没改变什么</h2>
+<table><thead><tr><th>维度</th><th>端到端加密的作用</th><th>不作用</th></tr></thead><tbody><tr><td>传输中内容机密性</td><td><strong>有效</strong>（服务端仅见密文与元数据）</td><td>—</td></tr><tr><td>服务端历史明文可得性</td><td>服务端依法配合也拿不到历史内容</td><td>元数据（时间、参与者、设备标识）仍在</td></tr><tr><td>接收端解析安全</td><td><strong>无作用</strong>：解密后必然本地解析</td><td>攻击面照常存在（第 2 节解码/渲染层）</td></tr><tr><td>被攻破设备上的可读性</td><td><strong>无作用</strong>：密钥与解密结果都在本机</td><td>取证/入侵同样能读到会话（#53、#42）</td></tr><tr><td>备份侧</td><td>取决于备份的密钥归属（见 #69 的密钥分层）</td><td>若类别非端对端，云端可解</td></tr><tr><td>联系人映射与账户关联</td><td>无作用</td><td>标识解析服务仍暴露手机号/邮箱与密钥的对应关系</td></tr></tbody></table>
+<p><strong>结论</strong>：把&quot;这条消息是加密的&quot;理解为&quot;这条路径是安全的&quot;，是防御沟通里最常见的错误。加密是<strong>内容</strong>层面的属性；攻击面是<strong>解析代码</strong>层面的属性。任何声称&quot;因为端到端加密所以不可能被消息投递攻破&quot;的判断都需要按第 2 节重新检查。</p>
+<hr>
+<h2>4. 投递形态与前置能力要求</h2>
+<table><thead><tr><th>形态</th><th>用户动作</th><th>需要的前置能力</th><th>与已有篇目对应</th></tr></thead><tbody><tr><td><strong>D1 送达即触发解析缺陷</strong></td><td>无</td><td>一个报文触发解析层内存缺陷，通常还需 #68 的可达性 + #41 的提权</td><td>#43（L1/L2 分层）、#49</td></tr><tr><td><strong>D2 送达 + 渲染触发</strong></td><td>无（打开会话即渲染）</td><td>渲染/字体/图像解析缺陷</td><td>#44、#52</td></tr><tr><td><strong>D3 诱导点击（钓鱼链接）</strong></td><td>有</td><td>仅需社工；随后走浏览器路径</td><td>#40、#66 路径 C</td></tr><tr><td><strong>D4 附件外发通道利用</strong></td><td>无（自动下载后解析）</td><td>关闭自动下载即可消除</td><td>#47（外发与隐蔽通道）</td></tr><tr><td><strong>D5 已感染设备借用会话</strong></td><td>无</td><td>已有代码执行 + 采集能力</td><td>#42、#53</td></tr></tbody></table>
+<p>D1–D2 属于稀有的无交互远程形态，工程门槛高、单条报文价值大，因此公开案例里出现次数有限但影响重大；D3 在实际感染事件中的总量远高于前者。防御预算因此要<strong>分人群</strong>：高危角色按 D1/D2 假设配置（锁定模式、关闭自动下载、最小授权），普通角色主要防 D3。</p>
+<hr>
+<h2>5. 调查与取证要点</h2>
+<table><thead><tr><th>工件</th><th>内容</th><th>提取路径</th><th>注意点</th></tr></thead><tbody><tr><td>会话数据库</td><td>本机消息正文、收发时间、附件引用</td><td>备份提取（AFU + 解锁后，#43）</td><td>BFU 阶段不可读；类别依赖 Data Protection</td></tr><tr><td>附件与缩略图缓存</td><td>落地媒体、生成时间</td><td>沙箱容器 / 媒体库</td><td>自动下载关闭时可能不存在，<strong>缺失不等于未收到</strong></td></tr><tr><td>推送/通知记录</td><td>唤醒时刻与来源</td><td>系统日志 / 通知数据库</td><td>与 #65 的唤醒时间线对齐</td></tr><tr><td>渲染进程崩溃日志</td><td>解析失败的异常痕迹</td><td>诊断日志</td><td>攻击尝试失败的强时间窗信号（#63 HUNT-04、#70 第 6 节）</td></tr><tr><td>链接预览/WebContent 痕迹</td><td>会话内 URL 的解析记录</td><td>WebView 工件（#70）</td><td>与浏览器历史区分：会话内加载常只在缓存</td></tr><tr><td>设备与密钥注册信息</td><td>账户-设备关联</td><td>账户侧（#69）</td><td>需先固定再变更凭证（#62 顺序纪律）</td></tr></tbody></table>
+<p><strong>表述纪律</strong>（延续 #62、#70）：</p>
+<blockquote><p>若本机数据库中没有指向 X 的报文记录，只能写&quot;在本次提取的工件范围内未发现&quot;，不能写&quot;未收到&quot;。渲染/缓存层是否产生工件取决于自动下载与预览配置，且可被清除。</p></blockquote>
+<hr>
+<h2>6. 防御清单</h2>
+<table><thead><tr><th>措施</th><th>覆盖</th><th>效果</th><th>代价</th></tr></thead><tbody><tr><td>锁定模式（#34）</td><td>D1/D2/D4</td><td>收紧自动下载、预览与扩展参与；直接削减&quot;送达即解析&quot;的面</td><td>部分便利功能不可用</td></tr><tr><td>关闭未知发件人消息/过滤</td><td>D1/D2</td><td>让报文停在&quot;未处理&quot;状态</td><td>可能漏接</td></tr><tr><td>不自动下载远程媒体</td><td>D4</td><td>消除附件解析的无交互触发</td><td>需手动确认</td></tr><tr><td>撤销不必要的扩展与权限（#66）</td><td>D2/D5</td><td>缩小可被借用的宿主</td><td>组织内自动化受影响</td></tr><tr><td>及时补丁（#61）</td><td>全部</td><td>唯一针对解析缺陷本身的手段</td><td>依赖更新纪律</td></tr><tr><td>敏感身份使用独立设备/账户</td><td>全部</td><td>隔离投递面与数据面</td><td>成本</td></tr><tr><td>被入侵后的处置：先取证后重置（#48、#62）</td><td>D5</td><td>避免把唯一证据随凭证重置一并灭失</td><td>需流程支持</td></tr></tbody></table>
+<hr>
+<h2>7. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>唤醒与推送通路（本文第 2 节的到达层）</td><td>#65（推送与通知通路）</td></tr><tr><td>隔离域与扩展渲染</td><td>#52（沙箱/BlastDoor）、#68（IPC/XPC 审计）</td></tr><tr><td>媒体与字体解析面</td><td>#44（渲染与图形攻击面）</td></tr><tr><td>无交互分层与解锁状态</td><td>#43（0-click 分层与 BFU/AFU）</td></tr><tr><td>端到端与密钥归属</td><td>#69（同步与中继通道）、#53（SEP 与钥匙串）</td></tr><tr><td>投递失败痕迹与工件缺口</td><td>#70（Safari/WebView 工件）、#63（狩猎手册）</td></tr><tr><td>归因与证据</td><td>#62（取证证据链）、#59（ATT&amp;CK 映射）、#55（反取证）</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>端到端加密保护内容机密性，不保护接收端解析安全——两者是独立属性</td></tr><tr><td>2</td><td>消息通路的风险来自&quot;送达即处理 + 自动解析 + 扩展参与&quot;三项叠加，而非内容可控本身</td></tr><tr><td>3</td><td>因此平台级缓解的正确方向是推迟与隔离解析，锁定模式正作用在这三个开关</td></tr><tr><td>4</td><td>D1/D2 类无交互投递工程门槛高，防御预算应按人群分配：高危按无交互假设，普通按钓鱼假设</td></tr><tr><td>5</td><td>一旦设备被攻破，端到端对被感染那一端不提供防御；会话内容对本机取证与对入侵者同样可读</td></tr><tr><td>6</td><td>调查上最可靠的时间窗信号常是渲染层崩溃聚合与推送唤醒时刻，而不是消息数据库本身</td></tr><tr><td>7</td><td>自动下载关闭时&quot;附件工件缺失&quot;是预期状态，不能据此推断未收到报文</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：Coruna 与 DarkSword 这类链条之所以反复把消息通路当作入口，不是因为加密有缺陷，而是因为<strong>任何可用设备都必须解密并渲染报文</strong>——防御方真正能控制的，是让这份解析发生在多隔离的域里、发生得多晚、以及是否根本没有发生；把这条通路理解为&quot;加密即安全&quot;，是所有关于 iMessage 的风险讨论里代价最大的一个误解。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Messaging &amp; End-to-End Encryption</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 零点击与消息通路研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 商业间谍软件投递路径披露</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — iOS 工件提取范围</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a70.html">← 第 70 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a72.html">第 72 篇 →</a></nav></article>
+</main></body></html>

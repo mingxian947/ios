@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 沙箱逃逸分析文章 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 3 · 沙箱逃逸">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a05.html">
+<meta property="og:title" content="iOS 沙箱逃逸分析文章">
+<meta property="og:description" content="阶段 3 · 沙箱逃逸">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a05.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 5 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 沙箱逃逸（Sandbox Escape）· 分析文章</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Google Project Zero、Synacktiv、8ksec、CSA、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 什么是沙箱，为什么攻击者必须&quot;逃逸&quot;</h2>
+<p>iOS 采用<strong>强制访问控制沙箱（Seatbelt / sandbox profile）</strong>：每个进程（尤其是处理不可信内容的进程）被限制在极小权限内——不能随意读文件、不能访问其他应用数据、不能直接碰硬件与内核接口。</p>
+<p>对攻击者而言，即便通过 <strong>WebKit RCE</strong> 控制了 <strong>WebContent 渲染进程</strong>，也仍被困在沙箱里：拿不到用户数据、无法持久化、无法提权。因此<strong>沙箱逃逸（Sandbox Escape）是连接&quot;网页代码执行&quot;与&quot;完整设备沦陷&quot;的必经环节</strong>：</p>
+<pre><code>WebKit RCE (WebContent 进程内代码执行)
+        │   ← 仍受沙箱限制
+[沙箱逃逸]  借助第二个漏洞突破进程/权限边界
+        │
+内核提权 (root / 内核读写)
+        │
+完整设备沦陷</code></pre>
+<hr>
+<h2>2. iOS 沙箱逃逸的常见攻击面</h2>
+<p>逃逸的本质是：<strong>让被沙箱限制的进程，去触达一个权限更高、且存在缺陷的组件</strong>。常见攻击面：</p>
+<table><thead><tr><th>攻击面</th><th>说明</th><th>典型例子</th></tr></thead><tbody><tr><td><strong>WebKit IPC / 绑定层</strong></td><td>WebContent 通过 IPC 调用更高权限的服务（如网络、存储、GPU 服务）；IPC 校验缺陷可被滥用</td><td>Synacktiv《Escaping the Safari Sandbox: a tour of WebKit IPC》</td></tr><tr><td><strong>GPU / 图形栈（ANGLE / WebGPU / IOKit）</strong></td><td>渲染进程可与 GPU 驱动/图形服务交互；驱动或 ANGLE 层缺陷可成为逃逸跳板</td><td>DarkSword 经 ANGLE/WebGPU 层逃逸；CVE-2025-43529 链条</td></tr><tr><td><strong>Mach / 内核相邻 IPC</strong></td><td>Mach 端口、voucher、IPC 消息处理缺陷</td><td>历史多条在野链条组件</td></tr><tr><td><strong>IOKit 驱动</strong></td><td>用户态可 reach 的内核驱动接口存在内存缺陷</td><td>经典 iOS 逃逸/提权面</td></tr><tr><td><strong>媒体 / 后台服务</strong></td><td>将恶意指令导入后台媒体服务等更高权限进程</td><td>DarkSword 将指令导入后台媒体服务</td></tr></tbody></table>
+<p><strong>关键洞察</strong>：沙箱逃逸很少是&quot;单一漏洞&quot;，而是<strong>利用被允许的系统调用/IPC 通道 + 该通道上更高权限组件的缺陷</strong>。攻击者优先选择沙箱&quot;放行&quot;的接口（GPU、IPC、媒体），因为这些是沙箱内进程合法可达的。</p>
+<hr>
+<h2>3. 代表性案例与 CVE</h2>
+<table><thead><tr><th>CVE / 案例</th><th>组件</th><th>作用</th><th>备注</th></tr></thead><tbody><tr><td>CVE-2025-43529</td><td>JavaScriptCore（DFG 层 GC 缺陷）</td><td>提供 WebContent 内 RCE 与内存原语</td><td>iOS 18.6–18.7；DarkSword 链条基础，逃逸经 ANGLE/GPU 层完成</td></tr><tr><td>CVE-2025-24201</td><td>WebKit（越界写）</td><td>沙箱逃逸</td><td>在野/公开分析</td></tr><tr><td>Project Zero 2023 在野分析</td><td>Safari WebContent → 逃逸</td><td>首个系统化的在野 WebContent 沙箱逃逸剖析</td><td>揭示 IPC/驱动逃逸手法</td></tr><tr><td>CVE-2023-32434 等</td><td>WebKit/内核</td><td>链条组件</td><td>历史在野利用</td></tr></tbody></table>
+<p><strong>DarkSword 的逃逸路径（示例）</strong>：</p>
+<ol><li>CVE-2025-43529（JSC GC 缺陷）→ WebContent 内 RCE + 任意读写原语</li><li>经 <strong>ANGLE / WebGPU（GPU 渲染栈）</strong> 将恶意指令导入<strong>后台媒体服务</strong>，脱离浏览器沙箱</li><li>再经 dyld / 内存管理缺陷（如 CVE-2026-20700、CVE-2025-43510/43520）提权至 root</li></ol>
+<hr>
+<h2>4. Apple 的反逃逸缓解</h2>
+<ul><li><strong>细粒度沙箱 profile</strong>：WebContent 等进程默认拒绝绝大多数系统调用与文件访问。</li><li><strong>PAC（指针认证）</strong>：抬高劫持控制流、伪造 IPC/驱动对象的难度。</li><li><strong>PPL / 内核完整性保护</strong>：限制逃逸后进一步改写内核。</li><li><strong>IPC 校验与最小权限</strong>：收紧高权限服务对来自渲染进程请求的验证。</li><li><strong>驱动加固（IOKit/驱动 kit 化）</strong>：把驱动移入用户态/受限环境，缩小内核攻击面。</li><li><strong>Lockdown Mode</strong>：禁用/收紧 GPU 特性、JIT 与部分 IPC 通道，<strong>直接切断多条逃逸路径</strong>（Coruna/DarkSword 检测到该模式会主动中止）。</li></ul>
+<p><strong>攻防趋势</strong>：沙箱与缓解越强，逃逸越依赖&quot;合法可达接口上的零日&quot;（GPU、IPC、媒体服务），并与其他零日组合；单一逃逸漏洞价值下降，<strong>全链条零日组合</strong>成为主流。</p>
+<hr>
+<h2>5. 检测与防护建议</h2>
+<h3>个人 / 高危用户</h3>
+<ol><li><strong>保持系统最新</strong>：逃逸漏洞修复依赖系统更新。</li><li><strong>高危时启用 Lockdown Mode</strong>：切断 GPU/JIT/部分 IPC 逃逸路径。</li></ol>
+<h3>企业 / 组织</h3>
+<ol><li>补丁管理覆盖全部 Apple 设备与 BYOD。</li><li>移动端 EDR/MTD 关注：WebContent 异常崩溃后紧跟 GPU/媒体服务异常调用、异常 IPC/Mach 消息、异常 dyld 加载。</li><li>对高价值人群分层防护（Lockdown Mode + 专用网络 + 行为监控）。</li></ol>
+<h3>研究 / 防御团队</h3>
+<ol><li>以&quot;沙箱内合法可达接口&quot;为威胁建模起点：GPU/ANGLE、WebKit IPC、媒体服务、IOKit。</li><li>回归测试 Project Zero / 厂商披露的逃逸 CVE 补丁；监控全链条零日组合情报。</li></ol>
+<hr>
+<h2>6. 结论</h2>
+<p>沙箱逃逸是 iOS 全链条攻击的<strong>中枢环节</strong>：它把被限制的 WebContent 代码执行，转化为对更高权限组件的触达，进而衔接内核提权与完整沦陷。逃逸不靠&quot;硬闯&quot;沙箱，而靠<strong>滥用沙箱放行的接口（GPU、IPC、媒体、驱动）上的缺陷</strong>。Apple 通过细粒度沙箱、PAC、PPL、驱动 kit 化与 Lockdown Mode 持续收紧这些通道，推动攻击向&quot;多零日组合&quot;演进。<strong>防御要点：及时补丁 + Lockdown Mode + 针对 GPU/IPC/媒体服务异常行为的运行时检测。</strong></p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://projectzero.google/2023/10/an-analysis-of-an-in-the-wild-ios-safari-sandbox-escape.html" rel="nofollow noopener" target="_blank">An analysis of an in-the-wild iOS Safari WebContent sandbox escape — Google Project Zero</a></li><li><a href="https://www.synacktiv.com/sites/default/files/2024-05/escaping_the_safari_sandbox_slides.pdf" rel="nofollow noopener" target="_blank">Escaping the Safari Sandbox: A tour of WebKit IPC — Synacktiv</a></li><li><a href="https://www.8ksec.io/how-browser-exploits-work-darksword-ios-cve-2025-43529/" rel="nofollow noopener" target="_blank">A Case Study of CVE-2025-43529 (DarkSword iOS Chain) — 8ksec</a></li><li><a href="https://fidelissecurity.com/vulnerabilities/cve-2025-24201/" rel="nofollow noopener" target="_blank">CVE-2025-24201: Sandbox Escape via OOB Write — Fidelis Security</a></li><li><a href="https://objectivebythesea.org/v6/talks/OBTS_v6_iBeer.pdf" rel="nofollow noopener" target="_blank">Escaping the Safari Sandbox in iOS 16 — Objective by the Sea</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud Threat Intelligence</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a04.html">← 第 4 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a06.html">第 6 篇 →</a></nav></article>
+</main></body></html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 内核提权与 PAC 绕过技术 | iOS 安全研究文章库</title>
+<meta name="description" content="Coruna 内核提权：PAC 机制与绕过、KTRR/PPL 影响、SPTM/TXM 硬件保护、与 DarkSword 对比">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a41.html">
+<meta property="og:title" content="Coruna 内核提权与 PAC 绕过技术">
+<meta property="og:description" content="Coruna 内核提权：PAC 机制与绕过、KTRR/PPL 影响、SPTM/TXM 硬件保护、与 DarkSword 对比">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a41.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 41 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 内核提权与 PAC 绕过技术</h1>
+<blockquote><p>编制日期：2026-10-13 数据来源：Google Project Zero、Apple Security Advisory、公开安全研究 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>Coruna 内核提权阶段</strong>是攻击链中从系统级权限跃迁到 <strong>root 权限 + 内核读写</strong> 的关键环节。在沙箱逃逸后，攻击者需要进一步突破内核级保护，包括 <strong>PAC（Pointer Authentication Code）</strong> 等硬件级控制流完整性机制。</p>
+<p>本文深入解析 Coruna 如何实现内核提权以及 PAC 绕过技术。</p>
+<p><strong>核心内容</strong>：</p>
+<ol><li>内核提权目标与挑战</li><li>PAC 机制与绕过技术</li><li>Coruna 内核漏洞利用原理</li><li>从内核提权到完全控制</li><li>与 DarkSword 提权路径对比</li></ol>
+<p><strong>风险等级：严重（Critical）</strong>。</p>
+<hr>
+<h2>2. 内核提权目标与挑战</h2>
+<h3>2.1 提权目标</h3>
+<table><thead><tr><th>目标</th><th>说明</th></tr></thead><tbody><tr><td><strong>root 权限</strong></td><td>uid = 0，完全系统控制</td></tr><tr><td><strong>内核读写</strong></td><td>读写任意内核内存</td></tr><tr><td><strong>task_for_pid(0)</strong></td><td>控制内核任务</td></tr><tr><td><strong>沙箱完全绕过</strong></td><td>脱离所有沙箱限制</td></tr></tbody></table>
+<h3>2.2 面临的保护</h3>
+<table><thead><tr><th>保护</th><th>机制</th><th>难度</th></tr></thead><tbody><tr><td><strong>KTRR</strong></td><td>内核代码段只读</td><td>中</td></tr><tr><td><strong>PPL</strong></td><td>页表完整性校验</td><td>高</td></tr><tr><td><strong>PAC</strong></td><td>指针签名验证</td><td>高</td></tr><tr><td><strong>KASLR</strong></td><td>内核地址随机化</td><td>中</td></tr><tr><td><strong>W^X</strong></td><td>内存不可同时可写可执行</td><td>中</td></tr></tbody></table>
+<hr>
+<h2>3. PAC 机制与绕过</h2>
+<h3>3.1 PAC 原理</h3>
+<p><strong>Pointer Authentication Code（PAC）</strong> 是 ARMv8.3+ 的控制流完整性机制：</p>
+<pre><code>函数指针 / 返回地址
+        ↓
+使用密钥签名（PAC 指令）
+        ↓
+存储：[指针值 + PAC 签名]
+        ↓
+调用前验证（AUT 指令）
+        ↓
+  ┌─ 签名有效 → 执行
+  └─ 签名无效 → 异常</code></pre>
+<h3>3.2 PAC 保护的指针类型</h3>
+<table><thead><tr><th>类型</th><th>说明</th></tr></thead><tbody><tr><td><strong>代码指针</strong></td><td>函数指针、虚表指针</td></tr><tr><td><strong>返回地址</strong></td><td>栈上的返回地址</td></tr><tr><td><strong>数据指针</strong></td><td>某些关键数据结构指针</td></tr></tbody></table>
+<h3>3.3 PAC 绕过技术</h3>
+<table><thead><tr><th>技术</th><th>原理</th><th>难度</th></tr></thead><tbody><tr><td><strong>签名泄露</strong></td><td>泄露 PAC 密钥/上下文</td><td>极高</td></tr><tr><td><strong>XPAC 攻击</strong></td><td>利用 PAC 高位未签名（指针异或）</td><td>高</td></tr><tr><td><strong>签名绕过</strong></td><td>找到不检查 PAC 的代码路径</td><td>中–高</td></tr><tr><td><strong>PAC 预言</strong></td><td>侧信道预测有效签名</td><td>极高</td></tr></tbody></table>
+<h3>3.4 Coruna 的 PAC 绕过</h3>
+<p><strong>Coruna 可能使用的技术</strong>（基于公开信息推断）：</p>
+<ol><li><strong>签名绕过</strong>：找到不验证 PAC 的内核代码路径</li><li><strong>XPAC 攻击</strong>：利用指针异或操作绕过 PAC</li><li><strong>ROP</strong>：不修改指针，复用现有代码片段</li></ol>
+<hr>
+<h2>4. Coruna 内核漏洞利用</h2>
+<h3>4.1 可能的漏洞类型</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>案例</th></tr></thead><tbody><tr><td><strong>IOKit User Client</strong></td><td>驱动接口内存破坏</td><td>历史常见</td></tr><tr><td><strong>内核内存管理</strong></td><td>XNU VM 子系统缺陷</td><td>历史常见</td></tr><tr><td><strong>竞态条件</strong></td><td>TOCTOU 漏洞</td><td>难度高</td></tr><tr><td><strong>逻辑缺陷</strong></td><td>权限检查遗漏</td><td>难度中</td></tr></tbody></table>
+<h3>4.2 利用流程（简化）</h3>
+<pre><code>沙箱逃逸后（系统级权限）
+        ↓
+KASLR 绕过（信息泄露）
+        ↓
+获得内核基址
+        ↓
+利用内核漏洞（IOKit/内存管理）
+        ↓
+内核内存破坏 → 控制流劫持
+        ↓
+绕过 PAC（签名绕过/XPAC/ROP）
+        ↓
+修改 cred → uid = 0（root）
+        ↓
+获得 task_for_pid(0)
+        ↓
+完整内核读写能力</code></pre>
+<h3>4.3 关键技术点</h3>
+<p><strong>KASLR 绕过</strong>：</p>
+<ul><li>通过信息泄露获得内核指针</li><li>计算内核基址</li></ul>
+<p><strong>控制流劫持</strong>：</p>
+<ul><li>覆写内核函数指针/虚表</li><li>或 ROP 链复用现有代码</li></ul>
+<p><strong>PAC 绕过</strong>：</p>
+<ul><li>找到不验证 PAC 的路径</li><li>或使用 ROP 避免修改指针</li></ul>
+<p><strong>权限提升</strong>：</p>
+<ul><li>修改进程 cred 结构 → uid = 0</li><li>获得 task_for_pid(0) → 内核任务控制</li></ul>
+<hr>
+<h2>5. 从内核提权到完全控制</h2>
+<h3>5.1 提权后的能力</h3>
+<table><thead><tr><th>能力</th><th>说明</th></tr></thead><tbody><tr><td><strong>root 权限</strong></td><td>执行任何系统操作</td></tr><tr><td><strong>内核读写</strong></td><td>读写任意内核内存</td></tr><tr><td><strong>进程控制</strong></td><td>控制任何进程</td></tr><tr><td><strong>文件访问</strong></td><td>读写任何文件</td></tr><tr><td><strong>网络访问</strong></td><td>绕过网络限制</td></tr><tr><td><strong>沙箱绕过</strong></td><td>脱离所有沙箱</td></tr></tbody></table>
+<h3>5.2 后续操作</h3>
+<pre><code>内核提权成功
+        ↓
+安装 Pegasus 载荷
+        ↓
+数据采集模块加载
+        ↓
+C2 通信建立
+        ↓
+数据外传
+        ↓
+痕迹清除</code></pre>
+<hr>
+<h2>6. 与 DarkSword 提权路径对比</h2>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td><strong>提权起点</strong></td><td>系统级（GPU 驱动）</td><td>系统级（媒体服务）</td></tr><tr><td><strong>PAC 绕过</strong></td><td>签名绕过/XPAC</td><td>类似技术</td></tr><tr><td><strong>内核漏洞</strong></td><td>IOKit/内存管理</td><td>IOKit/内存管理</td></tr><tr><td><strong>最终目标</strong></td><td>root + 内核读写</td><td>root + 内核读写</td></tr></tbody></table>
+<p><strong>共同点</strong>：</p>
+<ul><li>都需要 PAC 绕过</li><li>都使用 IOKit/内核漏洞</li><li>最终目标相同</li></ul>
+<p><strong>差异</strong>：</p>
+<ul><li>提权起点不同（GPU vs 媒体服务）</li><li>具体漏洞可能不同</li></ul>
+<hr>
+<h2>7. 硬件级保护的影响</h2>
+<h3>7.1 KTRR/PPL 的影响</h3>
+<table><thead><tr><th>保护</th><th>影响</th><th>Coruna 应对</th></tr></thead><tbody><tr><td><strong>KTRR</strong></td><td>内核代码只读</td><td>不修改代码，使用数据段/ROP</td></tr><tr><td><strong>PPL</strong></td><td>页表校验</td><td>绕过 PPL 或使用合法页表操作</td></tr></tbody></table>
+<h3>7.2 SPTM/TXM 的影响（A17+）</h3>
+<table><thead><tr><th>保护</th><th>影响</th></tr></thead><tbody><tr><td><strong>SPTM</strong></td><td>硬件页表监控，大幅提高攻击难度</td></tr><tr><td><strong>TXM</strong></td><td>EL3 硬件信任根，几乎无法绕过</td></tr></tbody></table>
+<p><strong>结论</strong>：A17+ 设备上，Coruna 类攻击难度极大。</p>
+<hr>
+<h2>8. 防御与检测</h2>
+<h3>8.1 Apple 修复</h3>
+<table><thead><tr><th>版本</th><th>修复内容</th></tr></thead><tbody><tr><td>iOS 17.3+</td><td>修复内核漏洞</td></tr><tr><td>iOS 17.4+</td><td>加强 PAC/PPL 保护</td></tr></tbody></table>
+<h3>8.2 防御建议</h3>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>使用 A17+ 设备</strong></td><td>SPTM/TXM 提供硬件级保护</td></tr><tr><td><strong>及时更新</strong></td><td>修复内核漏洞</td></tr><tr><td><strong>Lockdown Mode</strong></td><td>减少攻击面</td></tr><tr><td><strong>运行时检测</strong></td><td>监控异常内核调用</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<p>Coruna 内核提权是攻击链的<strong>第四阶段</strong>：</p>
+<table><thead><tr><th>维度</th><th>现状</th></tr></thead><tbody><tr><td><strong>目标</strong></td><td>root 权限 + 内核读写</td></tr><tr><td><strong>挑战</strong></td><td>PAC、KTRR、PPL、KASLR</td></tr><tr><td><strong>技术</strong></td><td>PAC 绕过 + 内核漏洞利用</td></tr><tr><td><strong>结果</strong></td><td>完全控制设备</td></tr></tbody></table>
+<p><strong>技术要点</strong>：</p>
+<ol><li>PAC 绕过是关键（签名绕过/XPAC/ROP）</li><li>内核漏洞实现控制流劫持</li><li>修改 cred 获得 root 权限</li><li>A17+ 设备 SPTM/TXM 大幅提高难度</li></ol>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Apple Security Advisory: iOS 17.3+</li><li>Google Project Zero: PAC bypass research</li><li>ARM Architecture Reference Manual</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a40.html">← 第 40 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a42.html">第 42 篇 →</a></nav></article>
+</main></body></html>

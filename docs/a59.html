@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 的 MITRE ATT&amp;CK 战术映射与检测覆盖缺口 | iOS 安全研究文章库</title>
+<meta name="description" content="ID 可信度三档、逐战术映射与两套体系实现差异、数据源约束下的覆盖度核算、矩阵空洞与自定义 ID">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a59.html">
+<meta property="og:title" content="Coruna 与 DarkSword 的 MITRE ATT&amp;CK 战术映射与检测覆盖缺口">
+<meta property="og:description" content="ID 可信度三档、逐战术映射与两套体系实现差异、数据源约束下的覆盖度核算、矩阵空洞与自定义 ID">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a59.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 59 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 的 MITRE ATT&amp;CK 战术映射与检测覆盖缺口</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：MITRE ATT&amp;CK Enterprise / for Mobile 矩阵、Google Project Zero、Citizen Lab、Amnesty International（Pegasus 项目）、iSight Partners、Lookout、MDM 厂商遥测实践 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>ATT&amp;CK 的价值不在于&quot;给攻击打上编号&quot;，而在于它<strong>强制你把攻击拆成可独立观测的行为单元</strong>，然后暴露你的观测盲区。</p>
+<p>对 iOS 商业间谍软件使用 ATT&amp;CK 时，绝大多数组织会撞上同一个陷阱：<strong>矩阵里的技术 ID 是 Windows 世界长大的，直接套到 iOS 上做红蓝对抗，会得到一张&quot;全绿&quot;的假安心地图</strong>——每个战术都有对应技术，每个技术都被标为&quot;已覆盖&quot;，但没有任何一个数据源真正落地。</p>
+<p>本文做三件事：</p>
+<ol><li>把 Coruna 与 DarkSword 的完整攻击链<strong>逐战术映射</strong>到 ATT&amp;CK 技术，并标出两者在同一技术上的<strong>实现差异</strong>（同一 ID 下的不同行为工件）</li><li>明确 ATT&amp;CK for Mobile 与 Enterprise 矩阵在 iOS 上的<strong>适用性边界</strong>——哪些 ID 可用、哪些是硬套、哪些攻击行为<strong>根本没有对应技术</strong></li><li>从映射出发做<strong>检测覆盖度核算</strong>：以&quot;iOS 端真实可用的四类数据源&quot;为约束，算出每个战术的<strong>可检测上限</strong>，从而把防御预算投向少数几个真正有信号的位置</li></ol>
+<p>核心结论：<strong>iOS 上 ATT&amp;CK 的可检测面集中在&quot;网络侧&quot;与&quot;投递侧&quot;，而不是&quot;主机侧&quot;</strong>。把它当成 Windows 那套 EDR 驱动的检测项目来建，是资源错配。</p>
+<hr>
+<h2>2. 先划边界：ATT&amp;CK 在 iOS 上的三种可用状态</h2>
+<p>在开始映射前必须先建立&quot;ID 可信度分层&quot;，否则后续所有表格都会被误读。</p>
+<table><thead><tr><th>状态</th><th>含义</th><th>判定标准</th><th>典型技术</th></tr></thead><tbody><tr><td><strong>A 直接可用</strong></td><td>iOS 上确实存在该行为，且工件可被某类数据源观测</td><td>Apple 平台有对应机制、有第三方遥测路径</td><td>T1203、T1068、T1555.001、T1041、T1573</td></tr><tr><td><strong>B 语义可用但工件不可观测</strong></td><td>攻击确实做了这件事，但 iOS 不提供任何常规遥测能证明它</td><td>需要内存取证或 jailbreak 才能看到</td><td>T1055、T1564、T1620、T1497</td></tr><tr><td><strong>C 硬套（应避免）</strong></td><td>ID 来自 Windows 语义，iOS 上没有对应实现，套用只为报表整齐</td><td>无法写出任何 iOS 侧的检测逻辑</td><td>注册表类、WMI 类、LSASS 内存转储、服务创建</td></tr></tbody></table>
+<p><strong>工程纪律</strong>：任何 iOS 检测项目的 ATT&amp;CK 覆盖表，必须先按这三档重打标签。只统计 A 档做覆盖度评分，B 档单独列为&quot;架构盲区&quot;。把 B 档算进覆盖率，是商业间谍软件防御项目最常见的自我欺骗。</p>
+<hr>
+<h2>3. 战术层覆盖总表</h2>
+<p>下表给出 Coruna 与 DarkSword 在 14 个战术上的实际投入强度。●=核心投入，◐=有实现但轻量，○=不涉及或极简。</p>
+<table><thead><tr><th>战术</th><th>Coruna</th><th>DarkSword</th><th>说明</th></tr></thead><tbody><tr><td>侦察 Reconnaissance</td><td>●</td><td>◐</td><td>Coruna 有完整的浏览器/设备指纹筛选层；DarkSword 依赖投递方做画像</td></tr><tr><td>资源开发 Resource Development</td><td>●</td><td>●</td><td>漏洞采购、域名与站点控制（见 #49、#50、#65）</td></tr><tr><td>初始访问 Initial Access</td><td>●</td><td>●</td><td>均为 WebKit/JSC 漏洞链入口，0-click 与 1-click 混合</td></tr><tr><td>执行 Execution</td><td>●</td><td>●</td><td>JIT 内执行原语 → 原生代码</td></tr><tr><td>持久化 Persistence</td><td>◐</td><td>○</td><td>Coruna 落地驻留模块；DarkSword 走无持久化内存驻留（#45）</td></tr><tr><td>权限提升 Privilege Escalation</td><td>●</td><td>●</td><td>内核提权 + PAC/SPTM 对抗（#41）</td></tr><tr><td>防御规避 Defense Evasion</td><td>●</td><td>●</td><td>但规避手段性质完全不同：清除型 vs 无痕型（#47、#55）</td></tr><tr><td>凭据访问 Credential Access</td><td>●</td><td>●</td><td>Keychain / SEP 密钥路径（#53）</td></tr><tr><td>发现 Discovery</td><td>◐</td><td>◐</td><td>受沙箱限制，进程/文件系统枚举能力弱</td></tr><tr><td>横向移动 Lateral Movement</td><td>○</td><td>○</td><td>单目标投放模型，不做内网扩散</td></tr><tr><td>收集 Collection</td><td>●</td><td>●</td><td>模块化采集器（#42、#54）</td></tr><tr><td>命令与控制 C2</td><td>●</td><td>●</td><td>多层中继 + 加密心跳（#46）</td></tr><tr><td>外泄 Exfiltration</td><td>●</td><td>◐</td><td>Coruna 主动批量外传；DarkSword 偏按需小量回传</td></tr><tr><td>影响 Impact</td><td>○</td><td>○</td><td>窃密型套件不追求破坏性</td></tr></tbody></table>
+<p>关键判读：<strong>&quot;横向移动&quot;与&quot;影响&quot;两列为空</strong>——这不是攻击者能力不足，而是威胁模型不同。商业间谍软件的成功指标是&quot;长期静默观测单一高价值目标&quot;，任何横向与破坏行为都直接违反其自身利益。防御方据此可以做一个有用的一致性检验：<strong>如果一个&quot;疑似 Pegasus 类&quot;样本表现出横向扩散或破坏行为，优先怀疑归因（见 #66），而不是假设它升级了。</strong></p>
+<hr>
+<h2>4. 逐战术技术映射</h2>
+<h3>4.1 侦察与资源开发（TA0043 / TA0042）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>Coruna 实现</th><th>DarkSword 实现</th><th>可观测性</th></tr></thead><tbody><tr><td>T1592</td><td>收集受害者主机信息</td><td>页面脚本读取 UA/语言/时区/屏幕/插件</td><td>由投递方预筛，链内轻探测</td><td>服务器访问日志</td></tr><tr><td>T1589</td><td>收集受害者身份信息</td><td>结合 URL 路径与访客画像</td><td>外部情报输入</td><td>无</td></tr><tr><td>T1588</td><td>获得能力</td><td>漏洞采购、0-day 交易（#65）</td><td>自研 + 采购混合</td><td>无（属供应链情报）</td></tr><tr><td>T1583/T1584</td><td>建立基础设施</td><td>三层中继与 DGA 域名（#46、#50）</td><td>类似但更短生命周期</td><td>WHOIS/DNS 历史可查</td></tr></tbody></table>
+<p>映射要点：<strong>这两个战术的检测收益几乎全部落在防守方自己的边界之外</strong>。你能做的是订阅外部情报（域名注册、证书透明度日志、水坑站点变更），而不是在 iPhone 上找证据。</p>
+<h3>4.2 初始访问（TA0001）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>Coruna</th><th>DarkSword</th><th>档位</th></tr></thead><tbody><tr><td>T1661</td><td>Drive-by Compromise</td><td>水坑站点条件化下发（#50）</td><td>同，但更倾向窄时间窗</td><td>A</td></tr><tr><td>T1660</td><td>Phishing</td><td>钓鱼消息携带链接诱导点击（1-click）</td><td>少量使用</td><td>A</td></tr><tr><td>T1203</td><td>Exploitation for Client Execution</td><td>WebKit/JSC 类型混淆（CVE-2024-23222 等）</td><td>WebKit + 媒体栈路径</td><td>A</td></tr><tr><td>T1662</td><td>Exploit via Charging Station</td><td>不涉及</td><td>不涉及</td><td>—</td></tr><tr><td>T1663</td><td>Remote Access Software</td><td>不涉及（非合法渠道产品）</td><td>不涉及</td><td>—</td></tr></tbody></table>
+<p><strong>iOS 特殊性</strong>：ATT&amp;CK for Mobile 把 &quot;Exploit via Mobile Device&quot; 类路径单列，但对<strong>通过 iMessage/SMS 解析器的 0-click 入口</strong>（FORCEDENTRY、Triangulation 一脉）没有干净的对应 ID。工程上常用 T1203 承载，但要注意它的原始语义是&quot;客户端程序被利用&quot;，与消息解析器被利用在数据源上差别很大：</p>
+<table><thead><tr><th>入口形态</th><th>受害者交互</th><th>首要工件位置</th><th>检测抓手</th></tr></thead><tbody><tr><td>水坑 1-click</td><td>需点击链接</td><td>WebKit 进程崩溃/异常</td><td>浏览器历史 + 站点情报 + Crash 报告</td></tr><tr><td>消息 0-click</td><td>无需任何交互</td><td>消息/媒体解析服务进程</td><td>无法从用户行为推定；只能靠异常进程行为</td></tr><tr><td>无交互推送触发</td><td>无需交互</td><td>推送/网络服务解析</td><td>需 Apple 侧或基带侧可见性</td></tr></tbody></table>
+<p><strong>这是 iOS 检测最难的一类</strong>：T1203 在 0-click 变体下，&quot;用户报告点击了可疑链接&quot;这条最有效的取证线索直接消失（参见 #48 的应急响应时序）。</p>
+<h3>4.3 执行与权限提升（TA0002 / TA0004）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>实现</th><th>档位</th><th>备注</th></tr></thead><tbody><tr><td>T1059</td><td>Command and Scripting Interpreter</td><td>无 shell 语义；以原生函数调用替代</td><td>C</td><td>iOS 上不要用此 ID</td></tr><tr><td>T1106</td><td>Native API</td><td>利用 JSC 原语调用 C/C++ 运行时</td><td>B</td><td>无可观测 API 调用日志</td></tr><tr><td>T1068</td><td>Exploitation for Privilege Escalation</td><td>内核信息泄露 + 提权漏洞（#51、#41）</td><td>A</td><td>Crash/panic 报告可作滞后指标</td></tr><tr><td>T1610/T1480</td><td>部署/执行护栏</td><td>目标画像校验后才展开完整链</td><td>B</td><td>表现为&quot;只有少数设备异常&quot;</td></tr><tr><td>T1620</td><td>Reflective Code Loading</td><td>内存映射可执行页、无文件落地</td><td>B</td><td>需内存取证</td></tr></tbody></table>
+<p>映射要点：<strong>执行与提权两个战术是&quot;高价值、低可观测&quot;组合</strong>。防御侧唯一现实的批量抓手是崩溃遥测的<strong>统计异动</strong>——同一 iOS 版本群体中某进程异常退出率突增，往往是利用尝试可靠性调试的痕迹（这一指标对 Coruna 类反复迭代的攻击者更有用，见 #47 的对比）。</p>
+<h3>4.4 持久化（TA0003）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>Coruna</th><th>DarkSword</th><th>档位</th></tr></thead><tbody><tr><td>T1547</td><td>Boot or Logon Autostart Execution</td><td>iOS 无此语义</td><td>无</td><td>C</td></tr><tr><td>T1647</td><td>Plist File Modification</td><td>部分配置类驻留可用</td><td>无</td><td>B</td></tr><tr><td>T1112? / 配置描述文件滥用</td><td>MDM/描述文件持久</td><td>个别变体涉及</td><td>无</td><td>A（企业场景关键）</td></tr><tr><td>无持久化驻留</td><td>—</td><td>—</td><td>核心设计（#45）</td><td>无 ID</td></tr></tbody></table>
+<p><strong>必须承认的矩阵空洞</strong>：&quot;靠注入既有系统进程存活、重启即消失、磁盘零写入&quot;这一整套驻留模型，在 ATT&amp;CK 里<strong>没有恰当位置</strong>。它是 DarkSword 的关键特征（#45、#47），也是持久化战术检测清单对其完全失效的原因。</p>
+<blockquote><p>实践建议：给&quot;无持久化驻留&quot;在项目内部自定义一个 ID（如 <code>IOS-RESIDENT-01</code>），并将其与&quot;持久化战术全部为空&quot;绑定成一个正向信号——<strong>持久化痕迹缺失本身可以是检测线索</strong>，而不是&quot;没中&quot;的证明。</p></blockquote>
+<h3>4.5 防御规避（TA0005）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>Coruna</th><th>DarkSword</th><th>档位</th></tr></thead><tbody><tr><td>T1562</td><td>Impair Defenses</td><td>规避审计与限制检测</td><td>不主动破坏，天然不触发</td><td>B</td></tr><tr><td>T1564</td><td>Hide Artifacts</td><td>文件属性与目录隐藏</td><td>无文件，无需隐藏</td><td>B</td></tr><tr><td>T1070</td><td>Indicator Removal</td><td>主动清除工件（#55）</td><td>不生成工件</td><td>A/B 混合</td></tr><tr><td>T1070.006</td><td>Timestomp</td><td>时间戳篡改</td><td>无</td><td>A（备份对比可见）</td></tr><tr><td>T1027</td><td>Obfuscated Files or Information</td><td>载荷/配置加密</td><td>同</td><td>B</td></tr><tr><td>T1497</td><td>Virtualization/Sandbox Evasion</td><td>投放前环境校验</td><td>同</td><td>B</td></tr><tr><td>T1622</td><td>Debugger Evasion</td><td>反调试检查</td><td>同</td><td>B</td></tr><tr><td>PAC/SPTM/TXM/BlastDoor 对抗</td><td>—</td><td>无对应 ID</td><td>无对应 ID</td><td>架构盲区</td></tr></tbody></table>
+<p>关键洞察：<strong>同一技术 ID（T1070）在两套体系中含义相反。</strong></p>
+<table><thead><tr><th>面对 T1070</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>行为</td><td>清除已产生的工件</td><td>不产生工件</td></tr><tr><td>取证后果</td><td>出现&quot;缺失&quot;异常（有间隙）</td><td>完全无缝隙</td></tr><tr><td>有效检测</td><td>时间线断裂检测、备份 diff</td><td>时间线检测无效，只能靠内存/网络</td></tr><tr><td>MVT 有效性</td><td>中（残留可查）</td><td>低</td></tr></tbody></table>
+<p>这正是 #47 &quot;清除型 vs 天然无痕型&quot;结论在 ATT&amp;CK 语言中的重述：<strong>技术 ID 相同不代表检测策略相同。</strong></p>
+<h3>4.6 凭据访问（TA0006）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>实现</th><th>档位</th></tr></thead><tbody><tr><td>T1555.001</td><td>Credentials from Password Stores: Keychain</td><td>钥匙串项读取/导出（#53）</td><td>A</td></tr><tr><td>T1555.005</td><td>会话凭据</td><td>Cookie/令牌采集</td><td>A</td></tr><tr><td>T1539</td><td>Steal Web Session Cookie</td><td>WebKit Cookie 存储读取</td><td>A</td></tr><tr><td>SEP 密钥路径</td><td>数据保护类绕过</td><td>内核级 + SEP 交互（#53）</td><td>无对应 ID</td></tr></tbody></table>
+<p><strong>iOS 上最&quot;名副其实&quot;的战术之一</strong>：Keychain 是企业环境里最容易做异常观测的位置之一（配合 MDM 与备份分析）。但要注意 <code>kSecAttrAccessible</code> 决定的可读窗口（见 #53）——锁定状态下不可读的类，攻击者必须等解锁窗口，<strong>这给&quot;凭据窃取发生时机&quot;提供了可推断的时间约束</strong>，是时间线分析里的有效锚点。</p>
+<h3>4.7 收集（TA0009）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>实现</th><th>档位</th></tr></thead><tbody><tr><td>T1113</td><td>Screen Capture</td><td>有（#42）</td><td>A</td></tr><tr><td>T1123</td><td>Audio Capture</td><td>麦克风，需绕过权限指示</td><td>A</td></tr><tr><td>T1125</td><td>Video Capture</td><td>摄像头</td><td>A</td></tr><tr><td>T1115</td><td>Clipboard Data</td><td>有</td><td>B</td></tr><tr><td>T1005</td><td>Data from Local System</td><td>沙箱内文件读取</td><td>A</td></tr><tr><td>T1430</td><td>Location Tracking</td><td>位置采集</td><td>A</td></tr><tr><td>T1114</td><td>Email Collection</td><td>邮件/IM 数据库</td><td>A</td></tr><tr><td>T1560</td><td>Archive Collected Data</td><td>打包 + 分卷（#46）</td><td>A</td></tr></tbody></table>
+<p><strong>最有价值的检测信号来自&quot;权限指示与实际硬件状态的矛盾&quot;</strong>：iOS 提供 LED/圆点等硬件级隐私指示器（Orange/Green dot），商业间谍软件若走的是被提权后绕过指示器的路径，会出现&quot;应用在前台但无采集 UI&quot;这类可交叉验证的异常。企业侧更现实的批量手段是：把设备传感器使用与 MDM 应用清单做联合相关性分析，而不是指望主机日志。</p>
+<h3>4.8 命令与控制与外泄（TA0011 / TA0010）</h3>
+<table><thead><tr><th>技术 ID</th><th>名称</th><th>Coruna</th><th>DarkSword</th><th>档位</th></tr></thead><tbody><tr><td>T1071</td><td>Application Layer Protocol</td><td>HTTPS/HTTP 伪装（#46）</td><td>同</td><td>A</td></tr><tr><td>T1573.002</td><td>Encrypted Channel: Asymmetric</td><td>ECDH 会话建立</td><td>同</td><td>A</td></tr><tr><td>T1090</td><td>Proxy</td><td>多层中继链路</td><td>更少层级</td><td>A</td></tr><tr><td>T1102</td><td>Web Service</td><td>合法域名前置/CDN 借道</td><td>有</td><td>A</td></tr><tr><td>T1095</td><td>Non-Application Layer Protocol</td><td>少见</td><td>少见</td><td>A</td></tr><tr><td>T1008</td><td>Fallback Channels</td><td>备用域名集轮换</td><td>有</td><td>A</td></tr><tr><td>T1041</td><td>Exfiltration Over C2 Channel</td><td>主要方式</td><td>主要方式</td><td>A</td></tr><tr><td>T1029/T1030</td><td>定时传输/数据量大小</td><td>分片节流</td><td>小量按需</td><td>A</td></tr><tr><td>T1048</td><td>Exfiltration Over Alternative Protocol</td><td>邮件/其他信道变体</td><td>少见</td><td>A</td></tr></tbody></table>
+<p><strong>这是 iOS 防御的主战场。</strong>原因很简单：网络侧是少数攻击者无法通过架构手段消除工件的地方——即使完全无持久化、无文件、清除所有痕迹，<strong>流量必须发生</strong>（除非使用完全离线触发）。</p>
+<p>网络侧检测的工程要点（与 #46、#48 一致）：</p>
+<table><thead><tr><th>观测维度</th><th>有效做法</th><th>失效风险</th></tr></thead><tbody><tr><td>JA3/JA4 指纹</td><td>与同 OS 版本基线比对该指纹的出现频率</td><td>Apple 网络栈实现更新会让基线漂移</td></tr><tr><td>SNI + IP 信誉</td><td>保留至少 90 天 DNS/SNI 日志</td><td>短生命周期域名使信誉库滞后</td></tr><tr><td>会话时长模型</td><td>心跳型（长会话）vs 交易型（短会话）分类</td><td>需先确认目标套件属于哪种模型</td></tr><tr><td>上行/下行比</td><td>采集期上行显著抬升</td><td>加密后无法看内容，只能看统计</td></tr><tr><td>时间规律</td><td>采集窗口周期性</td><td>攻击者可随机化</td></tr></tbody></table>
+<blockquote><p><strong>日志保留期是最常被低估的成本</strong>：一旦攻击者走无痕驻留路线，事后取证只有网络与备份两条时间机器。DNS/SNI 日志保留 7 天的组织，对 #45/#47 类攻击等于完全失明。</p></blockquote>
+<h3>4.9 影响（TA0040）</h3>
+<p>两套体系均不投入。唯一需保留的映射是内部自定义 ID 用于&quot;设备锁定/数据破坏&quot;类变体（如 T1479 Device Lockout），以及供应链中断场景。窃密型攻击中把它列为空是<strong>正确</strong>的，不要为了表格美观补 ID。</p>
+<hr>
+<h2>5. 检测覆盖度核算</h2>
+<p>把上面的映射转成预算决策，需要一次&quot;数据源 × 战术&quot;的交叉核算。iOS 端现实可用的数据源只有四类：</p>
+<table><thead><tr><th>数据源</th><th>采集方式</th><th>时间分辨率</th><th>攻击者可控性</th></tr></thead><tbody><tr><td>网络元数据（DNS/SNI/NetFlow）</td><td>企业网关、VPN、防火墙</td><td>实时</td><td>低（无法消除）</td></tr><tr><td>设备管理与配置（MDM）</td><td>企业 MDM 清单/描述文件/合规状态</td><td>天级</td><td>中</td></tr><tr><td>崩溃与诊断日志</td><td>Apple 分析、sysdiagnose</td><td>事件级</td><td>高（可选择避免崩溃）</td></tr><tr><td>备份文件系统（AFC/iMazing/iTunes）</td><td>人工/取证工具</td><td>事后</td><td>中（无痕型无内容可取）</td></tr></tbody></table>
+<p>覆盖度核算表（●=强信号可用，◐=弱/滞后信号，○=无效）：</p>
+<table><thead><tr><th>战术</th><th>网络元数据</th><th>MDM</th><th>Crash</th><th>备份</th><th>现实可检测性</th></tr></thead><tbody><tr><td>初始访问</td><td>◐</td><td>○</td><td>●（1-click）</td><td>○</td><td>低—中，强依赖用户上报</td></tr><tr><td>执行</td><td>○</td><td>○</td><td>◐</td><td>○</td><td><strong>极低</strong></td></tr><tr><td>持久化</td><td>○</td><td>◐</td><td>○</td><td>●（Coruna）/ ○（DarkSword）</td><td>分叉：一套可测一套不可</td></tr><tr><td>提权</td><td>○</td><td>○</td><td>●（滞后）</td><td>○</td><td>低</td></tr><tr><td>防御规避</td><td>○</td><td>○</td><td>○</td><td>◐</td><td>低</td></tr><tr><td>凭据访问</td><td>◐</td><td>○</td><td>○</td><td>●</td><td>中</td></tr><tr><td>收集</td><td>●（上行抬升）</td><td>○</td><td>○</td><td>●</td><td>中</td></tr><tr><td>C2</td><td>●</td><td>○</td><td>○</td><td>○</td><td><strong>高</strong></td></tr><tr><td>外泄</td><td>●</td><td>○</td><td>○</td><td>◐</td><td><strong>高</strong></td></tr></tbody></table>
+<p>结论表：</p>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>iOS 上 ATT&amp;CK 覆盖度应<strong>按数据源约束算上限</strong>，不按技术清单算完成度</td></tr><tr><td>2</td><td>高可检测战术只有两个：C2 与外泄——<strong>防御预算的 60% 以上应投在网络元数据</strong></td></tr><tr><td>3</td><td>执行/提权/防御规避三战术在架构层面不可批量观测，应作为&quot;接受盲区&quot;而非&quot;待补需求&quot;</td></tr><tr><td>4</td><td>持久化战术的覆盖度取决于对端是哪套体系：对 Coruna 型可测，对 DarkSword 型不可测</td></tr><tr><td>5</td><td>崩溃遥测是唯一有批量性价比的主机侧信号，但它是<strong>滞后指标</strong>，不能进实时告警逻辑</td></tr><tr><td>6</td><td>无 ID 可用不等于无风险：无持久化驻留、PAC/SPTM 对抗、0-click 消息入口都是矩阵空洞</td></tr></tbody></table>
+<hr>
+<h2>6. 面向不同角色的用法</h2>
+<table><thead><tr><th>角色</th><th>用这张映射做什么</th><th>应避免什么</th></tr></thead><tbody><tr><td>安全运营（SOC）</td><td>把告警规则按&quot;网络元数据可支撑&quot;的战术优先排序</td><td>用主机日志写 iOS 采集检测规则</td></tr><tr><td>威胁情报</td><td>用战术投入强度（●/◐/○ 分布）做套件区分初筛（#66）</td><td>把 ID 命中当作归因证据</td></tr><tr><td>移动安全 / MDM 团队</td><td>检查描述文件与配置合规漂移，锁定敏感角色设备</td><td>期待 MDM 报告间谍软件进程</td></tr><tr><td>法务 / 合规</td><td>以&quot;日志保留期 vs 无痕型驻留&quot;的矛盾，量化留存义务</td><td>用&quot;无持久化发现&quot;证明&quot;无感染&quot;</td></tr><tr><td>董事会 / 高管</td><td>保护期分级：高价值角色的网络元数据保留延长</td><td>把 ATT&amp;CK 覆盖率百分比当 KPI</td></tr></tbody></table>
+<p><strong>与锁定模式的联动</strong>：若采用 #48/#57 讨论的锁定模式（含禁用 JIT 的强缓解），映射表会发生变化——初始访问战术的成功率下降，执行战术的攻击面收窄。这是少数能真正改变攻击链成本结构的防御动作，也是&quot;移除型防御&quot;优于&quot;检测型防御&quot;的实证位置。</p>
+<hr>
+<h2>7. 一页速查表</h2>
+<pre><code>Coruna 映射重心：IA(●) PE(●) CA(●) CO(●) C2(●) EX(●) → 持久化(◐) DEF(●清除型)
+DarkSword 映射重心：IA(●) PE(●) CA(●) CO(●) C2(●) → 持久化(○) DEF(●无痕型)
+
+可检测性三档：
+  高  ── C2 / Exfiltration        → 网络元数据（DNS/SNI/JA4/上行比）
+  中  ── Collection / CredAccess  → 上行统计 + 备份/Keychain 分析
+  低  ── InitialAccess / PE / PrivEsc / DEF / Execution
+                                    → 依赖 Crash 滞后指标 + 用户上报
+
+矩阵空洞（需自定义 ID）：
+  IOS-RESIDENT-01  无持久化内存驻留
+  IOS-PARSED-01    0-click 消息解析器入口
+  IOS-HWCAL-01     PAC/SPTM/TXM/BlastDoor 对抗
+  IOS-PRT-01       隐私指示器绕过</code></pre>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>ATT&amp;CK 用于 iOS 的第一步是<strong>给技术 ID 分可信度档位（A/B/C）</strong>，而不是补全表格</td></tr><tr><td>2</td><td>Coruna 与 DarkSword 在战术分布上高度相似，差异集中在<strong>持久化与防御规避两列</strong></td></tr><tr><td>3</td><td>T1070 相同 ID 对应相反实现（清除工件 vs 不生成工件），<strong>检测策略不能按 ID 复用</strong></td></tr><tr><td>4</td><td>iOS 上唯一可批量观测的高信号战术是 C2 与外泄，防御预算应向网络元数据倾斜</td></tr><tr><td>5</td><td>执行、提权、防御规避三战术是架构级盲区，应明确&quot;接受&quot;而非&quot;投入补齐&quot;</td></tr><tr><td>6</td><td>攻击链中至少四个关键环节在矩阵里没有恰当 ID，需项目内自定义并保持版本化</td></tr><tr><td>7</td><td>日志保留期是映射表能否兑现的先决条件，不是运营细节</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：对 iOS 间谍软件而言，ATT&amp;CK 的正确用法是&quot;用攻击链的战术分布告诉你<strong>在哪里根本测不到</strong>&quot;，而不是&quot;用技术清单告诉你已经覆盖了多少&quot;——两套主流体系的差异恰好落在同一批不可观测战术上，因此防御的真实竞争力只存在于网络元数据的深度与保留期里。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://attack.mitre.org/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Enterprise</a></li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK Mobile Matrix</a></li><li><a href="https://attack.mitre.org/techniques/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile — Techniques</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Research</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://docs.securemessagingapps.com/" rel="nofollow noopener" target="_blank">Apple Platform Security — Lockdown Mode</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a58.html">← 第 58 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a60.html">第 60 篇 →</a></nav></article>
+</main></body></html>

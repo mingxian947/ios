@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS Coruna 与 DarkSword 系统分析报告 | iOS 安全研究文章库</title>
+<meta name="description" content="两代全链条利用套件对比与系统分析">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a10.html">
+<meta property="og:title" content="iOS Coruna 与 DarkSword 系统分析报告">
+<meta property="og:description" content="两代全链条利用套件对比与系统分析">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a10.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 10 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 安全系统分析报告：Coruna 与 DarkSword 漏洞利用工具包</h1>
+<blockquote><p>编制日期：2026-10-02 数据来源：Google Cloud Threat Intelligence、Wikipedia、Cloud Security Alliance (CSA)、Malwarebytes 等公开威胁情报 性质：防御性安全研究分析（Defensive Security Research）</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>2026 年 3 月，安全研究界公开披露了两套关联的 iOS 全链条漏洞利用工具包：</p>
+<ul><li><strong>Coruna</strong>：首个被证实的、从国家级/商业间谍软件供应商扩散至有组织犯罪集团的 iOS 利用框架，影响 <strong>iOS 13 – 17.2.1</strong>。</li><li><strong>DarkSword</strong>：Coruna 的后继者，复用其基础设施并引入新的零日漏洞，主要针对 <strong>iOS 18.x（18.4–18.7）</strong> 及 iOS 26 早期版本。</li></ul>
+<p>两者均通过被入侵/伪造的网页投递 JavaScript 载荷，实现&quot;完整设备沦陷&quot;（full device compromise），可窃取加密密钥、劫持钱包应用、抓取扫描影像，并通过算法生成域名（DGA）外传数据。Apple 已针对新旧 iOS 版本发布协调补丁。</p>
+<p><strong>核心风险</strong>：无长期植入物（ephemeral / no persistent implant）的设计使传统基于持久化特征的检测手段失效；且工具已扩散至多个独立威胁主体与商业监控公司。</p>
+<hr>
+<h2>2. Coruna 漏洞利用工具包分析</h2>
+<h3>2.1 概况</h3>
+<table><thead><tr><th>项目</th><th>内容</th></tr></thead><tbody><tr><td>首次公开披露</td><td>2026-03-03</td></tr><tr><td>早期碎片发现</td><td>2025 年 2 月（运营片段被隔离）</td></tr><tr><td>影响版本</td><td>iOS 13 – 17.2.1</td></tr><tr><td>利用漏洞数</td><td>7 个 CVE</td></tr><tr><td>补丁发布</td><td>2026-03-12（Apple 为旧版本 iOS 补充修复）</td></tr></tbody></table>
+<h3>2.2 涉及的 CVE</h3>
+<ul><li>CVE-2024-23222（WebKit 类型混淆，历史在野利用）</li><li>CVE-2022-48503</li><li>CVE-2023-43000</li><li>CVE-2021-30952</li><li>CVE-2023-41974</li><li>CVE-2023-32434（内核内存破坏）</li><li>CVE-2023-38606（内核硬件 MMIO 保护绕过，历史 Kasperovsky 链条组件）</li></ul>
+<h3>2.3 攻击链与技术机制</h3>
+<ol><li><strong>投递</strong>：受害者访问隐藏网页，页面执行 JavaScript。</li><li><strong>指纹识别</strong>：脚本识别设备硬件与软件配置；若检测到保护性设置（如 Lockdown Mode）则<strong>主动中止</strong>，规避分析。</li><li><strong>初始利用</strong>：触发浏览器引擎（WebKit）崩溃。</li><li><strong>内存保护绕过</strong>：绕过内存防护机制。</li><li><strong>载荷下载</strong>：下载加密的可执行载荷。</li><li><strong>驻留与提权</strong>：将自身嵌入特权系统进程。</li><li><strong>目标行为</strong>：</li></ol>
+<p>   - 采集加密密钥</p>
+<p>   - 捕获扫描影像</p>
+<p>   - 劫持加密货币钱包应用</p>
+<p>   - 通过伪随机生成服务器地址（DGA）路由外传窃取数据</p>
+<h3>2.4 归因与目标</h3>
+<ul><li><strong>UNC6353</strong>：针对东欧（乌克兰机构访问者）的行动。</li><li><strong>UNC6691</strong>：全球范围加密货币盗窃，使用伪造金融门户。</li><li>情报显示其开发与此前被入侵的<strong>国防承包商资产</strong>存在关联。</li></ul>
+<hr>
+<h2>3. DarkSword 漏洞利用链分析</h2>
+<h3>3.1 概况</h3>
+<table><thead><tr><th>项目</th><th>内容</th></tr></thead><tbody><tr><td>披露时间</td><td>Coruna 之后不久（Google 博客 2026-03-18）</td></tr><tr><td>活跃起始</td><td>2025 年末</td></tr><tr><td>影响版本</td><td>iOS 18.4–18.7；早于 iOS 18.7.5 的版本，以及 iOS 26 分支中 26.3 之前的版本</td></tr><tr><td>关系</td><td>Coruna 后继者，复用基础基础设施，新增零日漏洞</td></tr></tbody></table>
+<h3>3.2 涉及的 CVE</h3>
+<ul><li>CVE-2025-31277（WebKit / JavaScriptCore 逻辑缺陷）</li><li>CVE-2025-43529</li><li>CVE-2025-14174</li><li>CVE-2026-20700</li><li>CVE-2025-43510</li><li>CVE-2025-43520</li></ul>
+<h3>3.3 攻击链阶段</h3>
+<table><thead><tr><th>阶段</th><th>技术</th></tr></thead><tbody><tr><td><strong>初始访问</strong></td><td>访问被入侵 URL 触发 JavaScript，利用 JavaScriptCore 逻辑缺陷获得初始执行权</td></tr><tr><td><strong>沙箱逃逸</strong></td><td>GPU 渲染缺陷，经 WebGPU 将恶意指令导入后台媒体服务，脱离浏览器环境</td></tr><tr><td><strong>内核利用</strong></td><td>动态链接器（dyld）弱点禁用 Apple 签名校验与页面所有权保护；随后内存管理缺陷提权至 root</td></tr><tr><td><strong>持久化</strong></td><td><strong>刻意不做长期植入</strong>，短暂驻留期间向核心系统服务注入脚本，聚合并外传机密后清除痕迹（&quot;完整设备沦陷&quot;）</td></tr></tbody></table>
+<h3>3.4 归因与目标（多主体共享基础设施）</h3>
+<ul><li><strong>UNC6353</strong>：疑似俄罗斯间谍行动，针对乌克兰平民。</li><li><strong>UNC6748</strong>：未归因国家/关联实体，对沙特用户开展社会操纵行动。</li><li><strong>PARS Defense</strong>：土耳其商业监控公司，改造框架并集成加密传输协议。</li><li>注：多个独立组织并行使用共享基础设施；<strong>大语言模型（LLM）被用于定制行动载荷</strong>。</li></ul>
+<hr>
+<h2>4. 对比分析：Coruna vs DarkSword</h2>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>目标 iOS</td><td>13 – 17.2.1（旧版本）</td><td>18.4–18.7 / iOS 26 &lt; 26.3（新版本）</td></tr><tr><td>漏洞类型</td><td>7 个已知历史 CVE</td><td>6 个（含新零日）</td></tr><tr><td>初始入口</td><td>WebKit 崩溃</td><td>JavaScriptCore 逻辑缺陷</td></tr><tr><td>沙箱逃逸</td><td>内存保护绕过</td><td>WebGPU / GPU 渲染缺陷</td></tr><tr><td>持久化</td><td>嵌入特权进程</td><td>无持久化，短暂驻留后清除痕迹</td></tr><tr><td>主要动机</td><td>加密货币盗窃 + 东欧间谍</td><td>国家级间谍 + 商业监控 + 社会操纵</td></tr><tr><td>关联主体</td><td>UNC6353 / UNC6691</td><td>UNC6353 / UNC6748 / PARS Defense</td></tr></tbody></table>
+<p><strong>演进趋势</strong>：由&quot;已知漏洞 + 持久驻留&quot;转向&quot;零日漏洞 + 无痕迹短时攻击&quot;，显著提高了检测难度，并体现了利用工具从供应商向犯罪集团、商业监控公司扩散的供应链风险。</p>
+<hr>
+<h2>5. 受影响面与风险评级</h2>
+<ul><li><strong>暴露设备</strong>：运行 iOS &lt; 18.7.5（含 iOS 13–17 旧机型）及 iOS 26 &lt; 26.3 的所有 iPhone。</li><li><strong>高危人群</strong>：乌克兰及东欧地区用户、沙特用户、加密货币持有者、国防/政府机构人员、访问被入侵或伪造金融门户的用户。</li><li><strong>风险等级：严重（Critical）</strong> —— 全链条远程零点击/低交互利用，可完整接管设备且无持久化痕迹。</li></ul>
+<hr>
+<h2>6. 缓解与防护建议</h2>
+<h3>6.1 立即措施</h3>
+<ol><li><strong>升级系统</strong>：将所有设备更新至 <strong>iOS 18.7.5 或更高</strong>（iOS 26 用户升级至 <strong>26.3+</strong>）；旧机型升级至 Apple 提供的补充补丁版本。</li><li><strong>启用 Lockdown Mode（锁定模式）</strong>：两套工具在检测到保护性设置时会主动中止，可显著降低风险（针对高危用户）。</li></ol>
+<h3>6.2 检测与响应</h3>
+<ol><li><strong>网络层监控</strong>：检测 DGA（伪随机域名）外传流量、异常加密通道；封禁已知恶意/伪造金融门户。</li><li><strong>端点行为检测</strong>：因无持久化，需依赖<strong>运行时行为</strong>（异常进程注入、WebGPU/GPU 服务异常调用、系统服务脚本注入、密钥库异常访问）而非静态持久化特征。</li><li><strong>威胁狩猎</strong>：排查对乌克兰/沙特/加密相关伪造门户的访问记录；结合 MDM/EDR 遥测。</li></ol>
+<h3>6.3 组织层面</h3>
+<ol><li><strong>资产清点</strong>：识别仍运行受影响 iOS 版本的设备（可借助 runZero 等资产测绘工具）。</li><li><strong>用户教育</strong>：警惕不明链接、伪造金融门户；针对高风险岗位强化培训。</li><li><strong>供应链治理</strong>：关注商业监控公司（如 PARS Defense 类）改造框架带来的扩散风险。</li></ol>
+<hr>
+<h2>7. 结论</h2>
+<p>Coruna 与 DarkSword 代表了移动全链条利用工具的重要转折：<strong>从供应商专属能力扩散至犯罪集团与商业监控主体</strong>，并从&quot;持久驻留&quot;演进为&quot;无痕迹短时接管&quot;。防御方应从&quot;依赖持久化特征检测&quot;转向&quot;运行时行为 + 网络遥测 + 及时补丁 + Lockdown Mode&quot;的综合策略。及时升级与资产可视化是当前最有效的缓解手段。</p>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/coruna-powerful-ios-exploit-kit" rel="nofollow noopener" target="_blank">Coruna: The Mysterious Journey of a Powerful iOS Exploit Kit — Google Cloud Threat Intelligence</a></li><li><a href="https://cloud.google.com/blog/topics/threat-intelligence/darksword-ios-exploit-chain" rel="nofollow noopener" target="_blank">The Proliferation of DarkSword: iOS Exploit Chain — Google Cloud Threat Intelligence</a></li><li><a href="https://en.wikipedia.org/wiki/Coruna_(exploit_kit" rel="nofollow noopener" target="_blank">Coruna (exploit kit) — Wikipedia</a>)</li><li><a href="https://labs.cloudsecurityalliance.org/research/csa-research-note-darksword-ios-fullchain-zeroday-multiactor/" rel="nofollow noopener" target="_blank">CSA Research Note: DarkSword iOS Full-Chain Zero-Day, Multi-Actor</a></li><li><a href="https://www.malwarebytes.com/blog/news/2026/03/apple-patches-coruna-exploit-kit-flaws-for-older-ios-versions" rel="nofollow noopener" target="_blank">Apple patches Coruna exploit kit flaws for older iOS versions — Malwarebytes</a></li><li><a href="https://www.runzero.com/blog/apple-devices/" rel="nofollow noopener" target="_blank">Apple iOS vulnerabilities (DarkSword exploit): Find impacted devices — runZero</a></li><li><a href="https://www.hklaw.com/en/insights/publications/2026/03/new-ios-exploit-darksword-and-a-new-era-of-mobile-security" rel="nofollow noopener" target="_blank">New iOS Exploit &quot;DarkSword&quot; and a New Era of Mobile Security — Holland &amp; Knight</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a09.html">← 第 9 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a11.html">第 11 篇 →</a></nav></article>
+</main></body></html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 数据采集模块架构分析 | iOS 安全研究文章库</title>
+<meta name="description" content="模块化采集架构、静态/实时监控、加密资产窃取、数据外传机制、与 DarkSword 对比">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a42.html">
+<meta property="og:title" content="Coruna 数据采集模块架构分析">
+<meta property="og:description" content="模块化采集架构、静态/实时监控、加密资产窃取、数据外传机制、与 DarkSword 对比">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a42.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 42 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 数据采集模块架构分析</h1>
+<blockquote><p>编制日期：2026-10-13 数据来源：Citizen Lab、Amnesty Tech、Apple Security、公开安全研究 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>Coruna 数据采集模块</strong>是攻击链的最终目标阶段——在内核提权成功后，攻击者需要提取目标设备上的敏感数据并外传到 C2 服务器。Coruna 的采集架构采用<strong>模块化设计</strong>，支持静态提取、实时监控和加密资产窃取。</p>
+<p>本文深入解析 Coruna 数据采集模块的架构设计。</p>
+<p><strong>核心内容</strong>：</p>
+<ol><li>采集模块总体架构</li><li>静态数据提取技术</li><li>实时监控能力</li><li>加密资产窃取</li><li>数据外传机制</li><li>与 DarkSword 采集模块对比</li></ol>
+<p><strong>风险等级：严重（Critical）</strong>。</p>
+<hr>
+<h2>2. 采集模块总体架构</h2>
+<h3>2.1 模块化设计</h3>
+<pre><code>采集框架（Core）
+        ├─ 任务调度器
+        ├─ 加密模块
+        ├─ 压缩模块
+        └─ 外传接口
+
+采集插件（Plugins）
+        ├─ 消息采集插件
+        ├─ 通话采集插件
+        ├─ 联系人采集插件
+        ├─ 照片/视频采集插件
+        ├─ 位置采集插件
+        ├─ 钥匙串采集插件
+        ├─ App 特定插件（WhatsApp/Signal/Telegram）
+        └─ 实时监控插件（麦克风/摄像头）</code></pre>
+<h3>2.2 采集流程</h3>
+<pre><code>内核提权成功
+        ↓
+加载采集框架
+        ↓
+根据 C2 指令选择采集插件
+        ↓
+执行数据采集
+        ↓
+压缩 + 加密
+        ↓
+外传到 C2
+        ↓
+清除本地痕迹</code></pre>
+<hr>
+<h2>3. 静态数据提取</h2>
+<h3>3.1 消息采集</h3>
+<table><thead><tr><th>数据源</th><th>存储位置</th><th>提取方式</th></tr></thead><tbody><tr><td><strong>iMessage/SMS</strong></td><td><code>/var/mobile/Library/SMS/sms.db</code></td><td>SQLite 数据库读取</td></tr><tr><td><strong>邮件</strong></td><td><code>/var/mobile/Library/Mail/</code></td><td>文件系统读取</td></tr><tr><td><strong>WhatsApp</strong></td><td><code>/var/mobile/Containers/Data/Application/.../ChatStorage.sqlite</code></td><td>数据库读取</td></tr><tr><td><strong>Signal</strong></td><td>加密数据库</td><td>需先提取密钥</td></tr></tbody></table>
+<h3>3.2 联系人/通话记录</h3>
+<table><thead><tr><th>数据源</th><th>存储位置</th><th>提取方式</th></tr></thead><tbody><tr><td><strong>联系人</strong></td><td><code>/var/mobile/Library/AddressBook/</code></td><td>数据库读取</td></tr><tr><td><strong>通话记录</strong></td><td><code>/var/mobile/Library/CallHistoryDB/</code></td><td>数据库读取</td></tr></tbody></table>
+<h3>3.3 照片/视频</h3>
+<table><thead><tr><th>数据源</th><th>存储位置</th><th>提取方式</th></tr></thead><tbody><tr><td><strong>照片库</strong></td><td><code>/var/mobile/Media/DCIM/</code></td><td>文件系统读取</td></tr><tr><td><strong>截图</strong></td><td><code>/var/mobile/Media/PhotoData/</code></td><td>文件系统读取</td></tr></tbody></table>
+<h3>3.4 位置信息</h3>
+<table><thead><tr><th>数据源</th><th>提取方式</th></tr></thead><tbody><tr><td><strong>GPS 缓存</strong></td><td>读取位置缓存文件</td></tr><tr><td><strong>Wi-Fi 位置</strong></td><td>读取 Wi-Fi 位置数据库</td></tr><tr><td><strong>实时位置</strong></td><td>调用位置 API</td></tr></tbody></table>
+<hr>
+<h2>4. 实时监控能力</h2>
+<h3>4.1 麦克风监听</h3>
+<pre><code>获得 root 权限
+        ↓
+调用 CoreAudio API
+        ↓
+激活麦克风
+        ↓
+实时录制音频
+        ↓
+压缩 + 加密
+        ↓
+外传到 C2</code></pre>
+<h3>4.2 摄像头监控</h3>
+<pre><code>获得 root 权限
+        ↓
+调用 AVFoundation API
+        ↓
+激活摄像头（前/后）
+        ↓
+拍照 / 录制视频
+        ↓
+压缩 + 加密
+        ↓
+外传到 C2</code></pre>
+<h3>4.3 屏幕捕获</h3>
+<pre><code>获得 root 权限
+        ↓
+调用 ScreenCapture API
+        ↓
+定时截屏
+        ↓
+压缩 + 加密
+        ↓
+外传到 C2</code></pre>
+<h3>4.4 按键记录</h3>
+<pre><code>注入到输入进程
+        ↓
+Hook 键盘事件
+        ↓
+记录按键
+        ↓
+外传到 C2</code></pre>
+<hr>
+<h2>5. 加密资产窃取</h2>
+<h3>5.1 钥匙串窃取</h3>
+<p><strong>挑战</strong>：钥匙串受 Data Protection + SEP 保护</p>
+<p><strong>攻击方式</strong>：</p>
+<pre><code>内核提权成功
+        ↓
+读取 Data Protection 密钥（从内核内存）
+        ↓
+或使用 API 直接访问（root 权限）
+        ↓
+提取钥匙串数据
+        ↓
+解密（如有必要）
+        ↓
+外传</code></pre>
+<h3>5.2 App 加密数据库</h3>
+<p><strong>示例</strong>：Signal 加密数据库</p>
+<pre><code>Signal 数据库使用 SQLCipher 加密
+        ↓
+提取加密密钥（从内存 / Keychain）
+        ↓
+使用密钥解密数据库
+        ↓
+读取消息内容</code></pre>
+<h3>5.3 端到端加密消息</h3>
+<p><strong>挑战</strong>：Signal/WhatsApp 消息端到端加密</p>
+<p><strong>攻击方式</strong>：</p>
+<ul><li><strong>内存提取</strong>：从 App 内存中提取已解密的消息</li><li><strong>数据库窃取</strong>：提取本地数据库（消息在发送/接收时解密）</li><li><strong>屏幕捕获</strong>：截取显示的消息内容</li></ul>
+<hr>
+<h2>6. 数据外传机制</h2>
+<h3>6.1 外传通道</h3>
+<table><thead><tr><th>通道</th><th>隐蔽性</th><th>带宽</th><th>使用场景</th></tr></thead><tbody><tr><td><strong>HTTPS</strong></td><td>中</td><td>高</td><td>常规外传</td></tr><tr><td><strong>DGA 域名</strong></td><td>高</td><td>中</td><td>防封禁</td></tr><tr><td><strong>DNS 隧道</strong></td><td>高</td><td>低</td><td>隐蔽外传</td></tr><tr><td><strong>合法服务</strong></td><td>高</td><td>中</td><td>Telegram/Dropbox API</td></tr></tbody></table>
+<h3>6.2 外传策略</h3>
+<table><thead><tr><th>策略</th><th>说明</th></tr></thead><tbody><tr><td><strong>分批外传</strong></td><td>大数据分块传输</td></tr><tr><td><strong>低速外传</strong></td><td>避免触发流量异常</td></tr><tr><td><strong>优先外传</strong></td><td>高价值数据优先</td></tr><tr><td><strong>失败重试</strong></td><td>网络失败时重试</td></tr></tbody></table>
+<h3>6.3 反检测</h3>
+<table><thead><tr><th>技术</th><th>说明</th></tr></thead><tbody><tr><td><strong>加密</strong></td><td>外传数据加密</td></tr><tr><td><strong>伪装</strong></td><td>伪装成正常流量</td></tr><tr><td><strong>定时</strong></td><td>选择低峰期外传</td></tr><tr><td><strong>压缩</strong></td><td>减少流量特征</td></tr></tbody></table>
+<hr>
+<h2>7. 与 DarkSword 采集模块对比</h2>
+<table><thead><tr><th>维度</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td><strong>架构</strong></td><td>模块化插件</td><td>模块化插件</td></tr><tr><td><strong>静态采集</strong></td><td>全量数据提取</td><td>全量数据提取</td></tr><tr><td><strong>实时监控</strong></td><td>麦克风/摄像头/屏幕</td><td>麦克风/摄像头</td></tr><tr><td><strong>加密资产</strong></td><td>钥匙串 + App 数据库</td><td>钥匙串 + App 数据库</td></tr><tr><td><strong>外传</strong></td><td>HTTPS + DGA</td><td>HTTPS + DGA</td></tr><tr><td><strong>驻留</strong></td><td>文件驻留</td><td>无文件驻留</td></tr></tbody></table>
+<p><strong>差异</strong>：</p>
+<ul><li>Coruna 文件驻留，可持续采集</li><li>DarkSword 无文件，需每次重新攻击</li></ul>
+<hr>
+<h2>8. 防御与检测</h2>
+<h3>8.1 数据保护</h3>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>Data Protection</strong></td><td>静态数据加密</td></tr><tr><td><strong>钥匙串</strong></td><td>凭证安全存储</td></tr><tr><td><strong>SEP</strong></td><td>硬件级密钥保护</td></tr><tr><td><strong>App 沙箱</strong></td><td>应用数据隔离</td></tr></tbody></table>
+<h3>8.2 检测指标</h3>
+<table><thead><tr><th>指标</th><th>说明</th></tr></thead><tbody><tr><td><strong>异常文件访问</strong></td><td>大量读取敏感文件</td></tr><tr><td><strong>异常网络流量</strong></td><td>异常外传流量</td></tr><tr><td><strong>异常 API 调用</strong></td><td>异常调用麦克风/摄像头</td></tr><tr><td><strong>异常进程</strong></td><td>未知进程运行</td></tr></tbody></table>
+<h3>8.3 防御建议</h3>
+<table><thead><tr><th>措施</th><th>说明</th></tr></thead><tbody><tr><td><strong>及时更新</strong></td><td>修复漏洞，防止提权</td></tr><tr><td><strong>Lockdown Mode</strong></td><td>减少攻击面</td></tr><tr><td><strong>端到端加密</strong></td><td>使用 Signal 等</td></tr><tr><td><strong>定期重启</strong></td><td>清除无文件驻留</td></tr><tr><td><strong>MVT 检测</strong></td><td>定期取证检查</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<p>Coruna 数据采集模块是攻击链的<strong>最终阶段</strong>：</p>
+<table><thead><tr><th>维度</th><th>现状</th></tr></thead><tbody><tr><td><strong>架构</strong></td><td>模块化插件设计</td></tr><tr><td><strong>静态采集</strong></td><td>消息/联系人/照片/位置</td></tr><tr><td><strong>实时监控</strong></td><td>麦克风/摄像头/屏幕</td></tr><tr><td><strong>加密资产</strong></td><td>钥匙串 + App 数据库</td></tr><tr><td><strong>外传</strong></td><td>HTTPS + DGA + 合法服务</td></tr></tbody></table>
+<p><strong>技术要点</strong>：</p>
+<ol><li>模块化设计，按需加载</li><li>静态 + 实时双模式采集</li><li>加密资产窃取是核心能力</li><li>外传采用多种隐蔽通道</li></ol>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Citizen Lab: Pegasus data collection analysis</li><li>Amnesty Tech: Mobile forensic research</li><li>Apple Platform Security: Data Protection</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a41.html">← 第 41 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a43.html">第 43 篇 →</a></nav></article>
+</main></body></html>

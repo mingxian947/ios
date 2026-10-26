@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 基带与无线固件攻击面：蜂窝、Wi-Fi、蓝牙链上的远程边界分析 | iOS 安全研究文章库</title>
+<meta name="description" content="基带作为并行信任域、R1–R6 无线入口分类与前置成本、基带驻留与清除差异、设备方可观测性的诚实边界、加固清单">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a72.html">
+<meta property="og:title" content="iOS 基带与无线固件攻击面：蜂窝、Wi-Fi、蓝牙链上的远程边界分析">
+<meta property="og:description" content="基带作为并行信任域、R1–R6 无线入口分类与前置成本、基带驻留与清除差异、设备方可观测性的诚实边界、加固清单">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a72.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 72 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 基带与无线固件攻击面：蜂窝、Wi-Fi、蓝牙链上的远程边界分析</h1>
+<blockquote><p>编制日期：2026-10-24 数据来源：Apple Platform Security 与无线/基带更新文档、Google Project Zero、Citizen Lab 关于远程植入的公开分析、Black Hat / USENIX 关于基带固件安全与 OTA 更新机制的公开研究、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>基带是 iOS 设备上<strong>最独立的攻击面</strong>：它有自己的处理器、自己的实时操作系统、自己的固件与更新通道，并且<strong>在设备锁屏、系统未解锁、甚至主系统看似关机时仍然处于活动状态</strong>（蜂窝注册本身要求它持续收发网络信令）。历史上&quot;通过无线电远程植入&quot;这一命题几乎全部落在这类并行处理器上。</p>
+<p>四条结论：</p>
+<ol><li>基带不是主处理器上的一个驱动，而是一个<strong>并行信任域</strong>：它通常可以直接访问主内存（DMA），因此&quot;基带→主机&quot;是一条天然存在的边界穿越路径，与 #64 讨论的启动链信任域同构，但方向相反。</li><li>无线攻击面有三类不同性质的入口：<strong>协议信令解析</strong>（网络侧下发的信令，可来自伪基站）、<strong>空口基带处理</strong>（物理层实现缺陷）、以及<strong>帧格式解析</strong>（短信/PDU、彩信、Wi-Fi/BT 帧）。其中前两类<strong>无需目标任何交互</strong>，也不需要互联网连接。</li><li>因此基带风险的&quot;0-click&quot;程度高于本文系列里任何一条软件通路：它的成本不依赖漏洞库存（伪基站/自有频谱设备），依赖的是<strong>实现质量</strong>，而这部分的公开审计与补丁响应 historically 远弱于主系统。</li><li>对防御方，可行的控制只有四类：及时更新（含基带固件）、关闭不必要的高层无线能力、把&quot;基带可读主内存&quot;这条路径用硬件隔离收紧（Apple Silicon 侧的 DMA 保护与 SPTM 类机制，见 #64）、以及对高危目标的<strong>物理层措施</strong>（无线电静默/专用屏蔽环境）。</li></ol>
+<hr>
+<h2>2. 无线侧的处理器与信任边界</h2>
+<pre><code>应用处理器 (AAP)                     基带处理器 (CP/BP)
+ ├─ iOS 内核 (XNU)                    ├─ RTOS + 厂商协议栈
+ ├─ 沙箱 / TCC / AMFI（#66）           ├─ 3GPP 协议层解析
+ └─ App / 系统服务                     └─ L1/L2 物理与链路层实现
+        ▲                                    │
+        │        共享内存 / 邮箱 / DMA        │
+        └────────────────────────────────────┘
+              ↑ 边界穿越方向（防御重点）
+
+      Wi-Fi / BT 组合芯片：独立固件、独立更新通道</code></pre>
+<table><thead><tr><th>域</th><th>是否独立固件</th><th>更新方式</th><th>是否可 DMA 主存</th><th>锁屏/关屏时活动</th><th>可观测性</th></tr></thead><tbody><tr><td>应用处理器</td><td>系统整体</td><td>iOS 软件更新</td><td>—</td><td>是</td><td>高（日志、崩溃、工件）</td></tr><tr><td>基带处理器</td><td><strong>是</strong></td><td>随系统更新一并下发</td><td>历史上<strong>可以</strong></td><td><strong>是</strong>（注册需要）</td><td><strong>极低</strong></td></tr><tr><td>Wi-Fi/BT 组合芯片</td><td>是</td><td>随系统更新</td><td>视实现</td><td>是（发现/扫描）</td><td>极低</td></tr><tr><td>SEP</td><td>是</td><td>随系统更新</td><td>受控</td><td>是</td><td>低</td></tr></tbody></table>
+<p><strong>结构性判断</strong>：可观测性从左到右递减，攻击者的操作空间递增。基带与无线固件是整台设备上&quot;证据最少、审计最少、公开漏洞研究也最少&quot;的区域——这不代表它们没有缺陷，只代表<strong>我们不知道</strong>（与 #62 的&quot;未发现≠未感染&quot;纪律同源，此处用于架构而非个案）。</p>
+<hr>
+<h2>3. 入口分类与前置成本</h2>
+<table><thead><tr><th>入口</th><th>攻击者位置</th><th>目标是否需要动作</th><th>需要互联网？</th><th>覆盖半径</th><th>现实门槛</th></tr></thead><tbody><tr><td><strong>R1 网络信令（核心网侧）</strong></td><td>运营商铺设点 / 伪基站</td><td><strong>否</strong></td><td>否</td><td>蜂窝覆盖区</td><td>高（频谱设备 + 协议知识）</td></tr><tr><td><strong>R2 空口实现（L1/L2）</strong></td><td>近场无线电</td><td><strong>否</strong></td><td>否</td><td>数十米—数百米</td><td>高（SDR + 固件逆向）</td></tr><tr><td><strong>R3 高层格式解析（SMS/PDU、MMS）</strong></td><td>短信网关</td><td><strong>否</strong>（送达即解析）</td><td>否（走蜂窝）</td><td>任意有信号处</td><td>中</td></tr><tr><td><strong>R4 Wi-Fi 帧/管理帧解析</strong></td><td>近场 AP/客户端</td><td>多数否（扫描即处理）</td><td>否</td><td>局域</td><td>中</td></tr><tr><td><strong>R5 蓝牙发现与配对协议</strong></td><td>近场</td><td>部分否（发现阶段）</td><td>否</td><td>局域</td><td>中（与 #71 的自动预览属同一&quot;处理早于决策&quot;逻辑）</td></tr><tr><td><strong>R6 基带→主机边界穿越</strong></td><td>已取得基带代码执行</td><td>否</td><td>否</td><td>—</td><td>极高（需两步能力）</td></tr></tbody></table>
+<p><strong>成本对比</strong>（与 #49 的原语升阶梯一致）：R1/R2 不需要任何&quot;目标点击&quot;，也不需要拥有互联网侧基础设施，因此<strong>在归因上极难</strong>——目标设备上没有可指向攻击者域名的工件（这与 #47 的 JA4/SNI 检测、#63 的狩猎剧本形成直接对照：<strong>这类路径根本不走 IP 出站</strong>）。</p>
+<hr>
+<h2>4. 与主系统攻击链的关系</h2>
+<table><thead><tr><th>链条形态</th><th>说明</th><th>与软件链的区别</th></tr></thead><tbody><tr><td><strong>C1 基带独立驻留</strong></td><td>载荷只存在于基带固件/内存，主机侧无进程</td><td>主机取证几乎看不到；重启/系统更新才可能清除（#45、#64）</td></tr><tr><td><strong>C2 基带→主机注入</strong></td><td>经共享内存/DMA 触发主机侧代码执行</td><td>起点在沙箱之外，#52/#68 的沙箱语义对其无意义</td></tr><tr><td><strong>C3 主机→基带（反向）</strong></td><td>已提权代码改写/滥用基带能力</td><td>用于隐蔽外发（蜂窝承载）与抗清除</td></tr><tr><td><strong>C4 与推送/消息通路混合</strong></td><td>无线层负责送达与唤醒，软件层负责落地</td><td>与 #65、#71 的&quot;送达即处理&quot;叠加</td></tr></tbody></table>
+<p><strong>C1 的防御含义最重要</strong>：如果驻留在基带固件里，那么&quot;重装系统&quot;&quot;恢复出厂&quot;这类主机侧清洗动作<strong>不一定清除</strong>它——清除依赖基带固件被重新刷写。这是为什么对高危目标要把&quot;完整系统更新（含基带固件版本变化）&quot;与&quot;备份恢复&quot;当作不同动作来对待（也与 #70 的工件灭失讨论对应：基带侧没有工件可供验证）。</p>
+<hr>
+<h2>5. 可观测性与检测：诚实的能力边界</h2>
+<table><thead><tr><th>检测手段</th><th>能否覆盖无线侧</th><th>说明</th></tr></thead><tbody><tr><td>设备侧流量/DNS 指标（#47、#63）</td><td><strong>不能</strong>（R1/R2 不走 IP）</td><td>无出站即无指纹</td></tr><tr><td>崩溃群体基线（#63 HUNT-04）</td><td>间接</td><td>仅当缺陷造成主机侧可观测崩溃</td></tr><tr><td>备份工件（#70、#62）</td><td><strong>不能</strong></td><td>基带侧不产出用户态工件</td></tr><tr><td>蜂窝注册异常统计（终端射频日志）</td><td>部分</td><td>需专用工具与解锁态，覆盖有限</td></tr><tr><td>网络侧（运营商/伪基站检测）</td><td><strong>可行但外部</strong></td><td>需独立频谱监测能力，非设备方能做</td></tr><tr><td>固件版本一致性核对</td><td><strong>可行</strong></td><td>比对上报的基带版本与应然版本（MDM 可采集部分字段，#67）</td></tr><tr><td>行为侧异常（无主机进程却有数据活动）</td><td>部分</td><td>与 #65/#69 的时间线矛盾模板同构</td></tr></tbody></table>
+<p>结论：<strong>基带攻击面在设备方几乎不可检测</strong>。防御预算因此应集中于三处——补丁与固件版本一致性、能力关闭（不需要的无线电功能）、以及对极少数高危角色的物理层与流程控制。任何声称&quot;可通过日志发现基带植入&quot;的方案都应要求对方说明证据来源。</p>
+<hr>
+<h2>6. 加固清单</h2>
+<table><thead><tr><th>措施</th><th>覆盖</th><th>有效性</th><th>备注</th></tr></thead><tbody><tr><td>及时系统更新（含基带固件）</td><td>全部</td><td><strong>主要手段</strong></td><td>更新后核对基带版本变化，而非只看 iOS 版本号</td></tr><tr><td>关闭不必要的 Wi-Fi/BT/个人热点，扫描时不自动连接</td><td>R4/R5</td><td>高（消除发现阶段）</td><td>与锁定模式互补（#34）</td></tr><tr><td>使用可信网络注册、避免异常运营商行为</td><td>R1</td><td>部分</td><td>高危场景可考虑网络选择手动化</td></tr><tr><td>高危环境无线电静默/屏蔽</td><td>R1/R2</td><td><strong>唯一可靠</strong></td><td>会议/机房级措施，属物理安全</td></tr><tr><td>基带版本纳入 MDM 可见项</td><td>C1</td><td>中</td><td>依赖 MDM 能取到该字段（#67 的清单比对方法）</td></tr><tr><td>固件层信任与 SPTM/DMA 保护</td><td>C2</td><td>架构性</td><td>Apple 侧持续收紧，用户无法配置（#64）</td></tr><tr><td>恢复出厂不作为唯一清洗手段</td><td>C1</td><td>重要认知</td><td>完整更新/重刷才是覆盖基带的动作</td></tr></tbody></table>
+<hr>
+<h2>7. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>并行信任域与固件完整性</td><td>#64（安全启动链与固件边界）</td></tr><tr><td>硬件密钥与协处理器</td><td>#53（SEP 与钥匙串）</td></tr><tr><td>送达即处理与通知/消息通路</td><td>#65（推送通路）、#71（iMessage 通路）</td></tr><tr><td>沙箱语义为何对基带无效</td><td>#52（沙箱模型）、#68（IPC/XPC 审计）</td></tr><tr><td>驻留与清除</td><td>#45（内存/无文件驻留）、#55（反取证）</td></tr><tr><td>归因与检测失效</td><td>#47（反检测对比）、#63（狩猎手册）</td></tr><tr><td>原语升阶梯</td><td>#49、#43（0-click 分层）、#61（补丁工程）</td></tr><tr><td>设备能力清单与 MDM</td><td>#67（企业分发与 MDM 滥用）</td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>基带是独立处理器 + 独立固件 + 独立更新通道的并行信任域，不是主系统的一个驱动</td></tr><tr><td>2</td><td>无线侧入口 R1–R3 不需要目标任何动作，也不需要互联网连接，覆盖半径由频谱决定</td></tr><tr><td>3</td><td>这类路径不产生 IP 出站，因此基于流量与 DNS 的检测体系对它们完全无效</td></tr><tr><td>4</td><td>若载荷驻留在基带固件，恢复出厂不必然清除，覆盖它的是&quot;含固件版本的完整更新&quot;</td></tr><tr><td>5</td><td>基带可观测性极低，防御应从&quot;检测&quot;转向&quot;能力关闭 + 版本一致性 + 物理层控制&quot;</td></tr><tr><td>6</td><td>与软件链相比，无线链的归因难度更高，因此在事件评估里应单列一类而非并入 APT 软件画像</td></tr><tr><td>7</td><td>对绝大多数用户，及时更新与关闭不必要射频能力已覆盖现实风险；无线植入假设仅适用于极少数高危角色</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：Coruna 与 DarkSword 这类链条争夺的是把主机侧软件缺陷串成完整入侵的能力，而基带与无线固件是 iOS 上唯一&quot;不需要经过主机、也不需要经过互联网&quot;的攻击面——它的防御代价因此完全不同：不是补丁纪律与锁定模式就够，而是要接受&quot;这一层我们基本看不见&quot;，并据此把控制放在固件更新一致性、射频能力关闭和物理层措施上。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Wireless &amp; Baseband Updates</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases（含基带相关条目）</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 无线与并行处理器研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 远程植入与能力披露研究</a></li><li><a href="https://www.usenix.org/conference/usenixsecurity" rel="nofollow noopener" target="_blank">USENIX Security / Black Hat — 基带固件安全与 OTA 更新公开研究</a></li><li><a href="https://www.3gpp.org/" rel="nofollow noopener" target="_blank">3GPP — 蜂窝协议规范目录</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a71.html">← 第 71 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a73.html">第 73 篇 →</a></nav></article>
+</main></body></html>

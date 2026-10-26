@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS Kernel Exploitation 与 KTRR/PPL 绕过技术详解 | iOS 安全研究文章库</title>
+<meta name="description" content="阶段 4 · XNU 内核攻击面、KTRR/PPL/SPTM/TXM 机制与绕过、内核利用原语">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a33.html">
+<meta property="og:title" content="iOS Kernel Exploitation 与 KTRR/PPL 绕过技术详解">
+<meta property="og:description" content="阶段 4 · XNU 内核攻击面、KTRR/PPL/SPTM/TXM 机制与绕过、内核利用原语">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a33.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 33 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS Kernel Exploitation 与 KTRR/PPL 绕过技术详解</h1>
+<blockquote><p>编制日期：2026-10-13 数据来源：Apple 安全公告、Google Project Zero、XNU 开源代码、安全研究论文、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>内核提权（Kernel Exploitation）</strong> 是 iOS 全链条攻击中<strong>最关键、最高难度</strong>的环节——攻击者从普通用户态进程（或沙箱逃逸后的系统进程）获得 <strong>root 权限 + 内核读写能力</strong>，从而完全控制设备。</p>
+<p>Apple 在内核层面部署了多层硬件级保护：</p>
+<table><thead><tr><th>保护</th><th>全称</th><th>机制</th></tr></thead><tbody><tr><td><strong>KTRR</strong></td><td>Kernel Text Region Register</td><td>内核代码段物理只读</td></tr><tr><td><strong>PPL</strong></td><td>Page Protection Layer</td><td>页表完整性硬件校验</td></tr><tr><td><strong>SPTM</strong></td><td>Secure Page Table Monitor</td><td>硬件页表监控（A17+）</td></tr><tr><td><strong>TXM</strong></td><td>Trusted Execution Monitor</td><td>EL3 硬件信任根（A17+）</td></tr></tbody></table>
+<p>本文深入解析：</p>
+<ol><li><strong>XNU 内核架构与攻击面</strong></li><li><strong>内核漏洞类型与利用原语</strong></li><li><strong>KTRR/PPL 机制详解</strong></li><li><strong>KTRR/PPL 绕过技术</strong></li><li><strong>SPTM/TXM 新一代保护</strong></li><li><strong>真实案例与 CVE 映射</strong></li></ol>
+<p><strong>核心结论</strong>：KTRR/PPL 大幅提高了内核攻击成本，但并非不可绕过。攻击者需<strong>多个零日漏洞</strong>串联，成本极高。SPTM/TXM 进一步提升防御，但安全研究需持续跟进。</p>
+<p><strong>风险等级：严重（Critical）</strong>。</p>
+<hr>
+<h2>2. XNU 内核架构与攻击面</h2>
+<h3>2.1 XNU 内核组成</h3>
+<p><strong>XNU（X is Not Unix）</strong> 是 Apple 的混合内核，结合 Mach 微内核 + BSD 宏内核：</p>
+<pre><code>┌─────────────────────────────────────────┐
+│  用户态（User Space）                    │
+│    ├─ 应用程序                           │
+│    ├─ 系统服务                          │
+│    └─ 系统调用接口（syscall）            │
+└────────────────┬────────────────────────┘
+                 │  系统调用 / Mach trap
+┌────────────────┴────────────────────────┐
+│  XNU 内核（Kernel Space）                │
+│    ├─ Mach 层                           │
+│    │   ├─ 任务/线程管理                  │
+│    │   ├─ 虚拟内存（VM）                 │
+│    │   ├─ IPC（Mach 消息）               │
+│    │   └─ 调度器                        │
+│    ├─ BSD 层                            │
+│    │   ├─ 进程模型                      │
+│    │   ├─ 文件系统（VFS）                │
+│    │   ├─ 网络栈                        │
+│    │   └─ 用户/权限                     │
+│    ├─ IOKit                             │
+│    │   ├─ 设备驱动框架                   │
+│    │   └─ User Client（用户态接口）      │
+│    └─ 安全层                            │
+│        ├─ MAC（强制访问控制）             │
+│        ├─ AMFI（代码签名）               │
+│        └─ Sandbox（沙箱）               │
+└─────────────────────────────────────────┘</code></pre>
+<h3>2.2 内核攻击面</h3>
+<table><thead><tr><th>攻击面</th><th>说明</th><th>风险</th></tr></thead><tbody><tr><td><strong>系统调用</strong></td><td>用户态通过 syscall 进入内核</td><td>中（审计严格）</td></tr><tr><td><strong>Mach trap</strong></td><td>Mach IPC 接口</td><td>中</td></tr><tr><td><strong>IOKit User Client</strong></td><td>驱动用户态接口</td><td>高（历史漏洞多）</td></tr><tr><td><strong>网络栈</strong></td><td>网络协议处理</td><td>中（远程可触达）</td></tr><tr><td><strong>文件系统</strong></td><td>VFS 层处理</td><td>低（需本地访问）</td></tr><tr><td><strong>内存管理</strong></td><td>VM 子系统</td><td>高（核心功能）</td></tr></tbody></table>
+<h3>2.3 内核利用目标</h3>
+<p>攻击者获得内核代码执行后，通常追求：</p>
+<table><thead><tr><th>目标</th><th>说明</th></tr></thead><tbody><tr><td><strong>task port 获取</strong></td><td>获得 <code>task_for_pid(0)</code> → 控制内核任务</td></tr><tr><td><strong>内核读写</strong></td><td>读写任意内核内存</td></tr><tr><td><strong>代码执行</strong></td><td>在内核态执行任意代码</td></tr><tr><td><strong>权限提升</strong></td><td>修改 cred → root 权限</td></tr><tr><td><strong>沙箱绕过</strong></td><td>修改沙箱策略 → 脱离限制</td></tr></tbody></table>
+<hr>
+<h2>3. 内核漏洞类型与利用原语</h2>
+<h3>3.1 漏洞类型</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>频率</th></tr></thead><tbody><tr><td><strong>内存破坏</strong></td><td>缓冲区溢出、UAF、类型混淆</td><td>最高</td></tr><tr><td><strong>逻辑缺陷</strong></td><td>权限检查遗漏、竞态条件</td><td>高</td></tr><tr><td><strong>整数溢出</strong></td><td>长度计算溢出 → 越界</td><td>中</td></tr><tr><td><strong>空指针解引用</strong></td><td>可控制的空指针</td><td>低（现代缓解）</td></tr></tbody></table>
+<h3>3.2 利用原语（Primitives）</h3>
+<table><thead><tr><th>原语</th><th>说明</th><th>用途</th></tr></thead><tbody><tr><td><strong>内核信息泄露</strong></td><td>读取内核内存 → 泄露地址</td><td>KASLR 绕过</td></tr><tr><td><strong>任意地址读</strong></td><td>读取任意内核地址</td><td>数据提取</td></tr><tr><td><strong>任意地址写</strong></td><td>写入任意内核地址</td><td>控制流劫持</td></tr><tr><td><strong>代码执行</strong></td><td>在内核态执行代码</td><td>最终目标</td></tr></tbody></table>
+<h3>3.3 KASLR 绕过</h3>
+<p><strong>KASLR（Kernel Address Space Layout Randomization）</strong> 随机化内核基址：</p>
+<p><strong>绕过技术</strong>：</p>
+<table><thead><tr><th>技术</th><th>原理</th></tr></thead><tbody><tr><td><strong>信息泄露</strong></td><td>通过漏洞泄露内核指针 → 计算基址</td></tr><tr><td><strong>侧信道</strong></td><td>时序/缓存侧信道推断地址</td></tr><tr><td><strong>猜测</strong></td><td>低熵情况下暴力猜测（成功率低）</td></tr></tbody></table>
+<h3>3.4 内核控制流劫持</h3>
+<p>获得任意地址写后，劫持控制流：</p>
+<table><thead><tr><th>技术</th><th>原理</th></tr></thead><tbody><tr><td><strong>覆写函数指针</strong></td><td>内核函数表中的指针</td></tr><tr><td><strong>覆写 vtable</strong></td><td>C++ 对象的虚表指针</td></tr><tr><td><strong>覆写 GOT</strong></td><td>动态链接的全偏移表</td></tr><tr><td><strong>ROP</strong></td><td>复用内核代码片段</td></tr></tbody></table>
+<hr>
+<h2>4. KTRR 机制详解</h2>
+<h3>4.1 KTRR 设计原理</h3>
+<p><strong>KTRR（Kernel Text Region Register）</strong> 是 Apple Silicon 的硬件级保护，确保<strong>内核代码段物理只读</strong>：</p>
+<pre><code>内核代码段（__TEXT）
+        ↓
+KTRR 硬件寄存器标记为只读
+        ↓
+MMU 强制：即使内核态也无法修改
+        ↓
+防止攻击者篡改内核代码</code></pre>
+<h3>4.2 KTRR 保护的内存区域</h3>
+<table><thead><tr><th>区域</th><th>说明</th><th>KTRR 保护</th></tr></thead><tbody><tr><td><strong>__TEXT</strong></td><td>内核代码段</td><td>✓ 只读</td></tr><tr><td><strong>__DATA_CONST</strong></td><td>只读数据</td><td>✓ 只读</td></tr><tr><td><strong>__DATA</strong></td><td>可读写数据</td><td>✗ 可写</td></tr><tr><td><strong>__LINKEDIT</strong></td><td>链接信息</td><td>✓ 只读</td></tr></tbody></table>
+<h3>4.3 KTRR 的局限</h3>
+<table><thead><tr><th>局限</th><th>说明</th></tr></thead><tbody><tr><td><strong>不保护页表</strong></td><td>页表在 __DATA 区，可被修改</td></tr><tr><td><strong>不保护数据段</strong></td><td>__DATA 区可写</td></tr><tr><td><strong>不保护内核堆</strong></td><td>堆内存可被分配/修改</td></tr><tr><td><strong>仅保护代码</strong></td><td>只防止代码篡改</td></tr></tbody></table>
+<p><strong>结论</strong>：KTRR 防止内核代码被篡改，但<strong>不阻止通过页表/数据段的攻击</strong>。</p>
+<hr>
+<h2>5. PPL 机制详解</h2>
+<h3>5.1 PPL 设计原理</h3>
+<p><strong>PPL（Page Protection Layer）</strong> 是 KTRR 的补充，保护<strong>页表完整性</strong>：</p>
+<pre><code>内核修改页表
+        ↓
+PPL 固件（运行在 EL2）校验
+        ↓
+  ┌─ 合法修改 → 放行
+  └─ 非法修改 → 阻止 + 触发异常</code></pre>
+<h3>5.2 PPL 保护的页表操作</h3>
+<table><thead><tr><th>操作</th><th>PPL 检查</th></tr></thead><tbody><tr><td><strong>页表项修改</strong></td><td>验证新映射是否合法</td></tr><tr><td><strong>内存属性修改</strong></td><td>检查缓存/权限属性</td></tr><tr><td><strong>受保护区域映射</strong></td><td>阻止映射 SEP/SPTM 内存</td></tr></tbody></table>
+<h3>5.3 PPL 的局限</h3>
+<table><thead><tr><th>局限</th><th>说明</th></tr></thead><tbody><tr><td><strong>软件实现</strong></td><td>PPL 是固件，可能有漏洞</td></tr><tr><td><strong>信任边界</strong></td><td>PPL 与内核共享部分信任</td></tr><tr><td><strong>可被绕过</strong></td><td>PPL 固件漏洞可被利用</td></tr></tbody></table>
+<hr>
+<h2>6. KTRR/PPL 绕过技术</h2>
+<h3>6.1 KTRR 绕过</h3>
+<p><strong>KTRR 仅保护代码段</strong>，绕过思路：</p>
+<table><thead><tr><th>技术</th><th>原理</th></tr></thead><tbody><tr><td><strong>数据段攻击</strong></td><td>修改 __DATA 区的函数指针/数据</td></tr><tr><td><strong>页表攻击</strong></td><td>修改页表映射（需绕过 PPL）</td></tr><tr><td><strong>ROP</strong></td><td>不修改代码，复用现有代码片段</td></tr><tr><td><strong>堆攻击</strong></td><td>在内核堆构造恶意对象</td></tr></tbody></table>
+<p><strong>示例：数据段攻击</strong></p>
+<pre><code>内核漏洞 → 任意地址写
+        ↓
+覆写 __DATA 区的函数指针
+        ↓
+触发函数调用 → 执行攻击者代码
+        ↓
+（未修改 __TEXT，KTRR 不阻止）</code></pre>
+<h3>6.2 PPL 绕过</h3>
+<p><strong>PPL 是软件固件</strong>，绕过思路：</p>
+<table><thead><tr><th>技术</th><th>原理</th><th>难度</th></tr></thead><tbody><tr><td><strong>PPL 固件漏洞</strong></td><td>利用 PPL 自身缺陷</td><td>高</td></tr><tr><td><strong>PPL 配置绕过</strong></td><td>利用 PPL 配置缺陷</td><td>中</td></tr><tr><td><strong>侧信道攻击</strong></td><td>推断 PPL 状态</td><td>高</td></tr><tr><td><strong>物理攻击</strong></td><td>故障注入（国家级）</td><td>极高</td></tr></tbody></table>
+<p><strong>历史 PPL 绕过案例</strong>：</p>
+<ul><li>某些 iOS 版本中，PPL 未正确校验某些页表操作</li><li>通过特制的页表修改序列绕过 PPL 检查</li><li>利用 PPL 与内核的竞态条件</li></ul>
+<h3>6.3 组合绕过：KTRR + PPL</h3>
+<p><strong>完整绕过链</strong>：</p>
+<pre><code>内核漏洞（任意地址写）
+        ↓
+绕过 PPL（PPL 漏洞 / 配置缺陷）
+        ↓
+修改页表 → 映射受保护内存为可写
+        ↓
+修改内核代码/数据
+        ↓
+劫持控制流 → 内核代码执行</code></pre>
+<hr>
+<h2>7. SPTM/TXM：新一代保护</h2>
+<h3>7.1 SPTM（Secure Page Table Monitor）</h3>
+<p><strong>A17+/M4+</strong> 引入，运行在 <strong>EL2</strong>：</p>
+<table><thead><tr><th>特性</th><th>说明</th></tr></thead><tbody><tr><td><strong>硬件实现</strong></td><td>非软件固件，难以漏洞</td></tr><tr><td><strong>影子页表</strong></td><td>独立维护页表副本，对比校验</td></tr><tr><td><strong>保护区域</strong></td><td>SEP 内存、SPTM 自身、TXM、Exclaves</td></tr></tbody></table>
+<p><strong>对攻击的影响</strong>：</p>
+<ul><li>内核无法通过页表修改访问受保护内存</li><li>即使绕过 PPL，仍被 SPTM 阻止</li><li>大幅提高攻击成本</li></ul>
+<h3>7.2 TXM（Trusted Execution Monitor）</h3>
+<p>运行在 <strong>EL3</strong>，硬件信任根：</p>
+<table><thead><tr><th>特性</th><th>说明</th></tr></thead><tbody><tr><td><strong>最高特权级</strong></td><td>EL3，监控 SPTM 完整性</td></tr><tr><td><strong>安全寄存器</strong></td><td>保护关键系统寄存器</td></tr><tr><td><strong>安全启动</strong></td><td>作为安全启动链终端</td></tr></tbody></table>
+<p><strong>对攻击的影响</strong>：</p>
+<ul><li>SPTM 自身完整性由 TXM 保证</li><li>攻击者需同时绕过 SPTM + TXM</li><li>几乎需要硬件级漏洞</li></ul>
+<h3>7.3 代际对比</h3>
+<table><thead><tr><th>代次</th><th>保护机制</th><th>信任根</th><th>绕过难度</th></tr></thead><tbody><tr><td>A12–A16</td><td>KTRR + PPL</td><td>PPL 固件</td><td>中–高</td></tr><tr><td>A17+</td><td>KTRR + SPTM + TXM</td><td>TXM 硬件</td><td>极高</td></tr></tbody></table>
+<hr>
+<h2>8. 真实案例与 CVE</h2>
+<h3>8.1 内核提权 CVE 示例</h3>
+<table><thead><tr><th>CVE</th><th>类型</th><th>组件</th><th>影响</th></tr></thead><tbody><tr><td>CVE-2021-30807</td><td>UAF</td><td>IOKit HID 驱动</td><td>在野利用</td></tr><tr><td>CVE-2022-32874</td><td>内存破坏</td><td>IOGraphics 驱动</td><td>沙箱逃逸</td></tr><tr><td>CVE-2023-32422</td><td>信息泄露</td><td>内核内存管理</td><td>KASLR 绕过</td></tr><tr><td>CVE-2023-38606</td><td>内存破坏</td><td>IOGPUDevice</td><td>沙箱逃逸</td></tr></tbody></table>
+<h3>8.2 越狱中的内核利用</h3>
+<p><strong>越狱工具</strong>（如 checkra1n、palera1n）的内核利用：</p>
+<table><thead><tr><th>越狱</th><th>漏洞</th><th>利用方式</th></tr></thead><tbody><tr><td><strong>checkra1n</strong></td><td>checkm8（BootROM）</td><td>硬件级，无法补丁</td></tr><tr><td><strong>palera1n</strong></td><td>内核漏洞</td><td>软件级，需特定版本</td></tr></tbody></table>
+<p><strong>内核利用流程</strong>（典型越狱）：</p>
+<pre><code>1. KASLR 绕过（信息泄露）
+        ↓
+2. 内核漏洞触发（任意地址写）
+        ↓
+3. 绕过 PPL（PPL 漏洞）
+        ↓
+4. 修改内核数据/页表
+        ↓
+5. 劫持控制流 → 内核代码执行
+        ↓
+6. 安装越狱环境（修改文件系统）</code></pre>
+<h3>8.3 Operation Triangulation 内核利用</h3>
+<p><strong>卡巴斯基披露（2023）</strong>：</p>
+<ul><li>使用未知内核零日</li><li>驻留于 Secure Enclave 相邻区域</li><li>绕过 KTRR/PPL（具体技术未公开）</li><li>针对俄罗斯政府/军事人员</li></ul>
+<hr>
+<h2>9. 防御体系</h2>
+<h3>9.1 硬件级防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th><th>代次</th></tr></thead><tbody><tr><td><strong>KTRR</strong></td><td>内核代码只读</td><td>A12+</td></tr><tr><td><strong>PPL</strong></td><td>页表完整性校验</td><td>A12+</td></tr><tr><td><strong>SPTM</strong></td><td>硬件页表监控</td><td>A17+</td></tr><tr><td><strong>TXM</strong></td><td>EL3 硬件信任根</td><td>A17+</td></tr><tr><td><strong>PAC</strong></td><td>指针签名</td><td>A12+</td></tr></tbody></table>
+<h3>9.2 软件级防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th></tr></thead><tbody><tr><td><strong>KASLR</strong></td><td>内核地址随机化</td></tr><tr><td><strong>W^X</strong></td><td>内核内存不可同时可写可执行</td></tr><tr><td><strong>栈保护</strong></td><td>栈溢出检测（canary）</td></tr><tr><td><strong>类型安全</strong></td><td>加强内核代码类型安全</td></tr></tbody></table>
+<h3>9.3 运行时防御</h3>
+<table><thead><tr><th>防御</th><th>说明</th></tr></thead><tbody><tr><td><strong>行为检测</strong></td><td>监控异常内核调用模式</td></tr><tr><td><strong>内存监控</strong></td><td>检测异常内存访问</td></tr><tr><td><strong>完整性校验</strong></td><td>定期校验内核完整性</td></tr></tbody></table>
+<h3>9.4 防御建议</h3>
+<p><strong>对个人用户</strong>：</p>
+<ol><li>使用 A17+ 设备（SPTM/TXM 保护）</li><li>及时更新 iOS</li><li>启用 Lockdown Mode</li></ol>
+<p><strong>对企业/组织</strong>：</p>
+<ol><li>设备清点（识别 A16 及之前设备）</li><li>高风险岗位配备 A17+ 设备</li><li>运行时行为检测</li></ol>
+<p><strong>对安全研究者</strong>：</p>
+<ol><li>持续研究 SPTM/TXM 绕过</li><li>内核漏洞挖掘（fuzzing）</li><li>PPL/SPTM 形式化验证</li></ol>
+<hr>
+<h2>10. 总结</h2>
+<p>iOS 内核提权是<strong>全链条攻击的最高难度环节</strong>：</p>
+<table><thead><tr><th>维度</th><th>现状</th></tr></thead><tbody><tr><td><strong>保护机制</strong></td><td>KTRR + PPL（A12+）、SPTM + TXM（A17+）</td></tr><tr><td><strong>绕过难度</strong></td><td>A12–A16：中–高；A17+：极高</td></tr><tr><td><strong>漏洞需求</strong></td><td>多个零日串联（KASLR 绕过 + 内核漏洞 + PPL 绕过）</td></tr><tr><td><strong>攻击成本</strong></td><td>极高（数百万美元）</td></tr></tbody></table>
+<p><strong>防御核心</strong>：</p>
+<ol><li><strong>硬件级保护</strong>：SPTM/TXM 提供最强防御</li><li><strong>纵深防御</strong>：KTRR + PPL + PAC + KASLR</li><li><strong>及时补丁</strong>：修复已知漏洞</li><li><strong>运行时检测</strong>：监控异常行为</li></ol>
+<p><strong>未来展望</strong>：</p>
+<ul><li>A17+ 设备大幅提升内核攻击成本</li><li>攻击者需硬件级漏洞或侧信道</li><li>需要持续研究 + 硬件迭代</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li>XNU Open Source: https://opensource.apple.com/source/xnu/</li><li>Apple Platform Security: https://support.apple.com/guide/security</li><li>Google Project Zero: iOS kernel exploitation</li><li>checkra1n / palera1n jailbreak research</li><li>Kaspersky GReAT: Operation Triangulation</li><li>Academic papers on ARM hardware security</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a32.html">← 第 32 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a34.html">第 34 篇 →</a></nav></article>
+</main></body></html>

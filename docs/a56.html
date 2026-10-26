@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 及主流 iOS 攻击套件横向技术对比 | iOS 安全研究文章库</title>
+<meta name="description" content="Trident/FORCEDENTRY/Triangulation/Coruna/DarkSword 等九套体系十二维度对比、五条演化规律与一页速查表">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a56.html">
+<meta property="og:title" content="Coruna 与 DarkSword 及主流 iOS 攻击套件横向技术对比">
+<meta property="og:description" content="Trident/FORCEDENTRY/Triangulation/Coruna/DarkSword 等九套体系十二维度对比、五条演化规律与一页速查表">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a56.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 56 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 及主流 iOS 攻击套件横向技术对比</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Google Project Zero、Citizen Lab、Amnesty International、Lookout、ESET、Apple 安全公告、各套件公开分析报告 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>单看一个攻击套件，容易把它的能力当成&quot;特例&quot;；把近十年的公开案例放在一起看，才能识别出<strong>结构规律</strong>：哪些环节反复成为突破口、哪些防御真正改变了攻击者行为、哪些能力演化是必然趋势。</p>
+<p>本文对 <strong>Trident、ImageIO 链、FORCEDENTRY、Pegasus（各代）、Triangulation、Coruna、DarkSword、GHOSTBLADE、Predator</strong> 等主流 iOS 攻击套件，在 12 个技术维度上做系统横向对比，并从中提炼<strong>五条演化规律</strong>与<strong>四条防御结论</strong>。</p>
+<p>这是本 Coruna/DarkSword 系列的收官篇——把前面所有单点分析放回历史坐标系中。</p>
+<hr>
+<h2>2. 对比对象概览</h2>
+<table><thead><tr><th>套件</th><th>披露年份</th><th>归属方（公开报道）</th><th>交互模型</th><th>历史定位</th></tr></thead><tbody><tr><td><strong>Trident</strong></td><td>2016</td><td>NSO Group</td><td>1-click（iMessage 链接）</td><td>首个公开 iOS 全链条攻击</td></tr><tr><td><strong>ImageIO 链</strong></td><td>2018</td><td>NSO Group</td><td><strong>0-click</strong>（iMessage 预渲染）</td><td>首个 iOS 0-click 攻击</td></tr><tr><td><strong>Pegasus（2019 代）</strong></td><td>2019</td><td>NSO Group</td><td>0-click（iMessage）</td><td>零点击规模化运营开端</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>2021</td><td>NSO Group</td><td><strong>0-click</strong>（WhatsApp 通话）</td><td>解析器 0-click 工程高峰</td></tr><tr><td><strong>Triangulation</strong></td><td>2023</td><td>国家级（未公开厂商）</td><td><strong>0-click</strong>（基带/短信）</td><td>首个公开 SEP 层突破链</td></tr><tr><td><strong>Coruna</strong></td><td>2024</td><td>NSO Group（关联）</td><td>1-click（水坑）</td><td><strong>多链平台化</strong>代表</td></tr><tr><td><strong>DarkSword</strong></td><td>2024</td><td>商业间谍软件供应商</td><td>1-click（水坑）</td><td><strong>无持久化</strong>范式代表</td></tr><tr><td><strong>GHOSTBLADE</strong></td><td>2024</td><td>商业供应商</td><td>1-click</td><td><strong>泄露链复用</strong>代表</td></tr><tr><td><strong>Predator</strong></td><td>2023</td><td>IntelCere</td><td>1-click（含 0-click 尝试）</td><td>与 Pegasus 直接竞争的产品</td></tr></tbody></table>
+<hr>
+<h2>3. 十二维度横向对比</h2>
+<h3>3.1 维度总表</h3>
+<table><thead><tr><th>套件</th><th>入口</th><th>初始 RCE 组件</th><th>逃逸面</th><th>提权面</th><th>持久化</th><th>载荷架构</th><th>数据侧重</th></tr></thead><tbody><tr><td><strong>Trident</strong></td><td>iMessage 链接</td><td>WebKit</td><td>IOKit</td><td>内核</td><td>是</td><td>单体 implant</td><td>消息/位置/通话</td></tr><tr><td><strong>ImageIO 链</strong></td><td>iMessage 图片</td><td>ImageIO</td><td>IPC/驱动</td><td>内核</td><td>是</td><td>单体 implant</td><td>全量采集</td></tr><tr><td><strong>2019 Pegasus</strong></td><td>iMessage</td><td>WebKit/相关</td><td>IOKit</td><td>内核</td><td>是</td><td>模块化</td><td>全量采集</td></tr><tr><td><strong>FORCEDENTRY</strong></td><td>WhatsApp 通话</td><td>CoreText/PDF 字体</td><td>同进程内</td><td>内核</td><td>是</td><td>单体</td><td>消息/凭证</td></tr><tr><td><strong>Triangulation</strong></td><td>基带/短信</td><td>基带 → 内核链</td><td>内核 + <strong>SEP</strong></td><td>内核 + 固件</td><td><strong>是（含固件）</strong></td><td>模块化</td><td>全量 + 底层</td></tr><tr><td><strong>Coruna</strong></td><td>水坑 URL</td><td>JSC（多条链）</td><td>GPU/ANGLE + IOKit</td><td>内核</td><td>部分</td><td><strong>平台化多链 + 模块</strong></td><td>全量采集</td></tr><tr><td><strong>DarkSword</strong></td><td>水坑 URL</td><td>JSC DFG GC</td><td><strong>ANGLE/GPU 两阶段</strong></td><td>内核</td><td><strong>否</strong></td><td><strong>一次性内联</strong></td><td>精选小体积</td></tr><tr><td><strong>GHOSTBLADE</strong></td><td>水坑 URL</td><td><strong>复用泄露链</strong></td><td>复用</td><td>复用</td><td>是</td><td>模块化</td><td>全量采集</td></tr><tr><td><strong>Predator</strong></td><td>水坑/消息</td><td>WebKit 等</td><td>多面</td><td>内核</td><td>是</td><td>模块化（后期转混合）</td><td>全量采集</td></tr></tbody></table>
+<h3>3.2 交互模型演化</h3>
+<pre><code>2016 ──────── 2018 ──────── 2019 ──────── 2021 ──────── 2023 ──────── 2024
+ 1-click       0-click       0-click        0-click        0-click        1-click
+ Trident      ImageIO      iMessage      FORCEDENTRY   Triangulation   Coruna
+                                                          ↓             DarkSword
+                                                       BlastDoor      GHOSTBLADE
+                                                       上线(2021)      Predator
+                                                          ↓
+                                                  0-click 成本急剧上升
+                                                          ↓
+                                                  主流回退到 1-click 水坑</code></pre>
+<p><strong>这是本表最重要的观察</strong>：iOS 15 引入 BlastDoor 之后，公开的 <strong>0-click iMessage 链显著减少</strong>，攻击重心回落到 <strong>1-click WebKit 水坑</strong>。</p>
+<blockquote><p><strong>结论</strong>：这是<strong>架构性防御真实改变攻击者行为</strong>的实证案例。它没有&quot;防住攻击&quot;，但它把攻击推向了成本更高、暴露面更大的路径。</p></blockquote>
+<h3>3.3 初始执行组件选择</h3>
+<table><thead><tr><th>组件类别</th><th>代表</th><th>优点</th><th>缺点</th></tr></thead><tbody><tr><td><strong>WebKit/JSC</strong></td><td>Trident、Coruna、DarkSword、Predator</td><td>攻击面巨大、漏洞密度高、可控 JS 环境</td><td>受 BlastDoor 无关但也受 JIT 硬化影响</td></tr><tr><td><strong>ImageIO</strong></td><td>2018 链</td><td>支持 0-click（自动渲染）</td><td>面较窄，被重点加固</td></tr><tr><td><strong>CoreText/PDF</strong></td><td>FORCEDENTRY</td><td>0-click、字体格式复杂度极高</td><td>单点依赖，一个洞用完即止</td></tr><tr><td><strong>VoIP 栈</strong></td><td>2019 Pegasus、FORCEDENTRY</td><td>无需接听即可触发</td><td>需第三方 App 配合</td></tr><tr><td><strong>基带</strong></td><td>Triangulation</td><td>完全 0-click、绕过主系统沙箱</td><td>成本极高、漏洞极稀缺</td></tr></tbody></table>
+<p><strong>观察</strong>：<strong>组件选择的本质是在&quot;漏洞密度&quot;与&quot;交互成本&quot;之间做权衡</strong>。WebKit 密度最高但需点击；基带可 0-click 但近乎不可得。</p>
+<h3>3.4 逃逸面演化（关键趋势）</h3>
+<pre><code>第一代：IOKit 驱动直接漏洞（Trident 时期）
+    ↓  IOKit 面被大量审计 + 收紧
+第二代：Mach IPC / XPC 校验缺陷
+    ↓  IPC 校验加固
+第三代：媒体/后台服务进程滥用
+    ↓  服务沙箱收紧
+第四代：GPU / ANGLE / WebGPU（Coruna、DarkSword）  ← 当前主战场
+    ↓  图形栈逐步修补中
+第五代：跨层耦合（Triangulation：基带 → 内核 → SEP）  ← 能力天花板</code></pre>
+<p><strong>为何 GPU 成为当前热点</strong>（详见本仓库 #52）：</p>
+<table><thead><tr><th>判据</th><th>GPU/ANGLE</th></tr></thead><tbody><tr><td>沙箱必须放行</td><td>✅ 渲染必需</td></tr><tr><td>实现复杂</td><td>✅ GL/WebGPU 语义极复杂</td></tr><tr><td>代码年轻</td><td>✅ WebGPU 新 API</td></tr><tr><td>C/C++ 实现</td><td>✅ ANGLE 为 C++</td></tr><tr><td>跨权限边界</td><td>✅ 用户态服务 + 内核驱动</td></tr><tr><td>审计密度</td><td>⚠️ 相对低于 IOKit 传统面</td></tr></tbody></table>
+<p><strong>六项全中——这是系统性攻击面评估的结果，不是运气。</strong></p>
+<h3>3.5 持久化策略谱系</h3>
+<pre><code>完全持久化 ─────────────────────────────────→ 完全无持久化
+   ↑                          ↑                    ↑
+Trident / 早期 Pegasus    Coruna(部分)        DarkSword
+Triangulation(含固件)     Predator</code></pre>
+<table><thead><tr><th>策略</th><th>代表</th><th>动机</th><th>代价</th></tr></thead><tbody><tr><td><strong>强持久化</strong></td><td>早期 Pegasus、Triangulation</td><td>长期控制、跨重启</td><td>痕迹最多、易被归因</td></tr><tr><td><strong>部分持久化</strong></td><td>Coruna</td><td>平衡覆盖与隐蔽</td><td>仍需清除逻辑</td></tr><tr><td><strong>无持久化</strong></td><td>DarkSword</td><td>极致隐蔽</td><td>每次需重新投递、失去实时监控</td></tr></tbody></table>
+<p><strong>演化压力来源</strong>：Amnesty MVT（2021）等基于备份工件的检测工具成熟 ⇒ <strong>落地文件范式的检出率系统性上升</strong> ⇒ 攻击者向无持久化迁移。</p>
+<blockquote><p><strong>这是一条清晰的因果链：检测工具的进步直接塑造了攻击架构的演化方向。</strong></p></blockquote>
+<h3>3.6 载荷架构对比</h3>
+<table><thead><tr><th>套件</th><th>架构类型</th><th>模块</th><th>任务队列</th><th>状态</th></tr></thead><tbody><tr><td>Trident</td><td>单体 implant</td><td>少</td><td>简单</td><td>有</td></tr><tr><td>2019 Pegasus</td><td>三层 + 插件</td><td>多（Carthage/KiteRisa 等）</td><td>✅</td><td>有</td></tr><tr><td>FORCEDENTRY</td><td>单体精简</td><td>少</td><td>简单</td><td>有</td></tr><tr><td>Triangulation</td><td>模块化 + 固件层</td><td>多</td><td>✅</td><td>有（跨固件）</td></tr><tr><td>Coruna</td><td><strong>平台化多链 + 模块</strong></td><td>多</td><td>✅ 条件调度</td><td>有</td></tr><tr><td>DarkSword</td><td><strong>一次性内联</strong></td><td>❌</td><td>❌</td><td>❌</td></tr><tr><td>Predator</td><td>模块化（后期转混合）</td><td>多</td><td>✅</td><td>部分</td></tr></tbody></table>
+<p><strong>关键趋势</strong>（详见 #54）：</p>
+<blockquote><p>模块化并未消失，而是<strong>从设备端迁往服务端</strong>。设备端越来越干净，攻击智能留在 C2 侧按需下发。</p></blockquote>
+<h3>3.7 C2 与外传</h3>
+<table><thead><tr><th>套件</th><th>C2 架构</th><th>通道</th><th>心跳</th><th>抗封锁</th></tr></thead><tbody><tr><td>早期 Pegasus</td><td>多层</td><td>多</td><td>长周期</td><td>强</td></tr><tr><td>FORCEDENTRY</td><td>简单</td><td>少</td><td>有</td><td>中</td></tr><tr><td>Triangulation</td><td>多路径（含基带侧）</td><td>多</td><td>有</td><td>强</td></tr><tr><td>Coruna</td><td>三层洋葱</td><td>5+ 通道</td><td>分层（高/中/低频）</td><td>强</td></tr><tr><td>DarkSword</td><td>扁平 1-2 节点</td><td>HTTPS 单通道</td><td>短会话无心跳</td><td>中（依赖 DGA）</td></tr></tbody></table>
+<p>（详见本仓库 #46）</p>
+<h3>3.8 目标识别与投递</h3>
+<table><thead><tr><th>套件</th><th>投递方式</th><th>目标筛选精度</th><th>载体</th></tr></thead><tbody><tr><td>Trident</td><td>iMessage 链接</td><td>高（已知号码）</td><td>定向消息</td></tr><tr><td>ImageIO/2019</td><td>iMessage 主动推送</td><td>高（已知号码）</td><td>定向消息</td></tr><tr><td>FORCEDENTRY</td><td>WhatsApp 通话</td><td>高（已知号码）</td><td>定向通话</td></tr><tr><td>Triangulation</td><td>基带/短信</td><td>高</td><td>定向</td></tr><tr><td>Coruna</td><td><strong>水坑（大规模寄生）</strong></td><td><strong>极高</strong>（11 维筛选，多链路由）</td><td>被入侵站点/供应链</td></tr><tr><td>DarkSword</td><td>水坑（小规模定向）</td><td>高（精简探测）</td><td>站点/DGA 域</td></tr><tr><td>GHOSTBLADE</td><td>水坑</td><td>中（复用现成链）</td><td>站点</td></tr></tbody></table>
+<p><strong>观察</strong>：<strong>0-click 天然要求&quot;知道目标号码&quot;</strong>；水坑则要求&quot;<strong>知道目标会访问哪里</strong>&quot;。前者依赖身份情报，后者依赖行为画像——这是两种完全不同的侦察成本结构。</p>
+<h3>3.9 反检测与反取证</h3>
+<table><thead><tr><th>套件</th><th>反检测取向</th><th>主要弱点</th></tr></thead><tbody><tr><td>早期 Pegasus</td><td>弱（落地大量文件）</td><td>被 Citizen Lab 从 App Store 移除事件倒查发现</td></tr><tr><td>2019 零点击</td><td>中（有清除逻辑）</td><td>仍被工件分析发现</td></tr><tr><td>FORCEDENTRY</td><td>中</td><td>崩溃报告与基础设施关联</td></tr><tr><td>Triangulation</td><td><strong>强</strong>（含固件层驻留）</td><td>研究团队长期追踪才还原</td></tr><tr><td>Coruna</td><td><strong>强</strong>（多层混淆 + 主动清除 + 基础设施分层）</td><td>文件残留 + 备份捕获 + 基础设施复用</td></tr><tr><td>DarkSword</td><td><strong>极强</strong>（架构级无痕）</td><td><strong>网络侧日志</strong> + 反复投递的频次模式</td></tr><tr><td>GHOSTBLADE</td><td>中（依赖现成链）</td><td>与泄露链同源 ⇒ 一处分析全域暴露</td></tr></tbody></table>
+<p>（详见 #47、#55）</p>
+<h3>3.10 漏洞消耗与复用模式</h3>
+<table><thead><tr><th>模式</th><th>代表</th><th>说明</th></tr></thead><tbody><tr><td><strong>自研独占</strong></td><td>FORCEDENTRY、Triangulation</td><td>极高投入，单点能力</td></tr><tr><td><strong>多链储备 + N-day 复用</strong></td><td>Coruna</td><td>用已修补但目标未更新的漏洞，节省零日</td></tr><tr><td><strong>泄露链复用</strong></td><td><strong>GHOSTBLADE</strong></td><td>直接采用其他套件泄露的 exploit</td></tr><tr><td><strong>采购/供应商提供</strong></td><td>多数商业套件</td><td>漏洞市场（如前 Chapeau、Cygna 等供应商）</td></tr></tbody></table>
+<p><strong>关键事实</strong>：GHOSTBLADE 证明<strong>exploit 是可流转资产</strong>。同一组漏洞可在不同套件、不同客户之间流通。</p>
+<blockquote><p><strong>防御含义（重要）</strong>：<strong>修补一个漏洞可同时防护多个套件、多个客户场景</strong>。这直接改变了补丁优先级计算的逻辑——不是&quot;这个 CVE 影响几个产品&quot;，而是&quot;这个 CVE 出现在几条在野链条中&quot;。</p></blockquote>
+<h3>3.11 被发现的途径（对防御最有价值的一列）</h3>
+<table><thead><tr><th>套件</th><th>如何被发现</th><th>启示</th></tr></thead><tbody><tr><td>Trident</td><td>研究员监控 iMessage 异常 + Citizen Lab 报告</td><td><strong>主动猎杀</strong>有效</td></tr><tr><td>ImageIO</td><td>目标收到未请求的图片通知，研究员注意到</td><td>用户反馈渠道重要</td></tr><tr><td>2019 Pegasus</td><td>iMessage 通知异常，研究员复现</td><td>异常提示是信号</td></tr><tr><td>FORCEDENTRY</td><td>WhatsApp 上报 + 联合调查</td><td><strong>第三方 App 协作</strong></td></tr><tr><td>Triangulation</td><td>长期追踪 + 固件层分析</td><td>需要跨层研究能力</td></tr><tr><td>Coruna</td><td>备份工件 + 基础设施 + 大规模 IOC 关联</td><td><strong>工件 + 情报</strong>双路径</td></tr><tr><td>DarkSword</td><td><strong>Project Zero 主动分析 + 运行时研究</strong></td><td><strong>学术研究是唯一的检出路径</strong></td></tr><tr><td>GHOSTBLADE</td><td>锁定模式测试报告</td><td>防御机制测试暴露攻击</td></tr></tbody></table>
+<p><strong>这张表本身就是防御策略指南</strong>：</p>
+<table><thead><tr><th>发现路径</th><th>覆盖的套件</th><th>投资优先级</th></tr></thead><tbody><tr><td>备份工件 + IOC</td><td>Trident、Coruna、多数持久化型</td><td>高（成熟工具可用）</td></tr><tr><td>网络侧日志</td><td><strong>几乎所有</strong>（含 DarkSword）</td><td><strong>最高（唯一通用）</strong></td></tr><tr><td>运行时/内存取证</td><td>DarkSword、Triangulation</td><td>中高（能力门槛高）</td></tr><tr><td>第三方 App 协作</td><td>FORCEDENTRY</td><td>中（需建立渠道）</td></tr><tr><td>用户异常反馈</td><td>ImageIO、2019</td><td>高（成本最低）</td></tr><tr><td>防御机制测试</td><td>GHOSTBLADE</td><td>中</td></tr></tbody></table>
+<h3>3.12 能力等级分级</h3>
+<table><thead><tr><th>等级</th><th>特征</th><th>代表</th></tr></thead><tbody><tr><td><strong>L1 通用商业级</strong></td><td>单链、1-click、标准采集</td><td>早期套件、GHOSTBLADE</td></tr><tr><td><strong>L2 平台级</strong></td><td>多链、模块化、广版本覆盖、长期运营</td><td><strong>Coruna</strong>、Pegasus、Predator</td></tr><tr><td><strong>L3 精工级</strong></td><td>单链深度优化、架构级隐蔽、窄窗口高价值</td><td><strong>DarkSword</strong></td></tr><tr><td><strong>L4 国家级天花板</strong></td><td>跨基带/内核/SEP 多层突破、真 0-click、固件驻留</td><td><strong>Triangulation</strong></td></tr></tbody></table>
+<hr>
+<h2>4. 演化规律提炼</h2>
+<h3>规律一：防御每前进一步，攻击就迁移一个面</h3>
+<pre><code>IOKit 加固 → 转 XPC/IPC → 转媒体服务 → 转 GPU/ANGLE → (下一个: ?)</code></pre>
+<p><strong>预测下一批热点</strong>（基于&quot;沙箱必须放行 + 实现复杂 + 审计不足&quot;三判据）：</p>
+<table><thead><tr><th>候选面</th><th>理由</th></tr></thead><tbody><tr><td><strong>WebAssembly / 新 Web API</strong></td><td>新增能力，审计密度低</td></tr><tr><td><strong>AI/模型相关子系统</strong></td><td>功能必需 + 新代码 + 复杂输入解析</td></tr><tr><td><strong>网络协议解析（QUIC 等）</strong></td><td>复杂状态机，新实现</td></tr><tr><td><strong>健康/传感器数据服务</strong></td><td>沙箱内可达 + 数据高价值</td></tr><tr><td><strong>受信任组件内部逻辑</strong>（非绕过而是滥用）</td><td>SPTM/TXM 时代必须面对</td></tr></tbody></table>
+<h3>规律二：检测工具进步直接重塑攻击架构</h3>
+<p>Amnesty MVT（2021）成熟 ⇒ 落地文件范式检出率上升 ⇒ <strong>Coruna 加强清除</strong>、<strong>DarkSword 干脆不落地</strong>。</p>
+<blockquote><p><strong>投资检测工具的价值不只是&quot;抓到更多&quot;，而是&quot;迫使攻击者改变架构、增加其成本&quot;。</strong></p></blockquote>
+<h3>规律三：0-click 是稀缺资源，1-click 是运营主力</h3>
+<p>历史上公开的 0-click 总数极少（ImageIO、FORCEDENTRY、Triangulation 等屈指可数），而绝大多数实际入侵来自 <strong>1-click 水坑</strong>。</p>
+<p><strong>原因</strong>：</p>
+<ul><li>0-click 无法预探测 ⇒ 失败率高、暴露风险大</li><li>0-click 漏洞极贵且不可再生</li><li>1-click 可通过目标筛选达到很高有效成功率</li></ul>
+<p><strong>防御含义</strong>：不要把资源全押在&quot;防 0-click&quot;上，<strong>减少链接点击暴露</strong>的性价比更高。</p>
+<h3>规律四：漏洞是资产，会流通、会泄露、会复用</h3>
+<p>GHOSTBLADE 复用泄露链、Coruna 大量使用 N-day ⇒ 漏洞库是可复用、可交易、可泄露的资产。</p>
+<blockquote><p><strong>推论</strong>：一个漏洞被修补并不意味着它消失——它在旧版本设备上永远有效。<strong>&quot;未更新的存量设备&quot;就是攻击者的弹药库。</strong></p></blockquote>
+<h3>规律五：硬件强制正在改写规则</h3>
+<table><thead><tr><th>时代</th><th>攻击模型</th></tr></thead><tbody><tr><td>2016–2020</td><td>泄露 + 任意写 ≈ 提权成功</td></tr><tr><td>2020–2023</td><td>需同时突破 PAC + KTRR/PPL</td></tr><tr><td>2024+ (A17+)</td><td>SPTM/TXM 使内核写不再足够，需攻受信任组件本身</td></tr></tbody></table>
+<p><strong>这是最重要的结构性变化</strong>：攻击从&quot;绕过软件检查&quot;转向&quot;寻找被信任组件的缺陷&quot;。GPU 驱动、固件、协处理器成为必争之地。</p>
+<hr>
+<h2>5. 横向对照：Coruna vs DarkSword 的战略定位</h2>
+<p>把两者放回这张全景图，可以更清楚看到各自代表什么：</p>
+<table><thead><tr><th>轴</th><th>Coruna 的位置</th><th>DarkSword 的位置</th></tr></thead><tbody><tr><td>版本覆盖</td><td><strong>极广</strong>（iOS 13–17.2.1）</td><td>窄（新版本窗口）</td></tr><tr><td>漏洞策略</td><td><strong>多链 + N-day 复用</strong>（省零日）</td><td>少而精（赌高质量单链）</td></tr><tr><td>持久化</td><td>部分持久化</td><td><strong>完全无持久化</strong></td></tr><tr><td>载荷</td><td>平台化模块体系</td><td>一次性内联</td></tr><tr><td>反检测</td><td>主动清除</td><td><strong>架构级无痕</strong></td></tr><tr><td>任务模型</td><td>长期监控</td><td>短期突击</td></tr><tr><td>组织形态</td><td>面向多客户的<strong>服务化产品</strong></td><td>面向特定运营的<strong>精工武器</strong></td></tr><tr><td>历史定位</td><td>&quot;广度派&quot;的集大成</td><td>&quot;深度派&quot;的开创者</td></tr></tbody></table>
+<p><strong>两者共同指向的下一代表达</strong>：</p>
+<pre><code>下一代套件 ≈ Coruna 的多链适配与运营能力
+          + DarkSword 的无持久化与架构级隐蔽
+          + 面向 SPTM/TXM 时代的受信任组件攻击能力</code></pre>
+<hr>
+<h2>6. 防御结论（从横向对比中得出）</h2>
+<h3>结论 1：攻击链的每一环都有大量套件卡在同一处</h3>
+<table><thead><tr><th>环节</th><th>卡点频率</th><th>防御投资回报</th></tr></thead><tbody><tr><td>投递（水坑触达）</td><td>高（依赖用户点击）</td><td>中（教育 + 站点加固）</td></tr><tr><td>初始 RCE（JSC/解析器）</td><td><strong>极高</strong></td><td><strong>极高（锁定模式禁 JIT）</strong></td></tr><tr><td>逃逸（GPU/IPC）</td><td>高</td><td><strong>高（禁 WebGPU、优先修补驱动）</strong></td></tr><tr><td>提权（PAC/KTRR/SPTM）</td><td>中高</td><td>高（硬件升级带来质变）</td></tr><tr><td>数据提取（解锁窗口）</td><td><strong>极高（无人绕过）</strong></td><td>高（重启 + 少存秘密 + 硬件密钥）</td></tr><tr><td>外传（网络）</td><td><strong>极高（必然暴露）</strong></td><td><strong>最高（网络侧日志是唯一通用手段）</strong></td></tr></tbody></table>
+<h3>结论 2：没有任何套件同时做到&quot;广覆盖 + 无痕 + 强能力&quot;</h3>
+<p>这是防御者可以利用的<strong>结构性矛盾</strong>：</p>
+<table><thead><tr><th>想要</th><th>必须放弃</th></tr></thead><tbody><tr><td>覆盖老版本（Coruna）</td><td>接受落地与痕迹</td></tr><tr><td>极致隐蔽（DarkSword）</td><td>放弃长期监控与批量数据</td></tr><tr><td>真 0-click（Triangulation）</td><td>付出不可持续的漏洞成本</td></tr></tbody></table>
+<blockquote><p><strong>推论</strong>：防御策略应当<strong>迫使攻击者做出不利取舍</strong>。例如&quot;全员每日重启&quot;使无持久化套件失去价值；&quot;全员快速升级&quot;使多链套件失去目标；&quot;保留网络日志&quot;使隐蔽性投资失效。</p></blockquote>
+<h3>结论 3：可被检测的永远不是&quot;最聪明的环节&quot;，而是&quot;必须与外界交互的环节&quot;</h3>
+<p>设备内的一切都可被清除去，但<strong>投递要触达公网、外传要穿越网络边界</strong>。这两点是永恒暴露面。</p>
+<h3>结论 4：学术与公民社会研究是整个防御体系的实际主力</h3>
+<table><thead><tr><th>发现者</th><th>揭露的套件</th></tr></thead><tbody><tr><td>Citizen Lab</td><td>Trident、Coruna、Triangulation 等</td></tr><tr><td>Google Project Zero</td><td>DarkSword、多条链技术细节</td></tr><tr><td>Amnesty Security Lab</td><td>Pegasus 项目、MVT 工具</td></tr><tr><td>WhatsApp/Meta</td><td>FORCEDENTRY</td></tr><tr><td>Lookout / ESET / 商业厂商</td><td>Predator、多个样本</td></tr></tbody></table>
+<p><strong>Apple 自身并未及时发现多数在野利用。</strong> 这提示任何组织：不要依赖厂商单方面保护，<strong>独立情报源是必要补充</strong>。</p>
+<hr>
+<h2>7. 一页速查表</h2>
+<table><thead><tr><th>对比维度</th><th>Trident</th><th>ImageIO</th><th>FORCEDENTRY</th><th>Triangulation</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>年份</td><td>2016</td><td>2018</td><td>2021</td><td>2023</td><td>2024</td><td>2024</td></tr><tr><td>交互</td><td>1-click</td><td>0-click</td><td>0-click</td><td>0-click</td><td>1-click</td><td>1-click</td></tr><tr><td>入口组件</td><td>WebKit</td><td>ImageIO</td><td>CoreText</td><td>基带</td><td>JSC 多链</td><td>JSC DFG GC</td></tr><tr><td>逃逸面</td><td>IOKit</td><td>IPC/驱动</td><td>有限</td><td>内核+SEP</td><td>GPU+IOKit</td><td>ANGLE/GPU</td></tr><tr><td>持久化</td><td>✅</td><td>✅</td><td>✅</td><td>✅固件</td><td>部分</td><td>❌</td></tr><tr><td>载荷</td><td>单体</td><td>单体</td><td>精简</td><td>模块化</td><td><strong>平台化</strong></td><td><strong>一次性</strong></td></tr><tr><td>C2</td><td>简单</td><td>简单</td><td>简单</td><td>多路径</td><td><strong>三层</strong></td><td>扁平短会话</td></tr><tr><td>版本覆盖</td><td>iOS 9</td><td>iOS 11–12</td><td>iOS 14</td><td>iOS 16</td><td><strong>13–17.2.1</strong></td><td>18.6–18.7</td></tr><tr><td>CVE 数量</td><td>3</td><td>少</td><td>1 关键</td><td>多</td><td><strong>23</strong></td><td>少</td></tr><tr><td>检出路径</td><td>研究员</td><td>用户反馈</td><td>App 上报</td><td>长期追踪</td><td><strong>工件+情报</strong></td><td><strong>学术研究</strong></td></tr><tr><td>锁定模式可防</td><td>—</td><td>—</td><td>—</td><td>部分</td><td><strong>是</strong></td><td><strong>是</strong></td></tr></tbody></table>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>iOS 攻击史是一部<strong>攻击面迁移史</strong>：IOKit → IPC → 媒体服务 → GPU/ANGLE → 跨层（基带/SEP）</td></tr><tr><td><strong>2</strong></td><td><strong>BlastDoor 与 MVT 是改变攻击者行为的两个架构性事件</strong>——一个抬高 0-click 成本，一个抬高落地成本</td></tr><tr><td><strong>3</strong></td><td>Coruna 代表&quot;<strong>广度派</strong>&quot;（多链、平台、长期运营），DarkSword 代表&quot;<strong>深度派</strong>&quot;（精工、无痕、短期突击），二者是同一权衡的两端</td></tr><tr><td><strong>4</strong></td><td><strong>1-click 水坑是当前绝对主力</strong>，防御投资不应只押注 0-click</td></tr><tr><td><strong>5</strong></td><td>漏洞是可流通、可泄露、可复用的资产——<strong>存量未更新设备 = 攻击者弹药库</strong></td></tr><tr><td><strong>6</strong></td><td><strong>SPTM/TXM 时代要求攻击者转向&quot;被信任组件本身的缺陷&quot;</strong>，攻防重心正在向硬件与固件层迁移</td></tr><tr><td><strong>7</strong></td><td><strong>网络侧是唯一对所有套件都有效的检测面</strong>——攻击者无法清除你的 DNS 日志</td></tr><tr><td><strong>8</strong></td><td>独立研究（Citizen Lab / Project Zero / Amnesty）是实际主力检出来源，组织应具备或对接这类情报能力</td></tr><tr><td><strong>9</strong></td><td>攻击者无法同时做到广覆盖、无痕与强能力——防御的价值在于<strong>迫使对方做不利取舍</strong></td></tr><tr><td><strong>10</strong></td><td><strong>修补速度是最被低估的防御能力</strong>：所有多链套件的战斗力都来自目标的更新延迟</td></tr></tbody></table>
+<p><strong>收官结语</strong>：</p>
+<blockquote><p>把九套攻击体系放在同一张表上，看到的不是九个不同的故事，而是<strong>同一个权衡在九个时点上的不同解</strong>。 iOS 的防御纵深每加固一层，攻击者就向&quot;下一个合法可达、尚未被审计的组件&quot;迁移一步。 因此真正有效的长期防御不是&quot;补更多洞&quot;，而是<strong>缩短补丁部署时延、收紧功能必需的暴露通道、并投资那些攻击者无法清除的检测面（网络与情报）</strong>。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Citizen Lab: <a href="https://citizenlab.ca/2023/11/triangulation-a-0-click-exploit-chain-targeting-ios-devices/" rel="nofollow noopener" target="_blank">Triangulation: 0-click exploit chain targeting iOS devices</a></li><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna / NSO Group exploit suite analysis</a></li><li>Amnesty International: <a href="https://www.amnesty.org/en/latest/research/2021/07/forensic-methodology-report-how-to-catch-nso-groups-pegasus/" rel="nofollow noopener" target="_blank">The Pegasus Project</a></li><li>Lookout: <a href="https://www.lookout.com/threat-report" rel="nofollow noopener" target="_blank">Coruna &amp; Commercial Spyware Intelligence</a></li><li>WhatsApp / Meta Security: <a href="https://www.whatsapp.com/security/" rel="nofollow noopener" target="_blank">FORCEDENTRY (CVE-2021-30860) Advisory</a></li><li>Citizen Lab: <a href="https://citizenlab.ca/2024/03/gods-own-weapon-the-global-impact-of-nso-groups-exploit-as-a-service-arsenal/" rel="nofollow noopener" target="_blank">*God's Own Weapon': NSO Group's Exploit-as-a-Service Arsenal*</a></li><li>ESET / WeLiveSecurity: <a href="https://www.welivesecurity.com/" rel="nofollow noopener" target="_blank">Predator / LightPy analysis</a></li><li>Apple Security Updates: <a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li><li>MITRE ATT&amp;CK Mobile Matrix: <a href="https://attack.mitre.org/matrices/enterprise/mobile/" rel="nofollow noopener" target="_blank">Mobile Threats</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a55.html">← 第 55 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a57.html">第 57 篇 →</a></nav></article>
+</main></body></html>

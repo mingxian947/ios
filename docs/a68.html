@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mach IPC 与 XPC 接口审计：iOS 沙箱逃逸的攻击面测绘方法 | iOS 安全研究文章库</title>
+<meta name="description" content="可达性与身份校验双层模型、四类 IPC 跳板威胁画像、可落地审计流程与风险优先级公式、BlastDoor 语义、时间线矛盾检测">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a68.html">
+<meta property="og:title" content="Mach IPC 与 XPC 接口审计：iOS 沙箱逃逸的攻击面测绘方法">
+<meta property="og:description" content="可达性与身份校验双层模型、四类 IPC 跳板威胁画像、可落地审计流程与风险优先级公式、BlastDoor 语义、时间线矛盾检测">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a68.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 68 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Mach IPC 与 XPC 接口审计：iOS 沙箱逃逸的攻击面测绘方法</h1>
+<blockquote><p>编制日期：2026-10-22 数据来源：Apple Platform Security 文档、XNU 开源子系统与 Mach IPC 规范、Google Project Zero、Citizen Lab 关于 Pegasus/三叉戟（Trident）的公开分析、P0 关于 BlastDoor 与 WebKit 逃逸的议题、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>沙箱逃逸（sandbox escape）是 iOS 利用链里最&quot;依赖工程细节&quot;的一环，而它的攻击面几乎全部落在<strong>进程间通信</strong>上：一个受限进程能触达谁、以什么参数触达、对面怎么解析，这三件事决定了逃逸是&quot;理论可行&quot;还是&quot;实际可用&quot;。</p>
+<p>本文不谈具体漏洞，只谈<strong>怎么把这块攻击面测绘出来</strong>——因为对防御方来说，测绘方法本身就是最有价值的产出：它给出可审计的清单、可优先排序的补丁队列，以及可回归的检测基线。</p>
+<p>四条结论：</p>
+<ol><li>iOS 的进程可达性由两份约束叠加决定：<strong>沙箱 profile</strong>（能不能发出这条消息）与<strong>对端服务的 entitlement 检查</strong>（收到后肯不肯做）。审计必须同时看两侧，只看其一都会系统性误判。</li><li><code>Mach port</code> / <code>bootstrap</code> 命名服务、XPC endpoint、系统代理（service proxy）与内核设备节点是四类主要跳板；历史上被反复利用的集中在<strong>处理外部不可信数据的守护进程</strong>（媒体解析、渲染/图形、通知与安装相关服务）。</li><li>BlastDoor 这类&quot;把解析移到强沙箱进程&quot;的设计改变了攻击面形状：它把 WebKit→系统服务的直接可达变为&quot;必须再逃逸一层&quot;，但<strong>没有消除接口本身</strong>——接口审计的重点因此从&quot;能不能碰到&quot;转成&quot;碰到之后对面解析什么&quot;。</li><li>逃逸原语与代码执行原语的成本曲线不同：逃逸通常需要<strong>类型混淆/越界写 + 端口能力获取</strong>两步，而端口本身是&quot;能力（capability）&quot;，一旦泄漏即可跨沙箱调用——这是 Mach 端口在公开分析里出现频率远高于其他内核对象的原因。</li></ol>
+<hr>
+<h2>2. 通信路径的分层与判定者</h2>
+<pre><code>受限进程（App / WebContent / 媒体扩展 / NSE）
+   │  ① 沙箱 profile：允许 mach-lookup？允许 connect 到哪个服务名？
+   ▼
+命名与传输层
+   ├─ bootstrap / launchd：按名字查 Mach port（mach-lookup）
+   ├─ xpc_connection / NSXPCInterface：面向服务的会话
+   ├─ 系统代理（system service proxies）：跨域特权代理
+   └─ IOService / IOSurface / IOGPU：内核态驱动入口（与 #44 图形面重合）
+   │  ② 对端校验：调用者 pid/uid、entitlements、会话上下文
+   ▼
+服务端语义
+      ③ 参数解析：反序列化、路径拼接、命令分发、外部数据解析</code></pre>
+<table><thead><tr><th>层</th><th>判定者</th><th>攻击者目标</th><th>审计问法</th></tr></thead><tbody><tr><td>①</td><td>内核沙箱（Seatbelt）</td><td>找到 profile 允许但语义超出预期的服务名</td><td>&quot;这个受限进程被授予了哪些 <code>mach-lookup</code> 项？&quot;</td></tr><tr><td>②</td><td>服务自身 + entitlement</td><td>借用合法调用者身份，或替换调用上下文</td><td>&quot;对面是否校验调用者身份？校验的是什么？&quot;</td></tr><tr><td>③</td><td>服务代码</td><td>在解析路径上触发内存安全问题</td><td>&quot;这条接口是否解析来自外部的不可信字节？&quot;</td></tr></tbody></table>
+<p><strong>结构性判断</strong>：①是&quot;可达性&quot;，③是&quot;可利用性&quot;。②是双方都容易做弱的一环——因为历史上很多内部接口按&quot;能调用我的都是本机合法进程&quot;假设设计。Coruna/DarkSword 这类链条之所以把大量工程放在 ②③ 而不是&quot;发明新接口&quot;，正是这个原因（与 #49 的原语升阶梯一致）。</p>
+<hr>
+<h2>3. 四类跳板的威胁画像</h2>
+<table><thead><tr><th>跳板</th><th>特征</th><th>典型风险</th><th>现实出现频率</th><th>与已有篇目</th></tr></thead><tbody><tr><td><strong>A. Mach port（bootstrap 命名服务）</strong></td><td>能力语义：拿到端口即获得调用权</td><td>端口传递/继承导致跨沙箱调用；服务端无鉴权</td><td><strong>最高</strong>（公开逃逸分析的主线）</td><td>本文、#52</td></tr><tr><td><strong>B. XPC 会话 / NSXPCInterface</strong></td><td>类型化消息、解码发生在服务端</td><td>解码器内存安全、隐式信任调用方、<code>reply</code> 回调反向调用</td><td>高</td><td>#65（NSE 与 XPC 回调）、#44</td></tr><tr><td><strong>C. 系统代理 / 特权服务</strong></td><td>代受限进程执行高权操作</td><td>参数注入、路径穿越、把代理当&quot;特权手脚&quot;</td><td>中—高</td><td>#52、#66</td></tr><tr><td><strong>D. IO 服务 / 内核驱动入口</strong></td><td>进入内核态代码路径</td><td>越界写、use-after-free，直接触及内核对象</td><td>中（成本高但收益直达 #41）</td><td>#41、#44、#51</td></tr></tbody></table>
+<p><strong>为什么&quot;端口&quot;是核心</strong>：Mach 端口不是地址而是能力——它不可伪造、可传递、持有即可调用。沙箱能做的是限制&quot;能否查询/接收&quot;，一旦通过合法路径（例如把一个端口的 send right 随 XPC 消息送进受限进程），后续调用就不再需要突破沙箱。这使得&quot;端口泄漏&quot;类问题的严重性高于同等条件下的&quot;符号可调用&quot;。</p>
+<hr>
+<h2>4. 审计流程：从可达清单到补丁队列</h2>
+<p>以下流程是防御方可直接落地的测绘方法，不涉及任何构造利用：</p>
+<table><thead><tr><th>步骤</th><th>动作</th><th>产出</th><th>关键点</th></tr></thead><tbody><tr><td>1</td><td>提取目标受限进程的实际 profile（系统内生效版本，而非文档版本）</td><td>可达服务名集合</td><td>系统 profile 会随版本合并/继承，以实际生效为准</td></tr><tr><td>2</td><td>枚举这些服务名的宿主进程与所属域（用户态守护/系统代理/IO 服务）</td><td>跳板分类表（A–D）</td><td>归属决定后续分析责任方</td></tr><tr><td>3</td><td>对每个宿主判定 ②：是否有调用者身份校验（pid/uid/audit token/entitlement）</td><td>校验覆盖率</td><td>&quot;无校验&quot;直接进优先队列，无需漏洞即可标为高危</td></tr><tr><td>4</td><td>对每个接口判定 ③：消息字段里是否存在外部不可信字节（下载的媒体、消息附件、网页可控数据）</td><td>解析面清单</td><td>与 #44/#65 的&quot;不可信输入解析&quot;重合项优先</td></tr><tr><td>5</td><td>结合历史 CVE 与补丁节奏，为高 ② 弱 + 强 ③ 的接口打风险分</td><td>排序后的补丁/加固队列</td><td>风险分 = 可达性 × 解析不可信度 × 无校验</td></tr><tr><td>6</td><td>固化基线：把 profile、服务归属、校验覆盖写入可 diff 的清单，随版本回归</td><td>版本间攻击面变化报告</td><td>新版本&quot;多出来的可达项&quot;是回归重点（#61 补丁工程）</td></tr></tbody></table>
+<p><strong>优先级公式（本文最实用的部分）</strong>：</p>
+<pre><code>逃逸风险 ≈ 可达性(①通过 profile) × 无身份校验(②) × 解析不可信输入(③) × 历史活跃(同族 CVE)</code></pre>
+<p>三项中任意为零，风险骤降；因此&quot;最小授权裁剪 profile&quot;（把可达性从 1 变 0）是性价比最高的加固，远高于逐条修 ③ 的解析器。</p>
+<hr>
+<h2>5. 检测与可观测性</h2>
+<table><thead><tr><th>观测点</th><th>能看见什么</th><th>现实限制</th><th>对应手法</th></tr></thead><tbody><tr><td>沙箱违规拒绝日志（deny）</td><td>攻击探测过程：尝试 lookup 未授权服务</td><td>攻击者只走已授权项则不产生 deny；日志在设备侧、留存有限</td><td>探测阶段的强信号</td></tr><tr><td>服务侧异常调用（合法调用者 + 异常参数/时序）</td><td>② 弱接口的滥用</td><td>需要服务自己有指标，多数内部服务没有</td><td><strong>主要缺口</strong></td></tr><tr><td>崩溃归因（宿主守护进程崩溃）</td><td>③ 解析器被触发</td><td>成熟载荷会规避崩溃（#63 HUNT-04 反向）</td><td>群体基线仍有效</td></tr><tr><td>端口传递异常（受限进程持有特权能力）</td><td>①+② 组合滥用</td><td>设备侧几乎无对外可见通道</td><td>依赖 MDM/备份工件，与 #67 清单同构</td></tr><tr><td>系统调用/内核事件</td><td>逃逸后的行为</td><td>国家级载荷走文件less 驻留，工件少（#55）</td><td>事后取证（#62）</td></tr></tbody></table>
+<p>结论：<strong>IPC 层是 iOS 可观测性最差的一层</strong>。攻击面测绘（第 4 节）比运行时检测更现实，因为前者不依赖设备上报能力。这一判断与 #47 的结论同源：越靠近系统内部机制，越只能靠设计与架构防御，而不是靠告警。</p>
+<hr>
+<h2>6. 加固：三层各自的抓手</h2>
+<table><thead><tr><th>层</th><th>抓手</th><th>效果</th><th>代价</th></tr></thead><tbody><tr><td>① 可达性</td><td>profile 最小授权；把解析移入强沙箱域（BlastDoor 式架构）</td><td>直接抹掉整类跳板</td><td>功能取舍与性能；不影响已被授权项</td></tr><tr><td>② 校验</td><td>服务端强制 audit token + entitlement 校验；拒绝未识别调用者</td><td>使&quot;借用合法通道&quot;失效</td><td>兼容性回归风险最高（内部调用方众多）</td></tr><tr><td>③ 解析</td><td>内存安全语言重写解析器；长度/类型严格校验；不可信输入独立进程</td><td>降低漏洞产生率</td><td>长期工程，见 #61</td></tr><tr><td>跨层</td><td>语言级迁移（内核子系统内存安全化）+ 并行信任域（SPTM/TXM，#64）</td><td>抬高逃逸→提权之间的门槛</td><td>无法覆盖用户态解析缺陷</td></tr></tbody></table>
+<p><strong>BlastDoor 类设计的审计含义</strong>：强沙箱不是&quot;攻击面归零&quot;，而是&quot;必须多逃逸一次&quot;。因此接口审计在隔离进程上仍然要做——且因为隔离进程本身被设计为处理不可信输入，它的 ③ 权重最高，是测绘工作的第一优先对象。</p>
+<hr>
+<h2>7. 时间线矛盾模板（IPC 逃逸形态）</h2>
+<p>延续 #65、#66 的&quot;时间线矛盾&quot;方法，IPC 逃逸的可观测形态：</p>
+<pre><code>若 某受限进程出现以下组合
+   - 持有不属于其职责的 Mach 能力（特权端口 / 跨域服务句柄）
+   - 触发了一次不属于其用户操作序列的服务端调用（无前台、无授权、无通知）
+   - 随后出现数据读取或外发（#42、#47）
+→ 逃逸已发生的强指示；
+  进入 #48 应急时序，#62 做证据保全，
+  并按第 4 节流程反查&quot;该可达性是哪条 profile 允许的&quot;</code></pre>
+<p>其中&quot;能力持有&quot;是唯一在<strong>单次备份</strong>内可判定的项，因此取证时应把描述文件/能力清单（#67）与进程级安装数据库一并提取，避免只提取日志（#62 双工具交叉提取）。</p>
+<hr>
+<h2>8. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>沙箱语义与 BlastDoor 设计</td><td>#52（沙箱模型与隔离域）</td></tr><tr><td>逃逸后的提权与内核对象</td><td>#41（内核提权与 PAC）、#51（KASLR 泄露）、#64（并行信任域）</td></tr><tr><td>图形/媒体接口作为跳板</td><td>#44（渲染与 GPU 攻击面）</td></tr><tr><td>XPC 回调与通知通路</td><td>#65（推送与通知通路攻击面）</td></tr><tr><td>授权与能力约束的层级</td><td>#66（权限模型与隐私指示器）</td></tr><tr><td>合法通道与能力清单</td><td>#67（企业分发与 MDM 滥用）</td></tr><tr><td>补丁工程与攻击面回归</td><td>#61（事件响应与补丁机制）、#49（原语升阶梯）</td></tr><tr><td>检测剧本与证据</td><td>#63（狩猎手册）、#47（反检测对比）、#62（证据链）</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>沙箱逃逸攻击面由&quot;可达性 × 无校验 × 解析不可信输入 × 历史活跃&quot;四项乘积决定</td></tr><tr><td>2</td><td>Mach 端口是能力语义：持有即可调用，因此端口泄漏严重性高于同条件符号可调用</td></tr><tr><td>3</td><td>跳板分四类（Mach port / XPC 会话 / 系统代理 / IO 内核入口），公开分析主线集中在前两类</td></tr><tr><td>4</td><td>只审 profile 或只审解析器都会系统性误判；②（调用者身份校验）是最常被做弱的一环</td></tr><tr><td>5</td><td>BlastDoor 类隔离不消除接口，只增加一层逃逸成本；隔离进程的解析面权重最高</td></tr><tr><td>6</td><td>IPC 层运行时可观测性最差，防御重心应放在测绘与最小授权，而非告警</td></tr><tr><td>7</td><td>裁剪 profile 的性价比高于逐条修解析器；测绘结果应作为可 diff 的版本基线长期维护</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：Coruna 与 DarkSword 这类链条在沙箱逃逸阶段并不依赖神秘机制，它依赖的是一张&quot;受限进程实际能碰到谁、对面解析什么&quot;的清单——防御方真正该做的，是用同一套方法把这张清单先自己画出来、按可达性裁剪、并把校验补齐，让攻击者的工程成本从&quot;挑一个弱接口&quot;回到&quot;必须再发明一次逃逸&quot;。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Sandbox &amp; Process Isolation</a></li><li><a href="https://github.com/apple-oss-distributions/xnu" rel="nofollow noopener" target="_blank">XNU 开源 — Mach IPC / sandbox 子系统</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — iOS 沙箱逃逸与 WebKit 利用研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Pegasus 与三叉戟（Trident）公开分析</a></li><li><a href="https://www.amnesty.org/en/latest/campaigns/2021/04/pegasus-project/" rel="nofollow noopener" target="_blank">Amnesty International — Pegasus Project</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — iOS 工件提取范围</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a67.html">← 第 67 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a69.html">第 69 篇 →</a></nav></article>
+</main></body></html>

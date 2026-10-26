@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 漏洞赏金、CVE 披露与补丁周期：把防御优先级从&quot;漏洞分数&quot;改成&quot;暴露窗口&quot; | iOS 安全研究文章库</title>
+<meta name="description" content="三条漏洞供给渠道的结构性偏差、披露时机对攻击成本的反向影响、暴露窗口五步计算法、披露产生的检测指标">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a75.html">
+<meta property="og:title" content="iOS 漏洞赏金、CVE 披露与补丁周期：把防御优先级从&quot;漏洞分数&quot;改成&quot;暴露窗口&quot;">
+<meta property="og:description" content="三条漏洞供给渠道的结构性偏差、披露时机对攻击成本的反向影响、暴露窗口五步计算法、披露产生的检测指标">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a75.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 75 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 漏洞赏金、CVE 披露与补丁周期：把防御优先级从&quot;漏洞分数&quot;改成&quot;暴露窗口&quot;</h1>
+<blockquote><p>编制日期：2026-10-24 数据来源：Apple Security Releases 与 Source Maps、Apple 安全 Bounty 项目公开说明、NVD/CVE 公开数据、Google Project Zero 披露政策议题、Citizen Lab 与 Amnesty 关于漏洞库存的公开分析、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>组织里的 iOS 补丁决策几乎都按&quot;漏洞分数 + 厂商优先级&quot;排序，但这条排序方式在对抗商业间谍软件时系统性失效：<strong>真正决定风险的是&quot;某个缺陷在特定人群设备上仍然可被利用的时间窗口&quot;，而不是它的评分</strong>。Coruna 与 DarkSword 类案例里反复出现的模式是——被利用的缺陷常常已被修复，只是目标设备还没更新。</p>
+<p>四条结论：</p>
+<ol><li>公开缺陷（CVE/赏金）与实战利用之间存在<strong>结构性偏差</strong>：赏金与 CVE 覆盖的是&quot;有人愿意且能够报告的缺陷&quot;，而国家级/商业供应商拥有内部库存，其被利用的缺陷里有相当比例从未进入公开渠道。因此&quot;我们没有被公开 CVE 命中&quot;不能作为暴露面结论。</li><li>披露机制（厂商宽限期、协调披露、赏金门槛）决定了<strong>漏洞进入公开领域的时机</strong>，而这个时机同时改变两件事：防御方获得补丁知识的时机，以及攻击方获得&quot;逆向补丁即可复现利用&quot;的时机。<strong>公开披露不是单向利好</strong>。</li><li>对防御方，唯一稳健的度量是<strong>暴露窗口</strong>：<code>某个缺陷被修复的版本发布</code> → <code>该人群设备完成更新的分布时间</code>。风险集中在窗口右半段，而不是漏洞被公开的那一刻。</li><li>因此优先级排序的正确输入是三项：<strong>该组件是否处理外部不可信输入</strong>（架构位置，见 #68/#71/#73 的审计）、<strong>该人群的设备更新滞后分布</strong>、<strong>同族缺陷历史活跃度</strong>——CVSS 只是次要参考。</li></ol>
+<hr>
+<h2>2. 三条供给渠道与它们的偏差</h2>
+<pre><code>渠道 1：厂商 Bounty            → 报告者以获取奖励为目标
+渠道 2：研究社区 / P0 式协调披露 → 报告者以公开知识为目标
+渠道 3：内部库存 / 采购市场      → 持有者以投放为目标（不披露）
+                                    │
+                                    ▼
+                     实战利用的缺陷主要来自 3（以及 2 的逆向补丁）</code></pre>
+<table><thead><tr><th>渠道</th><th>谁提供</th><th>披露时机</th><th>对防御方的价值</th><th>结构性盲区</th></tr></thead><tbody><tr><td>Bounty</td><td>外部研究者</td><td>修复后（厂商政策决定公开程度）</td><td>组件分布、修复节奏</td><td>高危缺陷常被内部团队先发现，不进入赏金</td></tr><tr><td>协调披露</td><td>独立研究者/实验室</td><td>宽限期到点后公开</td><td>技术细节与检测思路</td><td>公开即&quot;补丁差分可利用&quot;窗口打开</td></tr><tr><td>会议/论文</td><td>学术界</td><td>发表时</td><td>攻击面分类与抽象</td><td>多为已修补的旧缺陷</td></tr><tr><td><strong>内部库存</strong></td><td>供应商/机构</td><td><strong>不披露</strong></td><td><strong>零</strong></td><td>全部风险都在这里，且不可观测</td></tr><tr><td>泄露/取证还原</td><td>事后调查</td><td>事件发生后</td><td>唯一能看到&quot;实际用了什么&quot;的渠道</td><td>样本极少、滞后、且高度选择性</td></tr></tbody></table>
+<p><strong>判断</strong>：任何以&quot;公开 CVE 数量/分数&quot;为核心的 iOS 风险报告，都在评估<strong>第四与第五行的可见性</strong>，而风险本身住在第四行以外的地方（#47 与 #63 得出的&quot;检测能力受限于攻击者是否留下痕迹&quot;是同一件事的另一面）。</p>
+<hr>
+<h2>3. 披露时机如何反向影响攻击成本</h2>
+<table><thead><tr><th>时机</th><th>防御方状态</th><th>攻击方状态</th><th>净效应</th></tr></thead><tbody><tr><td>缺陷被发现、尚未提交厂商</td><td>不知情</td><td>单人/单团队持有</td><td>攻击方独占（最高风险，不可度量）</td></tr><tr><td>已提交、修复开发中（宽限期内）</td><td>仍不知情</td><td>持有期受倒计时约束</td><td><strong>攻击方倾向在此期间投放</strong>（时间压力）</td></tr><tr><td>补丁发布、细节未公开</td><td>可部署补丁</td><td>仍可逆向补丁</td><td>防御增益取决于<strong>部署速度</strong>而非发布</td></tr><tr><td>细节公开（论文/赏金公告）</td><td>可精确检测</td><td>补丁差分使利用门槛骤降</td><td>双向：未更新者风险上升，检测指标诞生</td></tr><tr><td>库存耗尽/工具泄露</td><td>事后归因</td><td>生态扩散</td><td>该缺陷类别进入&quot;低预算攻击者也可用&quot;阶段</td></tr></tbody></table>
+<p>三个可直接落地的推论：</p>
+<ol><li><strong>宽限期内的投放倾向</strong>意味着&quot;高危人群的暴露峰值&quot;往往出现在补丁发布前几天，而不是补丁发布后——这解释了为什么&quot;及时更新&quot;对高危角色要配合更激进的自动更新策略（#34、#61）。</li><li><strong>细节公开=补丁差分</strong>：一个公开的技术细节会把&quot;需要数月工程&quot;的利用降为&quot;需要数天复现&quot;，因此公开披露的<strong>净收益只在目标已完成更新之后</strong>才成立。防御方评估是否支持提前披露时，应按自己人群的更新分布决定，而不是按抽象的公共利益。</li><li><strong>库存耗尽后风险扩散</strong>：同一缺陷从国家级下放到商业供应商、再到犯罪生态（与 #63 的套件分层、供应链篇的采购生态逻辑一致）。因此&quot;老缺陷&quot;在低预算对手身上会重新变得危险。</li></ol>
+<hr>
+<h2>4. 把优先级改成&quot;暴露窗口&quot;计算</h2>
+<pre><code>Step 1  组件定位：这个缺陷属于哪一层？
+        ① 外部不可信输入的解析路径（渲染/媒体/消息/IPC）
+        ② 边界穿越（PAC/沙箱/签名与加载）
+        ③ 内核提权
+        ④ 驻留与外发
+        → ①②的优先级恒高于③④，因为它们是&quot;必须突破&quot;的位置
+Step 2  人群更新分布：从 MDM/遥测取&quot;当前版本分布 + 滞后天数分位数&quot;
+Step 3  窗口计算：风险敞口 = 未更新人数比例 × 该层可达性 × 同族历史活跃度
+Step 4  排序输出：按&quot;未更新人群中可被端到端串联的层缺失数&quot;排序，
+        而非按单条 CVE 分数排序
+Step 5  回归：每次 iOS 版本发布后重算，并保留上一版快照做 diff（#68 第 4 节的基线思想）</code></pre>
+<table><thead><tr><th>常见做法</th><th>问题</th><th>替代指标</th></tr></thead><tbody><tr><td>按 CVSS 排序</td><td>忽略架构位置与可达性</td><td>&quot;端到端链条缺几层&quot;计数</td></tr><tr><td>按 CVE 数量统计</td><td>奖励漏洞多的组件、惩罚无库存组件</td><td>未更新人群比例</td></tr><tr><td>只看&quot;是否已修复&quot;</td><td>忽略部署速度才是防御增益来源</td><td>补丁发布→达成 90% 更新的天数</td></tr><tr><td>以&quot;未被公开 CVE 命中&quot;作结论</td><td>内部库存不可见</td><td>分层加固完成度（锁定模式、更新策略、能力关闭）</td></tr><tr><td>把更新视为 IT 事项</td><td>高危角色的更新滞后是最大单点风险</td><td>更新 SLA 纳入安全指标</td></tr></tbody></table>
+<p><strong>这一节是可交付的核心</strong>：把&quot;我们修补了吗&quot;换成&quot;我们的人群里，还有多少人停在可被端到端串联的版本上&quot;，绝大多数组织的风险排名会显著重排。</p>
+<hr>
+<h2>5. 检测侧接口：披露产生的指标</h2>
+<table><thead><tr><th>披露类型</th><th>可转化的检测资产</th><th>对应狩猎剧本</th></tr></thead><tbody><tr><td>基础设施公开（IP/域名/证书）</td><td>出口指标、JA4/SNI 基线</td><td>#63 HUNT-01、#47</td></tr><tr><td>载荷工件公开（文件哈希、路径）</td><td>备份/文件系统比对</td><td>#70、#74</td></tr><tr><td>利用崩溃形态公开</td><td>群体崩溃基线异常</td><td>#63 HUNT-04、#70 第 6 节</td></tr><tr><td>注入宿主与能力清单公开</td><td>宿主行为异常检测</td><td>#73 第 4 节、#66</td></tr><tr><td>时间戳与驻留手法公开</td><td>时间线缺口检测</td><td>#55、#62</td></tr></tbody></table>
+<p>结论：<strong>公开披露的主要防御红利是指标，而不是补丁本身</strong>（补丁早已发布）。因此对高危人群，把预算放在&quot;指标接入 + 更新 SLA&quot;上，收益高于继续跟踪新 CVE。</p>
+<hr>
+<h2>6. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>补丁工程与响应机制</td><td>#61（Apple 安全事件响应与补丁工程）</td></tr><tr><td>架构位置如何决定优先级</td><td>#68（IPC/XPC 审计）、#71（消息通路）、#73（签名与宿主）</td></tr><tr><td>缓解开关与人群配置</td><td>#34（锁定模式）、#66（权限模型）</td></tr><tr><td>套件分层与库存扩散</td><td>#63（狩猎手册）、#47（反检测对比）</td></tr><tr><td>归因与实际使用证据</td><td>#59（ATT&amp;CK 映射）、#62（取证证据链）</td></tr><tr><td>驻留与清除</td><td>#45、#72（基带驻留）、#74（备份与恢复）</td></tr><tr><td>供应链与采购生态</td><td>后续批次（供应链生态篇）</td></tr></tbody></table>
+<hr>
+<h2>7. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>实战利用主要来自不披露的内部库存，公开 CVE 与赏金数据无法度量这部分风险</td></tr><tr><td>2</td><td>披露时机同时改变防御与攻击的能力，公开细节会把利用门槛从&quot;数月工程&quot;降为&quot;数天复现&quot;</td></tr><tr><td>3</td><td>宽限期内存在投放倾向，高危人群的暴露峰值常在补丁发布之前而非之后</td></tr><tr><td>4</td><td>正确的优先级输入是架构位置 × 人群更新滞后 × 同族历史活跃度，而不是 CVSS</td></tr><tr><td>5</td><td>防御增益来自部署速度；&quot;已修复&quot;与&quot;已覆盖&quot;是两个不同指标</td></tr><tr><td>6</td><td>公开披露的最大红利是检测指标，把预算放在指标接入与更新 SLA 上收益更高</td></tr><tr><td>7</td><td>老缺陷会随库存扩散重新变得危险，优先级需要按对手预算分层而非按漏洞年代排序</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：Coruna 与 DarkSword 之所以能成功，绝大多数情况下不是因为对手掌握了不可知的漏洞，而是因为目标设备上那条已修复的缺陷仍在生效——把 iOS 防御的组织指标从&quot;跟了多少 CVE&quot;换成&quot;人群更新滞后分布 + 外部输入解析层的加固完成度&quot;，是这一整条 kill chain 上最能立刻改变风险排名的一件事。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases（含各版本修复条目）</a></li><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security — Security Response &amp; Updates</a></li><li><a href="https://developer.apple.com/security-bounty/" rel="nofollow noopener" target="_blank">Apple Security Bounty 项目公开说明</a></li><li><a href="https://nvd.nist.gov/" rel="nofollow noopener" target="_blank">NVD — CVE 公开数据</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 披露政策与研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 漏洞库存与商业供应商研究</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a74.html">← 第 74 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a76.html">第 76 篇 →</a></nav></article>
+</main></body></html>
