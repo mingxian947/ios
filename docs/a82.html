@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS IOKit 内核驱动攻击面：驱动族缺陷测绘与可达性审计方法 | iOS 安全研究文章库</title>
+<meta name="description" content="外部方法与两道授权门、驱动族×缺陷倾向测绘表、五步可达性审计法、IOHIDFamily/IOGPU/IOUserTexts 代表形态、族×类二维统计口径、检测工件与不可观测边界">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a82.html">
+<meta property="og:title" content="iOS IOKit 内核驱动攻击面：驱动族缺陷测绘与可达性审计方法">
+<meta property="og:description" content="外部方法与两道授权门、驱动族×缺陷倾向测绘表、五步可达性审计法、IOHIDFamily/IOGPU/IOUserTexts 代表形态、族×类二维统计口径、检测工件与不可观测边界">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a82.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 82 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS IOKit 内核驱动攻击面：驱动族缺陷测绘与可达性审计方法</h1>
+<blockquote><p>编制日期：2026-10-28 数据来源：Apple Platform Security 文档、Apple Security Releases（SWU 公告条目）、XNU/IOKit 公开源码（Apple Open Source）、Google Project Zero 与 Safeguard 系列、Citizen Lab 与 Amnesty 的 Pegasus 取证披露、iOS 分析组件（Ian Beer、Brandon Azlad 等）公开研究笔记、CVE 情报库、本系列前 78 篇分析 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>本系列把 iOS 内核提权拆过多次（#6、#33、#41、#51），把沙箱逃逸拆过多次（#5、#29、#40、#43、#52、#68），但<strong>没有单独给 IOKit 画过一张图</strong>。这一篇补上这块——因为它是 iOS 上&quot;内核代码里最大的一片非 Apple 手写区域&quot;，也是提权链与逃逸链最常借道的那一层。</p>
+<p>六条结论：</p>
+<ol><li>IOKit 不是&quot;一个组件&quot;，而是<strong>几百个内核扩展（driver personality）的集合</strong>，每个都通过 <code>IOServiceOpen</code> 向用户态暴露&quot;外部方法（external method）&quot;接口。<strong>接口数量 = 攻击面数量</strong>，这决定了它的缺陷产出率长期高于 XNU 核心子系统。</li><li>与 #68 的 Mach IPC 面不同：Mach 端口是<strong>内核自身</strong>的服务；IOKit 是<strong>驱动</strong>的服务，其参数由内核态代码解析标量/结构体/欧可描述符（OOL）。历史上 iOS 提权链里&quot;最容易找到第一块多米诺&quot;的位置就在这里。</li><li>图形栈（IOGPU / AGX / IOAccelerator）是近五年增长最快的一块：本系列 #58 从&quot;图形 API 面&quot;角度分析过它，本篇从&quot;驱动接口与内核内存边界&quot;角度补另一侧——同一块栈，两条正交的攻击面。</li><li>可达性由<strong>沙箱 profile 的设备类授权</strong>决定，不是由代码难度决定。因此&quot;谁能在未逃逸状态下打开哪些驱动&quot;是防御方唯一可操作的收敛点，也是本篇 §5 给出的审计方法。</li><li>已确认被利用过的 IOKit 缺陷存在，但不多。公开可确认的例如 Apple 在安全公告中标注&quot;可能已在攻击中被利用&quot;的 <strong>CVE-2023-41990（IOHIDFamily）</strong> 与 <strong>CVE-2023-42917（IOGPU）</strong>；<strong>CVE-2021-30869（IOUserTexts）</strong> 属于同一形态的早期例子。这三条都在 §6 里按&quot;接口形态&quot;而非&quot;新闻价值&quot;归类。</li><li>检测侧的好消息与坏消息：<strong>驱动崩溃是强工件</strong>（诊断日志会带 personality 名与调用栈），但<strong>驱动被合法打开不是工件</strong>——<code>IOServiceOpen</code> 对授权进程完全正常，因此不能把它本身当告警，只能做基线偏移分析（§8）。</li></ol>
+<hr>
+<h2>2. IOKit 在 iOS 栈里的位置</h2>
+<pre><code>用户态                        内核态
+──────────────────────────────────────────────────────────
+App（受限）  ── sandbox profile 判定 ──┐
+              │                        │
+   IOKit.framework（用户态客户端）      │
+              │  IOServiceGetMatchingService / IOServiceOpen
+              ▼                        ▼
+      用户态驱动客户端（IOUserClient 代理）
+              │  externalMethod(selector, scalar / struct / OOL)
+              ▼
+   ┌───────────────────────────────┐        ┌────────────────────┐
+   │ XNU kernel                    │◄──────►│ IOKit driver kext  │
+   │ mach、vm、vfs、proc、kauth    │        │  数百个 personality │
+   └───────────────────────────────┘        └────────────────────┘
+              ▲                        ▲
+        SPTM/CSM、PPL/RTX（内核隔离域，#27、#64）</code></pre>
+<table><thead><tr><th>概念</th><th>是什么</th><th>为什么与漏洞有关</th></tr></thead><tbody><tr><td>IORegistry / personality</td><td>设备与服务树，声明每个驱动的用户客户端类</td><td>决定&quot;存在哪些可打开的服务&quot;，是可达性清单的来源</td></tr><tr><td><code>IOServiceOpen</code></td><td>建立与用户客户端类的连接</td><td>连接建立时驱动可为你分配内核内存与上下文——生命周期起点</td></tr><tr><td>External method</td><td>用户可调用的编号方法，带参数描述符</td><td>参数解析是&quot;外部输入直接进内核&quot;的那道门，OOB/整数类缺陷高发（对齐 #81 的类轴）</td></tr><tr><td>参数类型（scalar / struct / OOL）</td><td>标量、结构体、可变长（out-of-line）内存</td><td><strong>OOL 最危险</strong>：内核拿到调用者控制的长度与页描述</td></tr><tr><td>Connection reference / 对象句柄</td><td>内核对象引用计数</td><td>UAF 的经典来源：关闭连接与异步工作项竞争</td></tr><tr><td>IOMapMemory / IOMobileFramebuffer 类</td><td>用户内存映射给驱动</td><td>跨越&quot;用户/内核&quot;边界的可见性，与 GPU/显示栈强相关（#58）</td></tr></tbody></table>
+<p><strong>关键结构事实</strong>：外部方法的授权写在驱动的 <code>sExternalMethodData</code> 表里（方法号 + 权限位），而<strong>是否允许你打开这个驱动</strong>写在调用方沙箱 profile 的 <code>device-type</code> 授权里。两者是<strong>两道独立门</strong>：逃逸成功才有第一道，参数校验决定第二道有没有实际作用。</p>
+<hr>
+<h2>3. 为什么 IOKit 是 iOS 缺陷的长期供给方</h2>
+<table><thead><tr><th>因素</th><th>机制</th><th>后果</th></tr></thead><tbody><tr><td>代码来源多样</td><td>除 Apple 自研外，大量为 SoC/外设供应商驱动移植；风格与安全要求不一</td><td>参数校验、长度检查、错误路径的<strong>一致性</strong>难以保证</td></tr><tr><td>数百个 personality</td><td>每个设备类都可能带一个用户客户端类</td><td>接口数量巨大，<strong>每个接口都需要独立审计</strong></td></tr><tr><td>生命周期复杂</td><td>连接、内存映射、异步工作循环、power state 转换</td><td>UAF/竞态的温床（对齐 #81 的 §3.2、§3.7）</td></tr><tr><td>必须处理外部内存</td><td>图形、显示、音频、输入、传感器都需要</td><td>跨越边界，&quot;用户可控长度/地址&quot;不可避免</td></tr><tr><td>长期不变量</td><td>老驱动接口长期保持兼容（不删不改）</td><td><strong>老代码持续暴露在新攻击者面前</strong>，历史缺陷可能仍可达</td></tr><tr><td>可组合性</td><td>一个&quot;任意读&quot;往往已在驱动里给出</td><td>攻击者可以只用小原语拼出泄露，无需完整 RCE</td></tr><tr><td>GPU 栈持续扩张</td><td>Metal 与图形 API 每代新增接口；虚拟化为多客户端</td><td>IOGPU/AGX 面随 iOS 版本<strong>净增长</strong>（#58）</td></tr></tbody></table>
+<p><strong>结论</strong>：把 IOKit 当&quot;第三方驱动问题&quot;是错的；它是<strong>内核里由 Apple 分发但由生态供给的那部分</strong>，治理方式只能是接口收敛与可达性最小化，而不是&quot;多审几遍&quot;。</p>
+<hr>
+<h2>4. 驱动族与缺陷倾向（本系列视角的测绘表）</h2>
+<p>按&quot;设备族&quot;分组，各族的历史缺陷倾向与可达性特征。<strong>&quot;暴露倾向&quot;是研究结论，不是清单</strong>；具体某台设备上某驱动是否可达，必须用 §5 的方法实测。</p>
+<table><thead><tr><th>驱动族</th><th>代表类（personality/kind）</th><th>为什么可达面广</th><th>历史缺陷倾向（对齐 #81 类轴）</th><th>链上价值</th></tr></thead><tbody><tr><td>输入与 HID</td><td>IOHIDFamily 一族（键盘、触控、传感器、电源键类）</td><td>输入路径必须被多数进程访问；且常提供回调/事件投递</td><td>OOB、竞态、引用生命周期；<strong>CVE-2023-41990 属此族并被标为可能被利用</strong></td><td>提权 + 采集双重价值（可拿到按键/事件语义）</td></tr><tr><td>图形与加速</td><td>IOGPU / AGXFamily / IOAcceleratorFamily / IOGPUClient</td><td>任何 UI 进程都需要；Metal 客户端接口多、参数复杂</td><td>结构体/句柄校验、OOL、类型混淆、UAF；<strong>CVE-2023-42917 属此族并被标为可能被利用</strong></td><td>逃逸（从 WebKit/GPU 客户端）与提权；与 #43 的 ANGLE/WebGPU 路径重合</td></tr><tr><td>显示与帧缓冲</td><td>IOMobileFramebuffer / IOBacklightDisplay</td><td>截图、合成、显示模式路径都在此</td><td>尺寸计算（整数→OOB）、跨进程内存映射</td><td>信息泄露与截屏采集能力</td></tr><tr><td>音频与视频</td><td>AppleHDA / IOAudioFamily / 多媒体处理族</td><td>采集与播放权限普遍；与后台状态相关</td><td>OOL 参数、缓冲区长度、生命周期</td><td>麦克风/摄像头采集能力（对应 #66 的通路问题）</td></tr><tr><td>网络与无线协处理器接口</td><td>蜂窝/Wi-Fi/蓝牙的用户态胶水类驱动</td><td>协议数据由外部可控</td><td>解析类缺陷；且常与协处理器信任域交界（#72）</td><td>与基带面构成&quot;跨域接口&quot;，风险等级最高的一类</td></tr><tr><td>存储与文件系统辅助</td><td>ANE/存储与加密辅助类</td><td>文件路径、加密上下文交互</td><td>状态假设、竞态</td><td>与备份/密钥通路相接（#74、#53）</td></tr><tr><td>文本与输入辅助</td><td>IOUserTexts、剪贴板相关服务</td><td>剪贴板与文本替换涉及多进程共享状态</td><td>生命周期与共享状态；<strong>CVE-2021-30869 属此族</strong></td><td>提权 + 剪贴板窃取（#66 §5 的工件来源）</td></tr><tr><td>电源与热管理</td><td>IOPowerSources / PMFamily</td><td>状态查询接口简单，但常在内核早期/唤醒路径</td><td>状态假设、TOCTOU</td><td>唤醒与持久性配合（#65）</td></tr><tr><td>安全协处理器接口</td><td>SEP/ANE 相关用户客户端</td><td>跨信任域调用</td><td>逻辑/授权误用类为主（<strong>不吃内存安全缓解</strong>，#81 §3.8）</td><td>直接指向密钥与生物特征边界（#53、#84）</td></tr></tbody></table>
+<p><strong>读表方式</strong>：一个漏洞的&quot;链上价值&quot;由它<strong>能给什么原语</strong>决定，而不是由它属于哪个驱动决定。图形族之所以被反复研究，是因为它能同时给出泄露与受限写；SEP 接口族之所以危险，是因为它可能压根不需要原语。</p>
+<hr>
+<h2>5. 可达性审计方法（防御方可直接执行，无可利用细节）</h2>
+<p>这是本篇对防御方最有价值的部分：<strong>&quot;我们的设备上，未提权代码能打开哪些驱动接口&quot;</strong>是一个可测量、可收敛的指标。</p>
+<h3>5.1 清单来源（三条通路）</h3>
+<table><thead><tr><th>通路</th><th>能拿到什么</th><th>局限</th></tr></thead><tbody><tr><td>iOS 系统符号/固件分析（Apple Open Source 中 IOKit 家族源码 + 设备上的 kext 资源）</td><td>驱动类名、外部方法表结构</td><td>需要与具体 iOS 版本对齐，方法号会随版本变动</td></tr><tr><td>沙箱 profile（<code>/System/Library/Sandbox/Profiles/*.sb</code>）</td><td>**哪些 <code>device-*</code> 类型被允许**，即真正的可达性来源</td><td>profile 是编译/展开形式，需要按目标进程读</td></tr><tr><td>崩溃与诊断日志（Analytics Data）</td><td>哪些驱动实际被打开、哪些路径崩溃过</td><td>只能给出&quot;发生过&quot;，不给出&quot;可发生的全部&quot;</td></tr></tbody></table>
+<h3>5.2 五步审计法</h3>
+<pre><code>① 选宿主进程 → ② 提取其沙箱 profile 的 device 授权集 → ③ 用 IORegistry 枚举匹配服务
+      → ④ 对每个服务列出其用户客户端的外部方法表（方法号/参数类型/权限位）
+      → ⑤ 标注&quot;接受外部可控长度或跨边界内存&quot;的方法，作为优先修补/收敛对象</code></pre>
+<table><thead><tr><th>步</th><th>输出物</th><th>判定标准</th></tr></thead><tbody><tr><td>①</td><td>目标进程清单（尤其是<strong>处理外部不可信输入</strong>的：浏览器、消息、媒体、扩展宿主）</td><td>与 #66 §3 的&quot;已授权 + 处理外部输入&quot;筛选条件同源</td></tr><tr><td>②</td><td>允许的设备类型集合</td><td><strong>集合越小越好</strong>；出现 <code>device-*</code> 泛授权要单独记录</td></tr><tr><td>③</td><td>可匹配服务名清单</td><td>与 profile 交集才是真实可达面</td></tr><tr><td>④</td><td>外部方法表：数量、参数类型分布、是否有 <code>IOStructScalar</code>/OOL</td><td>参数为 OOL 或可控结构体 → 进入优先清单</td></tr><tr><td>⑤</td><td>一份&quot;接口 × 版本 × 补丁状态&quot;矩阵</td><td>用于 §9 的暴露窗口跟踪（与 #75 的度量方法一致）</td></tr></tbody></table>
+<p><strong>审计纪律</strong>：</p>
+<ul><li><strong>不要在真机上对生产设备做接口探测</strong>。用同版本的隔离设备/测试镜像，按组织流程走（与 #62 的证据保全原则一致）。</li><li>输出物是<strong>配置与可达性事实</strong>，不是利用可行性结论。&quot;某接口可达&quot;不等于&quot;某接口有漏洞&quot;。</li><li>把&quot;能否用非 IOKit 通路达成同一功能&quot;也记录下来：很多驱动面是历史兼容产物，可被上游策略关掉。</li></ul>
+<h3>5.3 收敛手段（防御侧唯一有杠杆的动作）</h3>
+<table><thead><tr><th>手段</th><th>做法</th><th>效果</th><th>依据</th></tr></thead><tbody><tr><td>进程能力最小化</td><td>不需要的 <code>device-*</code> 类型不要出现在 profile；扩展宿主、内容解析进程应使用受限 profile</td><td>直接把 ②③ 的交集缩小</td><td>#52（BlastDoor 的隔离语义）、#68</td></tr><tr><td>Web 面收缩</td><td>锁定模式会显著减少可达的图形/媒体触发面（本系列 #34 的结论）</td><td>对高危角色等效于 ②③ 收缩</td><td>#34、#57、#58</td></tr><tr><td>版本对齐</td><td>已知被修补的驱动族（HID/GPU/UserTexts）优先保证全员升级</td><td>消除&quot;老代码仍可达&quot;这一风险项</td><td>§3 表格最后一行、#61</td></tr><tr><td>采购/SDK 约束</td><td>企业内自研扩展、驱动类工具（配置描述文件携带的）要登记（#67）</td><td>避免引入额外可达路径</td><td>#67</td></tr></tbody></table>
+<hr>
+<h2>6. 代表缺陷按形态归类（而非按 CVE 罗列）</h2>
+<table><thead><tr><th>形态</th><th>说明</th><th>公开确认的例子（以 Apple 安全公告标注为准）</th><th>链上作用</th></tr></thead><tbody><tr><td>用户客户端生命周期处理错误（UAF 类）</td><td>连接关闭与异步工作竞争</td><td>IOHIDFamily 一类：<strong>CVE-2023-41990</strong>（Apple 标注该问题可能在攻击中被主动利用）</td><td>提权、跨沙箱边界破坏</td></tr><tr><td>加速图形接口的内核侧处理（OOB/UAF 类）</td><td>GPU 客户端句柄与资源生命周期</td><td>IOGPU：<strong>CVE-2023-42917</strong>（同样被标注为可能已在攻击中被利用）</td><td>逃逸 + 提权；与 #43 的 WebGPU/ANGLE 面在语义上相邻</td></tr><tr><td>文本/剪贴板相关服务的内存破坏</td><td>跨进程共享状态下的对象使用</td><td>IOUserTexts：<strong>CVE-2021-30869</strong>（Apple 公告表明该问题报告于公开利用语境）</td><td>提权 + 内容采集侧信道</td></tr><tr><td>长度/尺寸计算（整数 → OOB 后果）</td><td>驱动解析外部结构体的常见成因</td><td>散见于各代公告，难以在通报里区分&quot;成因&quot;与&quot;后果&quot;（#81 §3.4 的统计失真问题）</td><td>任意读写的第一环</td></tr><tr><td>授权/参数校验缺失（逻辑类）</td><td>外部方法权限位配错或身份校验不足</td><td>通报里常写作&quot;任何进程都可…&quot;/&quot;攻击者可获得 root&quot;</td><td><strong>不吃任何内存安全缓解</strong>，只能靠接口收敛</td></tr></tbody></table>
+<p><strong>统计口径提醒</strong>：Apple 公告的条目粒度是&quot;CVE × 受影响组件 × iOS 版本&quot;，<strong>不含缺陷类别</strong>。因此任何&quot;iOS 漏洞类型分布&quot;统计都必须自己做归类映射——本篇 §4 的族分类 + #81 的类分类可以组成一个二维标签体系（族 × 类），建议直接沿用它做追踪。</p>
+<hr>
+<h2>7. Apple 在这一层做了什么缓解</h2>
+<table><thead><tr><th>缓解</th><th>打的是哪一类</th><th>现状判断</th></tr></thead><tbody><tr><td>内核隔离与执行域收紧（SPTM/CSM、可执行/可写页分离、PPL→后继机制）</td><td>内核侧控制流劫持、页表破坏</td><td>使&quot;写原语 → 稳定提权&quot;成本显著上升（#27、#64、#41）</td></tr><tr><td>用户客户端方法权限位与连接授权</td><td>逻辑/授权误用类</td><td>只能减少&quot;不该可达&quot;，无法修复&quot;可达但做错&quot;</td></tr><tr><td>分配器与 zone 隔离加固、释放后清零</td><td>UAF 回填可行性</td><td>提高工程门槛，不消除缺陷本身（#81 §3.2）</td></tr><tr><td>图形栈的虚拟化和 IOGPU 边界收敛</td><td>GPU 族的跨边界风险</td><td>与 #58 的观察一致：面在扩大，同时边界也在收紧，净效果随版本摆动</td></tr><tr><td>沙箱 profile 精细化、<code>BlastDoor</code> 型独立解析（#52）</td><td>解析类缺陷的可达性</td><td><strong>对 Web/消息投递面最有效</strong>，因为它删掉入口而不是修 bug</td></tr><tr><td>OOL/参数校验 API 规范化与内核内存拷贝检查</td><td>OOB/整数</td><td>组件间落地不均；供应商代码是最不均的部分</td></tr><tr><td>快速安全响应（RSR）覆盖部分内核/驱动</td><td>缩短暴露窗口</td><td>是本层最实用的运营改进（#61、#75）</td></tr></tbody></table>
+<hr>
+<h2>8. 检测与狩猎：什么可观测、什么不可</h2>
+<table><thead><tr><th>信号</th><th>可观测性</th><th>处置建议</th></tr></thead><tbody><tr><td>带驱动 personality 名的内核 panic/<code>IOKit</code> 崩溃报告</td><td><strong>强</strong>（Analytics Data 里可见）</td><td>做群体基线，突增/新出现的驱动名作为异常（#63 HUNT-04 思路）</td></tr><tr><td>未授权 <code>IOServiceOpen</code> 失败（sandbox deny 类日志）</td><td>中（在诊断日志/设备端 syslog 有痕迹，若被采集）</td><td>组织侧应明确&quot;deny 事件&quot;是否需要上报（#76 的可见性边界）</td></tr><tr><td>成功打开&quot;该进程从不开&quot;的驱动</td><td>设备侧<strong>几乎不可见</strong>，需网络/MDM 之外的取证手段</td><td>只能作为提取后的时序分析工件（#62、#70 方法）</td></tr><tr><td>提权后行为（读 SEP 接口、跨进程内存）</td><td>不可见（架构级，#59、#66）</td><td>放弃设备侧检测，转向出口与人为信号（#80 §5）</td></tr><tr><td>版本 + 补丁状态</td><td>强（MDM 可见）</td><td>用它替代&quot;有没有被攻击&quot;的判断；把 §5.3 与 #75 指标合流</td></tr></tbody></table>
+<p><strong>表述纪律</strong>：<code>未看到驱动异常崩溃 ≠ 没有利用</code>；<code>看到崩溃 ≠ 利用成功</code>。这两句话适用于本层所有检测。</p>
+<hr>
+<h2>9. 防御清单（按角色）</h2>
+<table><thead><tr><th>角色</th><th>动作</th><th>优先级</th></tr></thead><tbody><tr><td>个人</td><td>自动更新开启；高危者开锁定模式（同时收缩图形/媒体触发面）</td><td>高（#80 §4）</td></tr><tr><td>平台/系统 App 开发者</td><td>新代码不引入新的用户客户端；确需时把外部方法的参数改为定长校验、避免把外部长度直接用于拷贝</td><td>高</td></tr><tr><td>沙箱/授权配置负责人</td><td>用 §5 方法为<strong>处理外部不可信输入的进程</strong>做一次可达性基线，并建立回归（每 iOS 版本一次）</td><td>高</td></tr><tr><td>企业安全</td><td>版本矩阵 + 已知被修补族（HID/GPU/文本类）覆盖检查；把 §6 的族 × 类标签用于披露追踪</td><td>中—高</td></tr><tr><td>SOC</td><td>崩溃基线（按机型/版本）、deny 事件上报策略明确化</td><td>中</td></tr><tr><td>取证/响应</td><td>崩溃日志、系统诊断、版本信息纳入提取范围；与 #62 双工具交叉提取原则一致</td><td>中</td></tr></tbody></table>
+<hr>
+<h2>10. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>Mach IPC/XPC 接口审计（内核自身服务）</td><td>#68</td></tr><tr><td>缺陷类别分类学（类轴）</td><td>#81（本篇按族，#81 按类，二维标签由此而来）</td></tr><tr><td>图形栈攻击面全景</td><td>#58</td></tr><tr><td>沙箱模型与隔离解析</td><td>#5、#29、#40、#43、#52</td></tr><tr><td>内核提权与缓解机制</td><td>#6、#33、#41、#51、#27、#64</td></tr><tr><td>权限层与采集通路</td><td>#66</td></tr><tr><td>基带/协处理器信任域</td><td>#72</td></tr><tr><td>补丁周期与暴露窗口</td><td>#61、#75</td></tr><tr><td>分层防御与度量</td><td>#80、#63、#62、#48</td></tr></tbody></table>
+<hr>
+<h2>11. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>IOKit 是&quot;内核里的生态代码&quot;：几百个 personality 各自暴露外部方法，接口数量本身就是攻击面</td></tr><tr><td>2</td><td>两道门相互独立——沙箱 profile 决定能否打开驱动，参数校验决定打开后能做什么；防御只在第一道有杠杆</td></tr><tr><td>3</td><td>缺陷产出率长期偏高的根因是供应商代码风格不一致 + 生命周期复杂 + 老接口长期不删</td></tr><tr><td>4</td><td>已确认被利用过的 IOKit 缺陷存在（IOHIDFamily/IOGPU 等），其链上价值由&quot;能给什么原语&quot;决定，而不是由所属驱动决定</td></tr><tr><td>5</td><td>可达性审计是可执行、可回归的：宿主进程 → profile 授权 → IORegistry 匹配 → 外部方法表 → 优先清单</td></tr><tr><td>6</td><td>检测结果必须按&quot;族 × 类&quot;二维归类，Apple 公告不含缺陷类别，直接引用会造成类型统计失真</td></tr><tr><td>7</td><td>崩溃是这一层最好的工件，但只覆盖部分缺陷；逻辑/授权类与提权后行为不可观测，检测重心仍在入口与出口</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 内核里的 IOKit 就像一栋楼的几百个后门——Apple 修的是每一扇门的锁，而防御方真正能做的，是让住在不同房间里的人（沙箱 profile）手里根本拿不到那些门的钥匙，并且每年版本更新时重新数一遍还剩几扇门能打开。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security</a></li><li><a href="https://support.apple.com/sections/en-us/180401/" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li><li><a href="https://opensource.apple.com/releases" rel="nofollow noopener" target="_blank">Apple Open Source — IOKit / DriverKit</a></li><li><a href="https://github.com/apple-oss-distributions/xnu" rel="nofollow noopener" target="_blank">Darwin Kernel — XNU source</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies &amp; iOS kernel series</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Pegasus 能力与工件披露</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — Mobile Verification Toolkit</a></li><li><a href="https://cwe.mitre.org/data/definitions/1000.html" rel="nofollow noopener" target="_blank">MITRE CWE</a></li><li>本系列 #27、#29、#34、#41、#43、#51、#52、#58、#61、#64、#68、#72、#75、#80、#81（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a81.html">← 第 81 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a83.html">第 83 篇 →</a></nav></article>
+</main></body></html>

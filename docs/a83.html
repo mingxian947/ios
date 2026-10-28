@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 第三方 App 与配置类缺陷：Apple 补丁修不到的那一片攻击面 | iOS 安全研究文章库</title>
+<meta name="description" content="Keychain 可访问性与数据保护类选错、备份豁免、URL Scheme/Universal Link 鉴权、WebView 桥、get-task-allow 与 entitlement、SDK 数据出口、三层审计法、CVE 口径的系统性低估">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a83.html">
+<meta property="og:title" content="iOS 第三方 App 与配置类缺陷：Apple 补丁修不到的那一片攻击面">
+<meta property="og:description" content="Keychain 可访问性与数据保护类选错、备份豁免、URL Scheme/Universal Link 鉴权、WebView 桥、get-task-allow 与 entitlement、SDK 数据出口、三层审计法、CVE 口径的系统性低估">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a83.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 83 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 第三方 App 与配置类缺陷：Apple 补丁修不到的那一片攻击面</h1>
+<blockquote><p>编制日期：2026-10-28 数据来源：Apple Platform Security 文档、Human Interface Guidelines 与 App Store 审核指南、WWDC 安全/隐私议题、Google Project Zero、Citizen Lab 与 Amnesty 披露、OWASP MASVS/MASTG、MITRE CWE、公开 App 安全审计报告与 CVE 情报库、本系列前 79 篇分析 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>本系列的 #2 按&quot;层&quot;分类、#81 按&quot;缺陷类别&quot;分类，两轴都在讲<strong>系统与框架</strong>。这一篇讲第三片领地：<strong>App 自身与它的配置</strong>。它的特点是——Apple 的补丁周期与它无关，锁定模式对它的保护有限，而用户的&quot;只从 App Store 装&quot;也防不住它。</p>
+<p>七条结论：</p>
+<ol><li>iOS 上&quot;漏洞&quot;这个词被过度等同于系统 0-day。<strong>实际数据外泄事件里，App 侧缺陷与配置错误的占比远高于零日利用</strong>，因为它的成本是&quot;读一遍文档&quot;而不是&quot;买一条链&quot;。</li><li>App 侧缺陷的主型不是内存安全，而是<strong>边界语义错误</strong>：密钥的可访问条件、文件的保护等级、URL 的归属校验、共享容器的分区、日志与备份的暴露范围。这一类在 #81 里归到&quot;逻辑/授权误用&quot;，<strong>不吃任何内存安全缓解</strong>。</li><li>攻击者偏好它有三个原因：<strong>不需要逃逸与提权</strong>（在自己的权限里就能拿到东西）、<strong>结果稳定</strong>（不像利用链要赌版本）、<strong>归因干净</strong>（出事后可以写成&quot;App 的问题&quot;）。</li><li>iOS 给了 App 开发者一整套免费的默认安全（沙箱、数据保护类、Keychain、ATS、剪贴板保护、备份加密），<strong>大部分缺陷来自&quot;主动关掉默认值&quot;</strong>：为了后台可用性把密钥设成解锁前可用、为了调试把容器设为可豁免备份、为了兼容把 ATS 例外写进 plist。</li><li>对防御方，App 面是<strong>唯一可以由用户/组织直接收敛的一面</strong>：撤销授权、删除描述文件、卸载宿主 App，都能立刻缩小面（对应 #80 §4 与 #66 §3 的&quot;B 路径宿主&quot;）。</li><li>对企业，App 侧风险应通过<strong>上架准入 + MDM 策略</strong>治理，而不是等 Apple 公告；本系列 #67 讲过&quot;合法签名链上的入侵&quot;，本篇讲&quot;合法 App 里的数据泄露&quot;。</li><li>检测方式与系统漏洞完全不同：App 面可以<strong>审计</strong>（静态配置 + 权限清单 + 备份内容抽样），不需要狩猎。把两者混在一张威胁清单里，会导致预算错配。</li></ol>
+<hr>
+<h2>2. 三片攻击面的分工</h2>
+<pre><code>① 系统/框架层   WebKit、内核、IOKit、媒体与图形栈        ← Apple 发补丁（#1、#58、#68、#82）
+② 平台机制层     沙箱、TCC、Entitlement、签名、备份、SEP  ← Apple 设计 + 用户开关（#66、#73、#74、#84）
+③ App 与配置层   第三方 App 代码 + plist/权限/密钥配置    ← 开发者的责任，Apple 不修（本篇）</code></pre>
+<table><thead><tr><th>维度</th><th>① 系统</th><th>② 平台机制</th><th>③ App 与配置</th></tr></thead><tbody><tr><td>谁修补</td><td>Apple</td><td>Apple（架构）+ 用户（开关）</td><td>App 开发者</td></tr><tr><td>是否出现在安全公告</td><td>是</td><td>部分</td><td><strong>否</strong></td></tr><tr><td>是否需要提权配合</td><td>通常需要</td><td>视通路</td><td><strong>通常不需要</strong></td></tr><tr><td>锁定模式是否覆盖</td><td>部分入口</td><td>部分</td><td>很弱</td></tr><tr><td>防御方可直接动作</td><td>只能等补丁</td><td>开开关、最小授权</td><td><strong>卸载/撤销/准入</strong></td></tr><tr><td>检测手段</td><td>崩溃基线、出口分析</td><td>授权与描述文件核查</td><td>配置审计、备份抽样</td></tr></tbody></table>
+<hr>
+<h2>3. 缺陷清单（按&quot;配置项/接口&quot;组织，防御可直接对照）</h2>
+<h3>3.1 密钥与数据保护类</h3>
+<table><thead><tr><th>缺陷</th><th>表现</th><th>触发条件</th><th>加固方向</th></tr></thead><tbody><tr><td>Keychain 可访问性等级过松</td><td>把长期凭据存成&quot;首次解锁前即可用&quot;（为后台刷新/推送取令牌）</td><td>设备锁屏状态下即可读出</td><td>按用途分级；只有真正需要后台的项放宽，且配 <code>Access Control</code>（生物特征/设备口令绑定）</td></tr><tr><td>把密钥明文写入 UserDefaults/文件</td><td>依赖&quot;沙箱隔离&quot;当作机密性保证</td><td>备份被提取、越狱/提权后可读、iCloud 同步进键值存储</td><td>机密只进 Keychain；文件级用数据保护类（<code>NSFileProtection*</code>）显式声明</td></tr><tr><td>未指定文件保护等级</td><td>敏感文件落到默认保护，锁屏后可读窗口比预期大</td><td>取证/盗窃场景</td><td>对所有含个人数据的路径显式设定保护类，并在启动早期避免访问（会失败）</td></tr><tr><td>备份豁免配置</td><td>为&quot;减小备份体积&quot;把目录排除，或反之让机密进入未加密备份</td><td>备份被拿到（#74）</td><td>明确&quot;哪些数据可以出现在备份里&quot;，与隐私分类绑定；机密类一律不豁免</td></tr><tr><td>密码学误用</td><td>自实现加密、IV 复用、把设备标识当密钥材料</td><td>与密钥一起泄露即可解密</td><td>用平台原语（CryptoKit/Keychain），密钥不落地；对齐 #81 §3.9</td></tr></tbody></table>
+<p><strong>这一族的共同根因</strong>：开发者把沙箱当成机密性保证，而 iOS 的机密性保证其实是&quot;<strong>沙箱 + 数据保护类 + Keychain 访问控制</strong>&quot;三件叠加，少一件就等于没做。</p>
+<h3>3.2 输入与信任边界类</h3>
+<table><thead><tr><th>缺陷</th><th>成因</th><th>现实后果</th><th>加固</th></tr></thead><tbody><tr><td>Deep Link / 自定义 URL Scheme 未鉴权</td><td>scheme 是全局的，任何 App（含恶意 App）可构造</td><td>跳过登录态、越权访问内部路由、以他人身份打开功能</td><td>不通过 URL 传令牌；一次性 nonce + 服务端校验；scheme 参数视为完全不可信</td></tr><tr><td>Universal Link 关联域配置过宽</td><td><code>apple-app-site-association</code> 覆盖了不该覆盖的路径</td><td>钓鱼域/合作方域可截获本应给 App 的链接（登录/支付流程）</td><td>只声明实际需要的路径前缀；域所有权与服务端路由一起审</td></tr><tr><td>WebView 与 JS Bridge 暴露原生能力</td><td>为业务方便注入 bridge，未校验加载来源</td><td>内容注入 → 调用原生能力 → 越权；与 #70 的 WebView 工件同源</td><td>域白名单在<strong>加载前</strong>判定；bridge 参数做服务端授权；禁用不必要的 <code>evaluateJavaScript</code> 入口</td></tr><tr><td><code>openURL</code> / 分享扩展输入未清洗</td><td>外部 App 与网页可构造参数</td><td>路径穿越式误用、界面劫持（与 #66 §3 路径 C 的 UI 欺骗同族）</td><td>最小能力原则，扩展宿主进程当作不可信输入处理</td></tr><tr><td>剪贴板读写未收敛</td><td>复制令牌/验证码后长期残留</td><td>任何已授权读取剪贴板的 App 可读（系统会提示，但不阻断，#66）</td><td>用共享面板/直接分享替代剪贴板；敏感值设短期有效</td></tr><tr><td>推送载荷携带敏感数据</td><td>把内容/令牌放进 APNs payload</td><td>APNs 中继链路上的数据可见（#65 讨论过该通路）；备份/日志中也会留痕</td><td>推送只发&quot;拉取信号&quot;，内容由认证通道取回</td></tr></tbody></table>
+<h3>3.3 进程能力与签名配置类</h3>
+<table><thead><tr><th>配置项</th><th>风险</th><th>与本系列的接口</th></tr></thead><tbody><tr><td><code>get-task-allow</code> 未关（调试 entitlement 残留）</td><td>进程可被调试/注入，等价于把&quot;宿主借用&quot;（#66 §3 路径 B）的门留着</td><td>#73 的加载链与调试通道边界</td></tr><tr><td>Entitlement 过度申请（后台模式、共享容器、URL scheme 前缀）</td><td>能力越多，被借用的可能性越大；与&quot;哪些进程既有敏感授权又处理外部输入&quot;这一审计问题直接对应</td><td>#66、#68、#82</td></tr><tr><td>App Group / 共享容器分区过大</td><td>一个成员被攻破，整组共享数据可读；备份时整组一起带走</td><td>#74、#45（模块化落地）</td></tr><tr><td>自定义 extension（键盘、分享、媒体）</td><td>键盘扩展能读到输入内容；扩展宿主与被扩展 App 的信任关系常被忽视</td><td>#73 的宿主借用、#66</td></tr><tr><td>内嵌第三方 SDK/框架</td><td>供应链：SDK 的密钥、日志、网络实现不受主 App 团队控制</td><td>#28 供应链、#18 凭据窃取</td></tr><tr><td>描述文件/配置携带的能力（企业分发）</td><td>合法通道上的额外能力面</td><td>#67</td></tr></tbody></table>
+<h3>3.4 界面与交互类（最便宜、最常用的攻击方式）</h3>
+<table><thead><tr><th>缺陷</th><th>说明</th><th>防御</th></tr></thead><tbody><tr><td>权限时序操纵</td><td>先以&quot;必要功能&quot;话术索取麦克风/相册，用户在高完成率压力下同意（#66 路径 C）</td><td>只在功能真正需要时请求；拒绝后可用降级路径</td></tr><tr><td>伪造系统弹窗/界面劫持</td><td>用与系统相似的 UI 诱导输入凭据</td><td>App 不得自绘系统权限样式；登录页域名可见；组织侧培训</td></tr><tr><td>后台快照（系统截图）含敏感内容</td><td>任务切换器预览里出现卡号/验证码</td><td>敏感界面前台切换时做遮罩；系统提供的隐私遮盖能力要用</td></tr><tr><td>锁屏通知内容暴露</td><td>通知显示验证码/消息内容</td><td>内容裁剪、仅在解锁后可见（与 #84 同一控制面）</td></tr><tr><td>日志/崩溃上报泄露</td><td><code>os_log</code> 打了 PII、崩溃收集器带文件路径与令牌</td><td>脱敏；对齐 #76 的日志可见性边界</td></tr></tbody></table>
+<hr>
+<h2>4. 为什么攻击者偏爱 App 面（成本对照）</h2>
+<table><thead><tr><th>项</th><th>系统 0-click 链</th><th>App 与配置缺陷</th></tr></thead><tbody><tr><td>需要稀有漏洞</td><td>是</td><td><strong>否</strong></td></tr><tr><td>需要版本赌注</td><td>是（目标必须停在未修补版本，#75）</td><td>否（缺陷随 App 长期存在）</td></tr><tr><td>需要逃逸与提权</td><td>是（#40、#43、#41）</td><td>通常不需要</td></tr><tr><td>失败后果</td><td>崩溃 → 留下工件（#82 §8）</td><td>不崩溃 → <strong>几乎无工件</strong></td></tr><tr><td>归因难度</td><td>高（可指向国家级能力）</td><td>高（可写成&quot;第三方 App 问题&quot;）</td></tr><tr><td>单目标成本</td><td>极高（百万美元级投入）</td><td>极低（读一遍配置就能发现）</td></tr></tbody></table>
+<p><strong>这是本篇的核心防御判断</strong>：对绝大多数真实数据泄露事件，对手不是 L3/L4（#80 §2 的分层），而是 L1/L2 级别但对 App 面做了针对性工作。因此<strong>&quot;我只从 App Store 装 App 所以安全&quot;是错的</strong>（App Store 审核不覆盖密钥可访问性选择、备份豁免、scheme 鉴权这类问题），而<strong>&quot;我开了锁定模式所以数据面安全&quot;也是错的</strong>（锁定模式主要收缩系统入口，不改变 App 的存储配置）。</p>
+<hr>
+<h2>5. 审计方法（三层，均可执行）</h2>
+<h3>5.1 开发侧（App 团队自查清单）</h3>
+<pre><code>□ 每个 Keychain 项：可访问性等级是否与用途匹配？是否需要 Access Control？
+□ 每个文件路径：是否显式声明数据保护类？敏感目录是否豁免备份？
+□ Info.plist：LSApplicationQueriesSchemes / URL types / ATS 例外 / background modes 逐项过一遍
+□ 所有入站边界（scheme、Universal Link、推送、分享扩展、WebView bridge）：是否有鉴权？
+□ entitlement 清单：能否删掉一半？（get-task-allow 是否为 false）
+□ 第三方 SDK：谁有网络出口？谁持有密钥？日志写到哪？
+□ 崩溃/日志上报：字段抽样检查有无 PII、令牌、内部路径
+□ 备份抽样：做一次未加密备份，列出&quot;外人能拿到什么&quot;（最直接的一课）</code></pre>
+<p>对齐外部标准：OWASP MASVS（存储、加密、网络、平台、代码）可作为验收框架，但不替代平台原语选择。</p>
+<h3>5.2 企业/MDM 侧</h3>
+<table><thead><tr><th>动作</th><th>说明</th><th>依据</th></tr></thead><tbody><tr><td>上架准入：把 §3.1–§3.3 作为审核项</td><td>自研与采购 App 都要过；重点问&quot;密钥存哪、备份里有什么&quot;</td><td>本篇、#74</td></tr><tr><td>描述文件与能力登记</td><td>任何授予额外能力（代理、拦截、容器）的配置都要登记并定期清理</td><td>#67</td></tr><tr><td>权限状态纳入可见项</td><td>MDM 可见&quot;授予了什么&quot;，不可见&quot;提权后做了什么&quot;（诚实表述边界）</td><td>#76、#66</td></tr><tr><td>高危角色 App 白名单</td><td>只允许清单内 App 承载业务数据；减少 §3.3 的组合面</td><td>#80 §8</td></tr></tbody></table>
+<h3>5.3 用户侧</h3>
+<table><thead><tr><th>动作</th><th>频率</th></tr></thead><tbody><tr><td>撤销非必要 App 的麦克风/相机/定位/相册授权；&quot;始终允许&quot;归零</td><td>每月（#80 §10）</td></tr><tr><td>检查 VPN 与设备管理里的描述文件，删除不认识项</td><td>每月</td></tr><tr><td>卸载&quot;只为一次功能&quot;装的 App；检查可登录设备与浏览器会话</td><td>每月</td></tr><tr><td>通知预览关闭（验证码/消息类 App）</td><td>一次性</td></tr><tr><td>关闭非必要 App 的后台 App 刷新（减少锁屏可用窗口）</td><td>一次性</td></tr></tbody></table>
+<hr>
+<h2>6. 真实形态对照（不含具体厂商指名的通用案例）</h2>
+<table><thead><tr><th>事件形态</th><th>缺陷族</th><th>若只看本系列系统视角会漏掉什么</th></tr></thead><tbody><tr><td>&quot;备份被提取后，聊天与凭据全可读&quot;</td><td>§3.1 保护等级 + 备份豁免</td><td>会误判为&quot;设备被攻破&quot;（实际是备份通路，#74）</td></tr><tr><td>&quot;登录链接被第三方域截获，账户被接管&quot;</td><td>§3.2 Universal Link 关联域过宽</td><td>会被归成&quot;钓鱼&quot;，实为配置问题（#18 相关但不同因）</td></tr><tr><td>&quot;键盘扩展/输入法读取了输入内容&quot;</td><td>§3.3 扩展信任边界</td><td>会被归成&quot;木马&quot;，实为合法授权的宿主</td></tr><tr><td>&quot;SDK 把设备标识与令牌发到自建服务端&quot;</td><td>§3.3 供应链 + §3.4 日志</td><td>会被归成&quot;数据滥用&quot;，但对攻击者等价于凭据泄露（#18）</td></tr><tr><td>&quot;推送里带了完整内容，中继链路可见&quot;</td><td>§3.2 推送载荷</td><td>会被当作&quot;通知通路漏洞&quot;，实际是设计选择（#65）</td></tr><tr><td>&quot;调试 entitlement 残留导致内容注入即接管&quot;</td><td>§3.3 <code>get-task-allow</code></td><td>会被归成&quot;越狱攻击&quot;，实为无需越狱（#16、#73）</td></tr></tbody></table>
+<p><strong>方法论提示</strong>：这六条都<strong>不会出现在任何 Apple 安全公告或 CVE 数据库里</strong>，因此任何以&quot;CVE 数量&quot;为口径的 iOS 风险汇报（#75、#81 §5）天然漏掉了它们。做 iOS 风险统计时必须把 App/配置类作为独立一列，否则数字会系统性低估现实风险。</p>
+<hr>
+<h2>7. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;过了 App Store 审核就没问题&quot;</td><td>审核不覆盖密钥可访问性、备份豁免、scheme 鉴权、SDK 数据出口这些配置选择</td></tr><tr><td>&quot;沙箱隔离了，App 里的密钥别人读不到&quot;</td><td>沙箱隔离<strong>进程</strong>，不隔离&quot;备份、提权后、调试通道、共享容器、Keychain 宽松可访问性&quot;</td></tr><tr><td>&quot;越狱检测能发现 App 数据被偷&quot;</td><td>多数 App 面缺陷不需要越狱，也不需要任何工件（#82 §8 的表述纪律同样适用）</td></tr><tr><td>&quot;锁定模式保护我的 App 数据&quot;</td><td>锁定模式收缩系统入口与部分能力，不改变 App 自己的存储/密钥配置</td></tr><tr><td>&quot;用加密库就安全了&quot;</td><td>密钥存在哪、谁能读、备份里有什么，与加密算法实现无关（#81 §3.9）</td></tr><tr><td>&quot;只有敏感行业才需要管这个&quot;</td><td>App 面攻击是 L1/L2 成本最低的入口，普通用户与中小企业受影响的<strong>绝对数</strong>更大</td></tr><tr><td>&quot;配置类缺陷可以自己发版修，不用急&quot;</td><td>修复确实只需 App 更新，但缺陷存续期间没有任何外部信号，暴露窗口完全不可见（对比 #75 的系统补丁窗口）</td></tr></tbody></table>
+<hr>
+<h2>8. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>缺陷类别轴（本篇多数缺陷属&quot;逻辑/授权误用&quot;）</td><td>#81</td></tr><tr><td>权限模型、采集通路、指示器</td><td>#66</td></tr><tr><td>合法签名/描述文件通道武器化</td><td>#67</td></tr><tr><td>代码签名、dyld、宿主借用与调试通道</td><td>#73</td></tr><tr><td>备份三通路（本地/加密/云端）</td><td>#74</td></tr><tr><td>WebView 与 Safari 工件</td><td>#70</td></tr><tr><td>通知通路与载荷设计</td><td>#65</td></tr><tr><td>凭据窃取与账户滥用</td><td>#18</td></tr><tr><td>供应链</td><td>#28</td></tr><tr><td>锁屏状态与通知内容边界</td><td>#84</td></tr><tr><td>分层防御与巡检清单</td><td>#80、#63</td></tr></tbody></table>
+<hr>
+<h2>9. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>iOS 攻击面分三片：系统与框架（Apple 修）、平台机制（Apple 设计 + 用户开关）、App 与配置（开发者责任，Apple 不修）</td></tr><tr><td>2</td><td>App 面缺陷以边界语义错误为主，属逻辑/授权误用类，不吃内存安全缓解，也不需要提权</td></tr><tr><td>3</td><td>攻击者偏爱它因为成本是&quot;读配置&quot;而不是&quot;买利用链&quot;，且失败不留崩溃工件</td></tr><tr><td>4</td><td>大部分缺陷来自主动关掉平台默认安全：Keychain 可访问性、文件保护类、备份豁免、entitlement、ATS</td></tr><tr><td>5</td><td>App 面是防御方唯一可以直接收敛的一片：卸载、撤销授权、准入、清理描述文件都能立刻生效</td></tr><tr><td>6</td><td>这类问题不出现在 CVE/公告里，任何以 CVE 数为口径的 iOS 风险统计都系统性低估现实；必须单列一栏</td></tr><tr><td>7</td><td>审计方式与系统漏洞不同：配置审计 + 备份抽样即可覆盖，不需要狩猎能力</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 上最常被真正用走的不是零日利用链，而是&quot;某个 App 把密钥设成锁屏也能读、把敏感目录放进了未加密备份、把登录令牌塞进了 URL scheme&quot;——它不先进、不性感、不会出现在任何安全公告里，但它同时绕过了 Apple 的所有硬化和你的所有开关。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security</a></li><li><a href="https://developer.apple.com/documentation/security/protecting-data-with-data-protection" rel="nofollow noopener" target="_blank">Apple Developer — Protecting data with Data Protection</a></li><li><a href="https://developer.apple.com/documentation/security/keychain_services" rel="nofollow noopener" target="_blank">Apple Developer — Keychain Services &amp; Access Control</a></li><li><a href="https://developer.apple.com/videos/" rel="nofollow noopener" target="_blank">WWDC — App privacy &amp; secure storage 相关议题</a></li><li><a href="https://developer.apple.com/app-store/review/guidelines/" rel="nofollow noopener" target="_blank">App Store Review Guidelines</a></li><li><a href="https://mas.owasp.org/" rel="nofollow noopener" target="_blank">OWASP Mobile Application Security (MASVS / MASTG)</a></li><li><a href="https://cwe.mitre.org/data/definitions/1000.html" rel="nofollow noopener" target="_blank">MITRE CWE</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — Research</a></li><li>本系列 #16、#18、#28、#65、#66、#67、#70、#73、#74、#80、#81、#82（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a82.html">← 第 82 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a84.html">第 84 篇 →</a></nav></article>
+</main></body></html>
