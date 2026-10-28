@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 近场支付与钱包凭证攻击面：不需要攻破设备也能花钱的那条路 | iOS 安全研究文章库</title>
+<meta name="description" content="支付栈分层拆解、四条通路按&quot;谁必须失败&quot;排序（中继/丢失/账户侧加卡/Pass 与 NFC 滥用）、缺陷类别映射显示逻辑与授权误用主导、企业三条治理动作与事件响应顺序、五个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a89.html">
+<meta property="og:title" content="iOS 近场支付与钱包凭证攻击面：不需要攻破设备也能花钱的那条路">
+<meta property="og:description" content="支付栈分层拆解、四条通路按&quot;谁必须失败&quot;排序（中继/丢失/账户侧加卡/Pass 与 NFC 滥用）、缺陷类别映射显示逻辑与授权误用主导、企业三条治理动作与事件响应顺序、五个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a89.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 89 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 近场支付与钱包凭证攻击面：不需要攻破设备也能花钱的那条路</h1>
+<blockquote><p>本文是防御视角的分析与处置方法，<strong>不提供可利用代码</strong>，不包含中继装置制作、协议绕过步骤或任何可直接照做的攻击操作。面向需要评估资金与物理访问风险的用户、企业安全负责人与咨询场景。</p></blockquote>
+<h2>1. 为什么这是一个独立的攻击面</h2>
+<p>前面的文章基本都在处理&quot;软件里的错误&quot;：#2 按系统层分，#81 按缺陷类别分，#82–#88 按被攻击的组件与通路分（驱动、App 配置、锁屏、分发、智能输入、微架构侧信道）。</p>
+<p>支付与钱包这条路的特殊之处在于：<strong>大部分真实损失不需要设备上存在任何漏洞</strong>。</p>
+<ul><li>中继攻击里，设备与卡片都完好无损，被欺骗的是&quot;距离假设&quot;。</li><li>账户侧加卡滥用里，攻击者用的是发卡行的合法流程，Apple 与设备只是被绕过的旁观者。</li><li>小额离线免密里，损失来自<strong>网络规则的配置选择</strong>，而不是实现缺陷。</li><li>设备丢失场景里，风险取决于锁屏状态与数据保护等级（#84），而不是钱包本身是否有 bug。</li></ul>
+<p>所以这一层要评估的不是&quot;iOS 有没有漏洞&quot;，而是<strong>信任是在哪里被赋予的、由谁验证、能撤销吗</strong>。这是它值得单独成篇的原因。</p>
+<hr>
+<h2>2. 把这条栈拆开看</h2>
+<pre><code>┌─ 商户 / 终端 ─────────────────────────────────────────┐
+│  受理终端、在线网关、CVM 要求、离线限额、拒付处理       │
+├─ 支付网络 / 发卡行 ────────────────────────────────────┤
+│  令牌服务（DPAN 生命周期）、授权规则、风险引擎、Provisioning 审批 │
+├─ 设备侧（本文重点）─────────────────────────────────────┤
+│  Secure Enclave 上的个性化应用实例（密钥永不离开 SEP）  │
+│  NFC 控制器与天线、安全通道会话                         │
+│  钱包 App / Pass 库、Apple Cash、订单凭证              │
+│  认证策略：面容 / 触控 / 密码 / 锁屏计时               │
+├─ 账户侧 ───────────────────────────────────────────────┤
+│  Apple ID 设备清单、iCloud 钥匙串、家庭共享、eSIM 与短信接收方 │
+└────────────────────────────────────────────────────────┘</code></pre>
+<p>关键设计事实（决定后续所有判断）：</p>
+<ol><li><strong>卡号被替换为设备账号（DPAN）</strong>，每笔交易使用一次性密文，真实卡号不参与近场交互。</li><li><strong>私钥在 Secure Enclave 内生成与使用</strong>，#9 与 #53 讨论过 SEP 密钥提取的能力上限——那是国家级实验室课题，不是这类欺诈的常规手段。</li><li><strong>加卡的决定权在发卡行</strong>，Apple 只是把请求转过去。这条决定了最大风险面在账户侧。</li><li><strong>小额离线可以不做在线授权</strong>，这是可用性换来的窗口，也是中继类风险的根因之一。</li></ol>
+<hr>
+<h2>3. 四条通路，按&quot;谁必须失败&quot;分层</h2>
+<table><thead><tr><th>通路</th><th>需要设备被攻破吗</th><th>需要账户被接管吗</th><th>现实损失量级</th><th>防守杠杆位置</th></tr></thead><tbody><tr><td>① 近场中继（把卡/设备的信号延伸到远处）</td><td>否</td><td>否</td><td>单笔中小、可拒付</td><td>支付网络规则、限额、终端 CVM 要求</td></tr><tr><td>② 设备丢失或被盗后刷</td><td>否（但要已解锁/低风险状态）</td><td>否</td><td>有限，钱包受认证约束</td><td>锁屏状态与数据保护（#84）</td></tr><tr><td>③ 账户侧加卡滥用（SIM 转移、短信/电话社工发卡行、在别的设备上把卡加进钱包）</td><td>否</td><td><strong>是（核心）</strong></td><td>高、持续</td><td>发卡行验证方式 + Apple ID 设备清单治理</td></tr><tr><td>④ App 与 Pass 层滥用（Core NFC 标签读写、登机牌/门禁/学生证、Apple Cash 转账欺诈）</td><td>视情况</td><td>否</td><td>中，常表现为<strong>物理访问</strong>与社交工程</td><td>应用审核与配置（#83/#86）、凭证管理</td></tr></tbody></table>
+<h3>① 中继：被欺骗的是&quot;距离假设&quot;</h3>
+<p>公开研究与媒体演示早已把这类攻击从理论变成&quot;可购买到的工具&quot;话题；厂商与发卡行的回应主要落在限额、终端要求与风险引擎上。<strong>对个人而言这条路的正确心态是：它是支付网络的责任面，不是你的设备加固面</strong>。你的可操作项只有：知道哪些卡开了免密小额、以及出问题后有拒付通道。</p>
+<h3>② 设备丢失：真正起作用的是认证时机</h3>
+<p>钱包不是&quot;丢了还能刷&quot;的敞口：每次支付需要本机认证，设备被远程抹除、退出登录或被移除出账户后卡片即失效。<strong>这条通路的实际风险来自 #84 描述的窗口</strong>——设备处于已解锁状态、密码强度不足、或短期离开视线（餐厅、试用、代拿行李）。加固动作全部落在锁屏策略那一层，与钱包无关。</p>
+<h3>③ 账户侧：这一条才是高频高损失</h3>
+<p>典型形态是移动号码被劫持或通信被截获，再用&quot;合法&quot;的重置/加卡流程拿到钱包里的卡。相关事实：</p>
+<ul><li><strong>eSIM 与号码携带是主入口之一</strong>：签约关系在运营商手里，不在 Apple 手里（蜂窝侧边界见 #72）。</li><li><strong>短信/通话类一次性验证是弱点</strong>：只要发卡行接受这类因子，设备之外的通路就足以完成加卡。</li><li><strong>Apple ID 的设备清单与家庭共享</strong>决定了一张卡能被同步到哪些设备（#84 的密钥治理结论在这里同样成立：<strong>损失范围由密钥与账户治理决定</strong>）。</li></ul>
+<p>可执行的处置（这才是本文的重点动作）：</p>
+<ol><li>对<strong>每一个</strong>钱包内卡片回答：发卡行用什么方式批准加卡？如果只是短信或电话，视为高风险并优先处理。</li><li>号码侧：运营商账户加PIN/线下变更约束，禁止线上补卡与携号转移（各运营商名称不同，动作相同）。</li><li>账户侧：定期核对 Apple ID 设备清单，移除不认识的设备和不再使用的旧机（#80 月度清单里应加这一条）。</li><li>高价值个体的正确做法：<strong>主账户资金不放在可被手机号验证的卡上</strong>，与&quot;敏感内容不落在这台设备上&quot;是同一条原则的两个方向。</li></ol>
+<h3>④ App 与 Pass 层：钱包不只是卡</h3>
+<p>钱包里还能装登机牌、酒店房卡、门禁与学生证、车钥匙。这意味着：<strong>钱包凭证是一次物理访问令牌</strong>。丢失风险的评估口径要改：不是&quot;损失多少钱&quot;，而是&quot;谁能进入哪些门&quot;。</p>
+<p>App 侧的 NFC 读写（标签、会员卡、公交卡）主要风险不是协议，而是<strong>被诱导的交互</strong>——恶意 App 或诱导性页面让你完成一次不该做的绑定，这与 #86 描述的滥用 App 生态完全同构。</p>
+<hr>
+<h2>4. 缺陷类别映射（对齐 #81）</h2>
+<p>如果把这一层硬塞进 #81 的类别表，会发现行几乎是空的：</p>
+<table><thead><tr><th>类别</th><th>在这一层的出现频率</th><th>说明</th></tr></thead><tbody><tr><td>内存破坏类（UAF/越界/整数/双重释放）</td><td>低</td><td>不是这一层的主要损失来源</td></tr><tr><td>逻辑与授权误用</td><td><strong>主导</strong></td><td>加卡审批、拒付规则、离线限额、凭证撤销时机</td></tr><tr><td>信息泄露</td><td>中</td><td>商户/终端侧、通知与凭证可见性</td></tr><tr><td>密码学</td><td>低（实现强，边界在密钥治理）</td><td>参见 #88 的 SEP 物理研究上限</td></tr><tr><td>TOCTOU</td><td>低</td><td>不是本层瓶颈</td></tr></tbody></table>
+<p>这正是 #83 那句结论的重演：<strong>&quot;Apple 补丁修不到的那一片攻击面&quot;</strong>——而且支付这块连&quot;配置修补&quot;都多在发卡行与运营商手里，用户能做的只有把流程变严。</p>
+<hr>
+<h2>5. 企业视角：这条面上真正能控的三件事</h2>
+<p>个人谈加固，企业谈治理。给企业安全负责人的三条：</p>
+<ol><li><strong>公司卡与报销卡</strong>：离线限额、单笔免密额度、CVM 要求是可协商参数；把它当成配置项来审，而不是当成&quot;员工自己的事&quot;。</li><li><strong>MDM 能做什么</strong>：设备限制项可以禁止向钱包添加卡片、可以限制某些近场功能，但<strong>无法替发卡行做加卡审批</strong>。别把 MDM 当成资金风控（能力边界参见 #76）。</li><li><strong>事件响应顺序</strong>：怀疑员工设备或号码被接管时，第一步永远是<strong>在支付网络与运营商侧锁死</strong>（挂失卡片、锁定号码），第二步才是设备取证。反过来会留下一段持续失血窗口。设备侧的证据在这里价值很低——交易记录与授权轨迹主要握在发卡行侧。</li></ol>
+<hr>
+<h2>6. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;手机丢了钱就会被刷走&quot;</td><td>钱包支付要求本机认证；风险来自锁屏状态与设备被解锁，而不是钱包本身（#84）</td></tr><tr><td>&quot;有令牌化就不用担心中继&quot;</td><td>令牌化解决的是卡号泄露，不解决&quot;距离假设&quot;被破坏；缓解在限额与终端策略侧</td></tr><tr><td>&quot;Apple 批准了加卡&quot;</td><td>加卡由发卡行批准；攻击者走的是合法流程，所以加固点在验证因子而不是设备</td></tr><tr><td>&quot;开强密码就够了&quot;</td><td>强密码保护设备，不保护账户与号码；账户侧接管可以在任何设备上重放</td></tr><tr><td>&quot;MDM 能阻止这类损失&quot;</td><td>MDM 只能限制设备端功能，不能替代发卡行风控与运营商签约约束</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>支付这条面是系列里少见的<strong>&quot;设备安全做到 90 分也不会变好，账户与协议治理做到 90 分立竿见影&quot;</strong>的领域。</p>
+<ul><li>对个人：核对每张卡的加卡验证方式，锁好号码，定期清 Apple ID 设备清单，把免密小额额度调低。</li><li>对高危个体：主资金账户不要挂在手机号可验证的卡上。</li><li>对企业：把公司卡的限额与 CVM 当配置审，事件响应从&quot;锁卡锁号&quot;开始。</li></ul>
+<p>设备端你只要维持 #80 与 #84 的既有结论即可——真正需要动手的是设备之外的那两个环节。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a88.html">← 第 88 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
