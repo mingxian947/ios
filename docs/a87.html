@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 智能组件与输入通路攻击面：视觉解析、语音链、键盘与神经引擎上的新边界 | iOS 安全研究文章库</title>
+<meta name="description" content="无需交互即处理外部数据的 0-click 同构特征、各族主导缺陷类别映射、八条投递渠道可关闭性、ANE 作为并行信任域的诚实边界、键盘/视觉索引/健康推断的合法聚合风险、个人与组织加固清单">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a87.html">
+<meta property="og:title" content="iOS 智能组件与输入通路攻击面：视觉解析、语音链、键盘与神经引擎上的新边界">
+<meta property="og:description" content="无需交互即处理外部数据的 0-click 同构特征、各族主导缺陷类别映射、八条投递渠道可关闭性、ANE 作为并行信任域的诚实边界、键盘/视觉索引/健康推断的合法聚合风险、个人与组织加固清单">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a87.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 87 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 智能组件与输入通路攻击面：视觉解析、语音链、键盘与神经引擎上的新边界</h1>
+<blockquote><p>编制日期：2026-10-28 数据来源：Apple Platform Security 文档、Apple Machine Learning / Core ML / ANE 公开技术说明、WWDC 视觉与语音议题、Apple Security Releases 组件条目、Google Project Zero、Citizen Lab 与 Amnesty 披露、语音识别与 ML 安全学术文献（对抗样本、模型输入解析）、iOS 分析社区公开笔记、本系列前 83 篇分析 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>本系列把 WebKit（#3、#39）、图形栈（#58、#82）、媒体解析（#37、#44）、协议（#72）都拆过了，但有一条不断长大的面没被单独命名：<strong>系统里的智能组件与它们的输入通路</strong>——图像/文本识别、语音识别与合成、键盘预测、以及承载模型执行的神经引擎（ANE）。</p>
+<p>七条结论：</p>
+<ol><li>这一族的能力特征正好落在攻击链最贵的位置上：<strong>&quot;不需要用户交互就能处理外部数据&quot;</strong>。照片里的文字、来电里的语音、消息附件里的图像，都会在用户点任何东西之前被系统解析——与 #37、#60、#71 描述的 0-click 前提同构。</li><li>它同时具备两个不利属性：<strong>代码高度复杂且包含大量第三方数学库/模型运行时</strong>（对齐 #82 §3 的&quot;生态代码&quot;问题），<strong>运行位置常在特权服务或独立扩展宿主里</strong>（对齐 #52 的解析隔离思想）。</li><li>ANE 与安全协处理器一样，是一个<strong>并行信任域</strong>（#64、#27）：它有独立固件与调度路径，系统级缓解（PAC、堆硬化、SPTM）对它<strong>不必然生效</strong>。这与基带（#72）是同一个结构问题，而讨论远少于基带。</li><li>键盘与预测文本是一条被长期低估的<strong>数据聚合通路</strong>：它天生要看用户输入内容，历史上多次出现&quot;键盘扩展可读取全部输入&quot;的问题（#83 §3.3 提到宿主边界，本篇把它放进智能通路语境）。</li><li>语音链的风险不只在内核，也在<strong>云端与本地混合处理</strong>：请求会包含音频特征或文本转写，跨越 #20 的数据覆盖类别与 #69 的中继链路，形成新的隐私与凭据面。</li><li>对抗样本/模型层攻击在 iOS 场景的实际威胁，<strong>目前远小于内存安全类</strong>；不要把它写成&quot;AI 黑客&quot;故事——真正危险的是&quot;解析器里的老式 OOB&quot;，而不是模型被骗。这一条是本篇最重要的表述纪律。</li><li>可观测性与其它智能面一样差：<strong>处理成功不留工件，失败才崩溃</strong>。因此防御手段主要是<strong>关闭/降级解析能力</strong>与<strong>版本对齐</strong>，不是检测（§7）。</li></ol>
+<hr>
+<h2>2. 这条通路长在哪里</h2>
+<pre><code>外部不可信数据              系统智能组件                        执行位置
+──────────────────────────────────────────────────────────────────────
+图片/视频（消息、网页、相册） → 视觉解析、文本识别、场景理解      → 系统服务 / 独立扩展宿主
+音频（通话、语音留言、Siri）  → 语音识别、语言理解、合成          → 本地 + 云端混合
+键入文本                     → 预测、纠错、翻译、听写            → App 进程 + 系统服务
+模型文件（Core ML 等资源）    → 模型加载与编译                    → ANE 调度 + 驱动接口
+传感器数据                   → 姿态/活动/健康推断                → 协处理器与服务</code></pre>
+<table><thead><tr><th>组件族</th><th>输入来自哪里</th><th>是否需要用户交互</th><th>为什么危险</th></tr></thead><tbody><tr><td>图像中的文本识别（Live Text 类）</td><td>相册、相机、消息/邮件里的任意图像</td><td><strong>否</strong>（系统在展示时即分析）</td><td>图像 → 解析器 → 内核/服务内存破坏的完整 0-click 形态（对照 #37 的 ImageIO）</td></tr><tr><td>视觉与相机处理管线</td><td>相机、视频通话、扫描</td><td>部分</td><td>与图形/驱动族相邻，跨 IOAccelerator（#58、#82）</td></tr><tr><td>语音识别与听写</td><td>语音留言、Siri、键盘听写</td><td>需触发但无需点击内容</td><td>音频解析链 + 跨云端数据流出（#20、#69）</td></tr><tr><td>键盘预测与语言模型</td><td>所有文本输入</td><td><strong>否</strong>（持续运行）</td><td>聚合能力最强：它能看到你在其他 App 里打的字</td></tr><tr><td>翻译与文本处理服务</td><td>剪贴板、网页、消息中的外语</td><td>部分自动</td><td>文本解析栈与内存密集；与 #66 的剪贴板提示同域</td></tr><tr><td>模型运行时与 ANE</td><td>随 App 分发的模型资源</td><td>否（加载即执行准备）</td><td>模型文件是&quot;外部可控的二进制输入&quot;，解析器在驱动/固件层（#82 的接口形态）</td></tr><tr><td>健康与活动推断</td><td>传感器</td><td>否</td><td>数据敏感度极高，且落在协处理器信任域（#64、#72）</td></tr></tbody></table>
+<hr>
+<h2>3. 缺陷类别映射（对齐 #81 的第二根轴）</h2>
+<table><thead><tr><th>智能组件族</th><th>主导缺陷类别</th><th>为什么</th><th>不吃哪些缓解</th></tr></thead><tbody><tr><td>图像/视频解析</td><td>OOB 读写、整数→OOB、UAF</td><td>尺寸/行跨度计算多，缓冲区由外部图像决定</td><td>与 #37、#44 同类：类型硬化帮助有限</td></tr><tr><td>文本/字体与语言处理</td><td>OOB、未初始化读、逻辑类</td><td>编码/字形/边界条件复杂，且国际化路径覆盖不均</td><td>边界检查一致性</td></tr><tr><td>语音前端（编解码与特征提取）</td><td>整数、OOB、竞态</td><td>实时流处理 + 缓冲复用</td><td>堆隔离对流式缓冲帮助有限</td></tr><tr><td>模型加载与编译</td><td>类型混淆、整数、逻辑/授权</td><td>模型格式是外部可控结构化数据，且有版本兼容层</td><td>与 #82 的驱动外部方法同构</td></tr><tr><td>键盘与预测</td><td><strong>逻辑/授权误用为主</strong></td><td>缺陷往往不是内存错误而是&quot;能看什么、存到哪、谁可同步&quot;</td><td><strong>完全不吃内存安全缓解</strong>（#81 §3.8）</td></tr><tr><td>ANE / 协处理器</td><td>依实现而定，公开信息最少</td><td>独立固件 + 跨域接口</td><td>系统级缓解不必然覆盖（#64、#72）</td></tr></tbody></table>
+<p><strong>关键判断</strong>：这一族的<strong>最高风险项不是内存错误</strong>，而是&quot;聚合能力被合法使用&quot;（键盘、语音、健康）。这与 #66 §3 的 B 路径完全同构：<strong>找一个既有敏感数据可见性、又处理外部输入的进程</strong>。智能组件恰好两者都满足。</p>
+<hr>
+<h2>4. 投递面：谁能触发这些解析器</h2>
+<table><thead><tr><th>投递渠道</th><th>触发方式</th><th>是否需要用户交互</th><th>与本系列的接口</th></tr></thead><tbody><tr><td>消息类附件（图像/音频）</td><td>系统预处理/预览即解析</td><td>低（部分无需点开）</td><td>#71、#37、#60</td></tr><tr><td>网页/内嵌图像</td><td>渲染时解析</td><td>低</td><td>#14、#3、#21</td></tr><tr><td>日历/邮件/联系人里的媒体</td><td>后台拉取与索引</td><td><strong>否</strong></td><td>#65（无交互投递第一公里）</td></tr><tr><td>相册同步与云端媒体库</td><td>下载缩略图/索引时</td><td><strong>否</strong></td><td>#69、#74</td></tr><tr><td>蓝牙/近场传输的媒体</td><td>接收预览</td><td>中</td><td>#69、#72</td></tr><tr><td>语音唤醒与 Siri 触发</td><td>音频流</td><td>需触发（但可由外部音频）</td><td>#83 §3.4 的界面类风险</td></tr><tr><td>剪贴板内容（含文本/图像）</td><td>翻译/识别联动</td><td>低</td><td>#66 剪贴板提示</td></tr><tr><td>模型资源分发（App 自带/下载）</td><td>加载即解析</td><td>否</td><td>#83 的 SDK/资产供应链、#28</td></tr></tbody></table>
+<p><strong>防御含义</strong>：这些渠道里，<strong>只有少数是可以由用户关掉的</strong>（预览、索引、自动翻译、唤醒）。把它们逐条列成开关清单是 §7 的主要内容。</p>
+<hr>
+<h2>5. ANE 与协处理器：又一条并行信任域</h2>
+<table><thead><tr><th>属性</th><th>现状判断</th><th>依据</th></tr></thead><tbody><tr><td>独立调度与固件</td><td>ANE 有独立执行与任务提交通路，不完全等价于普通内核驱动</td><td>#64、#27 的同构推理</td></tr><tr><td>系统缓解覆盖</td><td>PAC/CSM/堆加固主要作用于主内核执行路径，不必然覆盖协处理器固件内部</td><td>#64 关于&quot;并行信任域&quot;的结论</td></tr><tr><td>公开研究密度</td><td>远低于基带与内核；可引用的利用实例极少</td><td>观察性结论，不夸大</td></tr><tr><td>攻击面位置</td><td>真正的近期风险在<strong>任务提交接口与模型解析</strong>（主机侧），不在固件内部猜测</td><td>#82 的外部方法视角</td></tr><tr><td>防御抓手</td><td>版本对齐 + 不装来源不明的模型/工具类 App；对高危者关闭不必要的智能处理</td><td>§7</td></tr></tbody></table>
+<p><strong>表述纪律</strong>：这一节必须诚实。<strong>目前没有公开证据表明存在&quot;ANE 固件级武器化利用&quot;</strong>。正确的写法是：它在架构上属于与基带同类的独立域，因此&quot;上限不受主系统缓解保护&quot;，但<strong>已发生的风险仍集中在主机侧解析器</strong>。把架构可能性写成已发生的威胁是本系列反复纠正的那类错误（#62、#80 §9）。</p>
+<hr>
+<h2>6. 数据与隐私侧（比内存漏洞更常发生的损失）</h2>
+<table><thead><tr><th>通路</th><th>流出内容</th><th>谁能拿到</th><th>加固</th></tr></thead><tbody><tr><td>云端语音识别</td><td>音频特征/转写文本，绑定账户标识（可重置的，非设备永久 ID）</td><td>服务侧、法律调取、账户泄露时你本人</td><td>关闭不必要的听写；对高危角色使用无账户/受控环境；理解&quot;重置标识符&quot;的边界</td></tr><tr><td>键盘学习与个性化</td><td>词表与使用统计，跨设备同步</td><td>同步链路、备份</td><td>关闭&quot;自设备学习/同步&quot;于敏感岗位；对齐 #69</td></tr><tr><td>照片索引与视觉标签</td><td>图像内容派生特征</td><td>云端索引（是否本地处理取决于设置与版本）</td><td>检查 iCloud 照片相关处理设置；敏感相册隔离</td></tr><tr><td>健康与活动推断</td><td>极高敏感度</td><td>健康 App 授权、第三方 App、备份</td><td>逐项撤销授权；健康数据落强保护类（#83 §3.1、#84 §2.2）</td></tr><tr><td>Siri 建议与通知智能</td><td>使用习惯、通信对象</td><td>本地为主，但同步/备份会带派生数据</td><td>高危角色可关闭建议类能力</td></tr><tr><td>剪贴板智能操作（翻译、识别）</td><td>复制内容</td><td>任何有权读剪贴板的 App（系统只提示不阻断）</td><td>敏感值不走剪贴板（#66 §3、#83 §3.2）</td></tr></tbody></table>
+<p><strong>这一节是本篇的&quot;多数人会真正受害&quot;部分</strong>：它不需要漏洞，只需要默认设置与你没注意到的同步开关（对照 #86 §5 的 stalkerware 逻辑——能力被合法使用）。</p>
+<hr>
+<h2>7. 加固清单（按可关闭性排序）</h2>
+<h3>7.1 个人/高危个体</h3>
+<pre><code>□ 自动更新（解析器缺陷唯一通用防线，#80 §3）
+□ 高危者开锁定模式：会同时收缩部分自动处理与媒体触发面（#34）
+□ 键盘：只保留系统键盘；删除所有第三方输入法与键盘扩展（聚合能力面，#83 §3.3）
+□ 听写/Siri 触发：不确定就关；车载/公共场合尤其
+□ 照片视觉搜索/记忆类功能：敏感岗位关闭
+□ 健康类授权逐项核查，只保留必要项
+□ 剪贴板：敏感值不用剪贴板传递；关注读取提示
+□ 输入法/翻译等派生功能的跨设备同步关闭
+□ 不装&quot;AI 增强/滤镜/工具&quot;类来源不明 App（模型解析面 + #86 的 A/E 层风险）</code></pre>
+<h3>7.2 组织/平台</h3>
+<table><thead><tr><th>动作</th><th>说明</th></tr></thead><tbody><tr><td>把&quot;智能组件相关条目&quot;纳入 #85 的族标签</td><td>组件名如视觉/语音/模型相关服务，单独统计趋势</td></tr><tr><td>业务 App 避免自建模型加载不可信资源</td><td>模型文件按不可信输入处理（长度/结构校验、隔离进程）</td></tr><tr><td>敏感岗位设备禁用第三方键盘与听写</td><td>用 MDM 策略落地</td></tr><tr><td>采购含 AI 能力的 SDK 时问三件事</td><td>是否云端处理、数据留存、模型来源</td></tr><tr><td>检测预期设低</td><td>该族失败才崩溃、成功不留工件（#63、#76）</td></tr></tbody></table>
+<h3>7.3 开发者（自研智能/解析功能）</h3>
+<pre><code>□ 外部媒体/模型一律视为不可信输入：长度、维度、层级数上限，拒绝即静默降级
+□ 解析放在受限进程/扩展宿主，最小 device 授权（#82 §5.3、#52）
+□ 不在特权进程内做格式猜测；优先用系统框架而非自带老解码器
+□ 模型资源签名/来源校验 + 更新走受控通道
+□ 敏感字段不写日志、不进崩溃上报（#76）</code></pre>
+<hr>
+<h2>8. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;AI 组件的新风险是对抗样本骗过模型&quot;</td><td>在 iOS 真实入侵场景中，风险来自解析器里的传统内存缺陷与聚合授权，不是模型被骗（§3、§5）</td></tr><tr><td>&quot;ANE 是独立处理器所以更安全&quot;</td><td>独立域意味着系统缓解不必然覆盖，既可能更安全也可能更不设防，取决于接口审计（#64）</td></tr><tr><td>&quot;语音都在本地处理&quot;</td><td>取决于功能与设置，部分链路存在云端处理与账户标识；要按功能逐项看（#20）</td></tr><tr><td>&quot;第三方输入法只是打字工具&quot;</td><td>它是聚合能力最强的宿主之一，能看见跨 App 输入（#83 §3.3）</td></tr><tr><td>&quot;关闭 Siri 就够了&quot;</td><td>真正的持续聚合来自键盘、视觉索引与健康推断，不在唤醒</td></tr><tr><td>&quot;系统智能功能默认都是安全的&quot;</td><td>默认值多为可用性优先；数据流出边界要看逐项开关（§6）</td></tr><tr><td>&quot;这类攻击一旦成功必然有异常崩溃可查&quot;</td><td>逻辑/授权类不崩溃；内存类才可能崩溃，且利用成功同样可以不崩溃（#63、#82 §8）</td></tr></tbody></table>
+<hr>
+<h2>9. 与既有各篇的接口</h2>
+<table><thead><tr><th>主题</th><th>参考</th></tr></thead><tbody><tr><td>图像解析 0-click 先例</td><td>#37、#60、#38</td></tr><tr><td>媒体服务注入与驻留</td><td>#44、#45</td></tr><tr><td>图形/驱动栈（模型提交与硬件加速相邻面）</td><td>#58、#82</td></tr><tr><td>解析隔离与 BlastDoor 思想</td><td>#52</td></tr><tr><td>基带与并行信任域</td><td>#72、#64、#27</td></tr><tr><td>无交互投递第一公里</td><td>#65、#71</td></tr><tr><td>数据覆盖类别与云端可见性</td><td>#20</td></tr><tr><td>设备间同步与中继</td><td>#69</td></tr><tr><td>授权模型与宿主借用</td><td>#66</td></tr><tr><td>App 配置与扩展宿主边界</td><td>#83</td></tr><tr><td>分发与滥用生态</td><td>#86</td></tr><tr><td>情报监测与族×类统计</td><td>#85、#81</td></tr><tr><td>分层防御与巡检</td><td>#80</td></tr></tbody></table>
+<hr>
+<h2>10. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td>1</td><td>智能组件与输入通路是一条持续净增长的攻击面，其核心特征是&quot;无需交互即处理外部数据&quot;，与 0-click 前提同构</td></tr><tr><td>2</td><td>主导缺陷类别是 OOB/整数/UAF（解析器）与逻辑/授权误用（聚合能力），后者完全不吃内存安全缓解</td></tr><tr><td>3</td><td>ANE 属并行信任域，主系统缓解不必然覆盖；但已公开的风险集中在主机侧解析与任务提交接口，不要把架构可能性写成已发生的威胁</td></tr><tr><td>4</td><td>键盘/预测/视觉索引/健康推断构成最强的合法数据聚合面，多数人的真实损失来自这里而非漏洞</td></tr><tr><td>5</td><td>投递渠道大多不可关（附件预览、索引、同步），能关的是第三方键盘、听写、视觉搜索、跨设备派生同步</td></tr><tr><td>6</td><td>该族检测预期必须设低：成功处理不留工件，因此防御杠杆在版本对齐与能力关闭</td></tr><tr><td>7</td><td>开发者侧的正确姿势是把媒体与模型资源当完全不可信输入，并在受限宿主里解析</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结</strong>：iOS 的智能功能为了&quot;懂你&quot;而必须<strong>先看你的内容</strong>——照片里的字、嘴里的话、指尖的输入都在你点下之前被系统解析过；这让它在架构上同时具备 0-click 的触发条件和最敏感的可见性，而它真正的日常风险不在模型被骗，而在解析器的老式越界和那些你从没关过的聚合开关。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security</a></li><li><a href="https://developer.apple.com/documentation/coreml" rel="nofollow noopener" target="_blank">Apple Machine Learning — Core ML 与模型部署说明</a></li><li><a href="https://developer.apple.com/videos/" rel="nofollow noopener" target="_blank">WWDC — 视觉、语音与模型性能相关议题</a></li><li><a href="https://support.apple.com/guide/" rel="nofollow noopener" target="_blank">Apple Support — Siri、听写与隐私（含标识符重置）</a></li><li><a href="https://support.apple.com/guide/" rel="nofollow noopener" target="_blank">Apple Support — 键盘与第三方输入法管理</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — Case Studies（图像/媒体解析链）</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 商业监控能力与数据聚合研究</a></li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK Mobile Matrix — 数据聚合相关战术</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — Mobile Verification Toolkit</a></li><li>本系列 #20、#27、#37、#44、#45、#52、#58、#60、#64、#65、#66、#69、#71、#72、#80、#81、#82、#83、#84、#85、#86（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a86.html">← 第 86 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
