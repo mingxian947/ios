@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 安全季度巡检执行表与台账：把&quot;该做什么&quot;变成&quot;谁做、多久一次、留下什么&quot; | iOS 安全研究文章库</title>
+<meta name="description" content="五条设计规则（可判定阈值/证据优先/例外登记/按危害排序/周期与触发双轨）、16 行季度主表与个人与企业两种取用方式、例外台账九字段与复发升级、周月季年四档节奏、八类事件触发清单、六个失败模式与三个运营数字">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a104.html">
+<meta property="og:title" content="iOS 安全季度巡检执行表与台账：把&quot;该做什么&quot;变成&quot;谁做、多久一次、留下什么&quot;">
+<meta property="og:description" content="五条设计规则（可判定阈值/证据优先/例外登记/按危害排序/周期与触发双轨）、16 行季度主表与个人与企业两种取用方式、例外台账九字段与复发升级、周月季年四档节奏、八类事件触发清单、六个失败模式与三个运营数字">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a104.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 104 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 安全季度巡检执行表与台账：把&quot;该做什么&quot;变成&quot;谁做、多久一次、留下什么&quot;</h1>
+<blockquote><p>本文是运营方法与模板，<strong>不提供可利用代码</strong>。面向需要真正落地执行的个人与家庭、企业 IT/安全负责人、以及给客户交付巡检方案的咨询场景。所有检查项都是&quot;在自己或本组织的设备/账户上查看并记录&quot;，不涉及任何第三方设备的探测或取证操作。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>系列里的其它文章回答的是<strong>&quot;该做什么&quot;</strong>：#80 给了分层防护与月度清单，#85 给了漏洞情报监测与暴露窗口运营，#89/#96/#99/#101/#102/#103 各给了自己那一层的处置动作。</p>
+<p>但从&quot;知道&quot;到&quot;做完&quot;之间缺一份东西，而这份东西不是知识：</p>
+<table><thead><tr><th>缺口</th><th>表现</th><th>巡检表要解决的</th></tr></thead><tbody><tr><td>没有判定标准</td><td>检查完不确定&quot;这样算不算合格&quot;</td><td>每行给出<strong>可当场判定的阈值</strong></td></tr><tr><td>没有责任人</td><td>家庭里&quot;以为对方看过&quot;，企业里&quot;以为 IT 管过&quot;</td><td>每行有<strong>唯一执行人</strong>与复核人</td></tr><tr><td>没有证据</td><td>下次巡检从零开始，无法比较</td><td>每行留<strong>可归档的证据</strong>（截图/导出/记录）</td></tr><tr><td>没有例外台账</td><td>做不完的项悄悄消失</td><td>未合格项进<strong>例外登记</strong>并带关闭期限</td></tr><tr><td>没有周期分层</td><td>要么天天紧张，要么一年什么都不做</td><td>按<strong>周/月/季/年 + 事件触发</strong>分层</td></tr></tbody></table>
+<p>所以本篇是一个<strong>执行件</strong>，不是新的一根分析轴：条目全部来自既有文章，本篇负责把它们排成可执行、可归档、可对比的表单。这也是为什么它值得单列——没有这份表，前 103 篇的边际价值会衰减。</p>
+<hr>
+<h2>2. 五条设计规则（先定规则再抄表）</h2>
+<ol><li><strong>每行必须可判定</strong>。&quot;锁屏设置是否安全&quot;不合格；&quot;锁屏通知预览是否关闭 + 密码是否为非 4 位数字&quot;才是判定项。</li><li><strong>证据优先于结论</strong>。留一份导出/截图比写&quot;已确认&quot;有用：下次对比才有意义（#92/#99 的&quot;固化&quot;习惯在运营侧同样成立）。</li><li><strong>例外要登记而不是清零</strong>。真实系统总有做不到的项；有台账的 6 条例外比假装 0 条例外安全得多。</li><li><strong>按危害排序，不按容易排序</strong>。第 ① 优先级永远是账户与验证因子（#89/#99/#100），不是设备外观设置。</li><li><strong>周期与触发双轨</strong>。季度是节拍，事件触发是补丁；只有季度表会在两次之间出事（见第 6 节）。</li></ol>
+<hr>
+<h2>3. 季度巡检主表（企业/家庭可各取所需）</h2>
+<p>标注 <code>[个]</code> 为个人/家庭版同样适用，<code>[企]</code> 为组织版。判定阈值写&quot;当场能看的答案&quot;。</p>
+<table><thead><tr><th>#</th><th>检查项</th><th>在哪看</th><th>判定阈值（合格 =）</th><th>证据</th><th>归属</th></tr></thead><tbody><tr><td>1 <code>[个][企]</code></td><td>系统版本与设备清单</td><td>设置 → 通用 → 关于本机；组织侧用 MDM 报表</td><td>全部设备在<strong>支持版本</strong>上且无低于两条大版本的设备</td><td>版本清单导出（按 #94 的 V1 逻辑：长尾设备是主要残留）</td><td>执行人本人 / IT</td></tr><tr><td>2 <code>[企]</code></td><td>补丁窗口</td><td>对照 #85 的暴露窗口算法</td><td>关键 CVE 的 P95 修复时长 ≤ 自定 SLA</td><td>上季窗口表</td><td>IT/安全负责人</td></tr><tr><td>3 <code>[个][企]</code></td><td>Apple ID 与验证因子</td><td>设置 → 你的姓名 → 登录与安全</td><td>受信任号码与恢复邮箱<strong>均为本人独占</strong>；恢复方式无第三方代持</td><td>截图（注意遮蔽敏感项）</td><td>本人 / IT 复核</td></tr><tr><td>4 <code>[个][企]</code></td><td>登录设备清单</td><td>同页底部</td><td>无不认识设备；离职/分手/换机后无残留</td><td>设备名与型号清单（#89/#99 的同一动作）</td><td>本人</td></tr><tr><td>5 <code>[企]</code></td><td>MDM 注册与描述文件</td><td>设置 → 通用 → VPN 与设备管理</td><td>注册方与预期一致；无未知描述文件</td><td>描述文件列表导出（#67/#86/#103）</td><td>IT</td></tr><tr><td>6 <code>[个][企]</code></td><td>受信任根证书</td><td>关于本机 → 证书信任设置</td><td>仅保留本人/组织明确需要的项</td><td>证书清单（#103 的第 3 行）</td><td>本人 / IT</td></tr><tr><td>7 <code>[个]</code></td><td>网络配置残留</td><td>已知 Wi-Fi、代理、DNS、VPN 配置</td><td>无不再可信的已保存网络；无来源不明的代理/DNS/VPN</td><td>配置截图（#103 的第 1/5/6 行）</td><td>本人</td></tr><tr><td>8 <code>[个][企]</code></td><td>钱包与支付凭证</td><td>钱包 App、发卡行设置、订阅清单</td><td>每张卡的<strong>加卡验证方式</strong>已知；免密额度已调低；订阅与组织者身份无遗留</td><td>发放方名称清单（#89）</td><td>本人 / 财务</td></tr><tr><td>9 <code>[个][企]</code></td><td>进入权凭证</td><td>钱包内的车钥匙/门禁、智能家居成员清单</td><td>无已失效关系仍持有的凭证；临时权限均有过期</td><td>分享出去过的钥匙清单（#101 的第 3/6 行）</td><td>本人 / 行政</td></tr><tr><td>10 <code>[个]</code></td><td>健康与敏感数据授权</td><td>健康 App 的共享与 App 清单</td><td>无已停用 App 的残留读取授权（#100 第 4 节）</td><td>授权类别截图</td><td>本人</td></tr><tr><td>11 <code>[个][企]</code></td><td>追踪与隐私设置</td><td>隐私与安全各子项、#95 的 8 项</td><td>按 #95 的&quot;能关/只能收窄/关不掉&quot;三档记录，不追求全关</td><td>#95 清单勾选表</td><td>本人</td></tr><tr><td>12 <code>[企]</code></td><td>备份与恢复演练</td><td>iCloud/电脑备份、离线副本</td><td><strong>抽一台做恢复验证</strong>，不只是&quot;看到备份时间&quot;（#74/#92）</td><td>演练记录（日期、恢复到的设备、缺失项）</td><td>IT + 使用人</td></tr><tr><td>13 <code>[个][企]</code></td><td>锁屏与生物识别</td><td>面容 ID 与密码、通知预览</td><td>无非本人认识的替代外观；锁屏敏感可见项已收窄（#84/#99）</td><td>设置截图</td><td>本人</td></tr><tr><td>14 <code>[个]</code></td><td>长期安排</td><td>医疗卡、紧急联系人、遗产联系人</td><td>仍然指向你现在想要的那个人（#102）</td><td>一年一次的确认记录</td><td>本人</td></tr><tr><td>15 <code>[企]</code></td><td>日志与可见性</td><td>现有日志源、保留期</td><td>对照 #76 的可见性清单：需要的日志是否留存、留多久</td><td>保留期表</td><td>安全负责人</td></tr><tr><td>16 <code>[企]</code></td><td>App 与配置面</td><td>关键业务 App 的 SDK/权限配置</td><td>按 #83 的三层审计法抽查 2–3 个高权限 App</td><td>抽查结论</td><td>应用负责人</td></tr></tbody></table>
+<p><strong>用法</strong>：个人版取 1、3、4、6、7、8、9、10、11、12、13、14（约 60–75 分钟）；企业版按设备数抽样，全量做 1–6、12、15，其余按 10% 抽样并记录抽样比。</p>
+<hr>
+<h2>4. 例外登记台账（这张表才是让巡检不退化的东西）</h2>
+<p>建议字段固定，季度追加而不是覆盖：</p>
+<table><thead><tr><th>字段</th><th>说明</th><th>反例（不要这样写）</th></tr></thead><tbody><tr><td>例外编号</td><td>稳定 ID，跨季度引用</td><td>无编号，只有描述</td></tr><tr><td>主表行号</td><td>对应第 3 节哪一项</td><td>&quot;一些设置问题&quot;</td></tr><tr><td>未合格内容</td><td>客观事实</td><td>&quot;IT 那边没管好&quot;</td></tr><tr><td>原因分类</td><td>能力限制 / 成本 / 依赖外部方 / 争议中</td><td>一律写&quot;暂时无法&quot;</td></tr><tr><td>风险读法</td><td>用 #90 的档位 + #91 的后果类型一句话定位</td><td>空白</td></tr><tr><td>补偿措施</td><td>做不到的项旁边做了什么替代</td><td>空白（最危险的一种）</td></tr><tr><td>责任人与期限</td><td>唯一名字 + 具体日期</td><td>&quot;相关同事&quot;</td></tr><tr><td>上季状态</td><td>新增 / 延续 / 已关闭 / 复发</td><td>只写本季</td></tr><tr><td>复发标记</td><td>同一例外第 3 次出现要升级处理</td><td>从不统计</td></tr></tbody></table>
+<p><strong>判读规则</strong>：一份健康的台账不会季度间一模一样——它应该有&quot;已关闭&quot;与&quot;新增&quot;。如果连续两个季度完全相同，说明巡检变成了拍照打卡（这是最常见的失败模式，见第 7 节）。</p>
+<p>&quot;依赖外部方&quot;这一类要特别标记：发卡行、门禁/车钥匙发放方、运营商、服务商条款（#89/#101/#100/#105）——这些是你<strong>唯一不能靠自己关闭</strong>的例外，正确的表达是升级路径（换发放方、换验证方式、走客户/员工沟通渠道），不是等待。</p>
+<hr>
+<h2>5. 分层节奏（避免&quot;每季度一口气做完&quot;）</h2>
+<table><thead><tr><th>周期</th><th>做什么</th><th>时长</th><th>来源</th></tr></thead><tbody><tr><td><strong>每周（15 分钟）</strong></td><td>只看三件事：更新是否可用、是否有异常登录/验证码通知、有无新装描述文件或证书提醒</td><td>15 min</td><td>#80/#85/#103</td></tr><tr><td><strong>每月（40 分钟）</strong></td><td>主表第 3、4、8 项 + 通知与订阅扫一遍（谁在扣费）</td><td>40 min</td><td>#80/#89</td></tr><tr><td><strong>每季（60–90 分钟个人 / 抽样企业）</strong></td><td>主表全量 + 例外台账更新</td><td>60–90 min</td><td>本篇</td></tr><tr><td><strong>每年（半天）</strong></td><td>长期安排类：#102（遗产/紧急）、#101（进入权全量重审）、#96（设备流转与退役计划）、#100（数据授权重审）</td><td>3–4 h</td><td>各专篇</td></tr><tr><td><strong>事件触发</strong></td><td>见第 6 节</td><td>即时</td><td>本篇</td></tr></tbody></table>
+<p>一句判读：<strong>季度是&quot;完整性&quot;的节拍，周/月是&quot;及时性&quot;的节拍</strong>。只有季度表意味着最长 90 天的盲区；只有周表意味着没有系统核对。</p>
+<hr>
+<h2>6. 事件触发清单（不等下一个季度）</h2>
+<table><thead><tr><th>触发事件</th><th>立即加查（按顺序）</th></tr></thead><tbody><tr><td>收到验证码/登录提醒但自己没操作</td><td>验证因子 → 设备清单 → 钱包内的卡 → 通知里那次操作的时间点（#89/#99）</td></tr><tr><td>设备丢失或被盗</td><td>服务端优先：标记丢失、改密、锁卡锁号；<strong>是否涉及证据</strong>再决定是否抹除（#92/#99）</td></tr><tr><td>关系变化（分手、离婚、亲属纠纷、纠纷对象获得过访问）</td><td>完整走 #99 的 12 项 + 门禁/车钥匙发放方撤销（#101）+ 家庭共享与组织者身份（#98/#102）</td></tr><tr><td>离职/岗位变化/外包结束</td><td>撤访问 → 注销 → 抹除 → 留台账（#96 的顺序逐字适用）+ 进入权（#101）+ 订阅归属（#89）</td></tr><tr><td>被要求安装描述文件/证书，或&quot;客服&quot;引导操作</td><td>#103 第 5 节最后一行 + #97 的核验通道；加查根证书与描述文件（第 3 节 5、6 行）</td></tr><tr><td>高危 CVE / 在野利用披露</td><td>版本覆盖 + 关闭非必要暴露面 + 是否给关键人群临时开锁定模式（#85/#90）</td></tr><tr><td>医疗事件、失能、去世</td><td>按 #102 的三条流程走，不要临时发明顺序</td></tr><tr><td>换机</td><td>旧设备按 #96 交出流程；新设备<strong>不从风险账户的旧备份恢复</strong>（#99 的硬约束）</td></tr></tbody></table>
+<hr>
+<h2>7. 六个失败模式</h2>
+<table><thead><tr><th>失败模式</th><th>后果</th><th>对策</th></tr></thead><tbody><tr><td>只留结论不留证据</td><td>下季度无法比较，趋势全部丢失</td><td>第 2 节规则 2；证据目录固定命名与存放</td></tr><tr><td>阈值写成&quot;安全/不安全&quot;</td><td>每次判定标准不同，同一个人两次结果不一样</td><td>每项写成&quot;能不能当场看到的答案&quot;</td></tr><tr><td>例外清零式汇报</td><td>真实风险被隐藏，问题复发无人认领</td><td>强制例外登记 + 补偿措施必填</td></tr><tr><td>责任人虚设（&quot;IT&quot;）</td><td>没有名字 = 没有人</td><td>每行一个具体人名 + 复核人</td></tr><tr><td>把 MDM 当成风控</td><td>以为管住了设备，实际管不到账户、支付、运营商与发放方（#76/#89/#101）</td><td>主表把&quot;设备外&quot;的行列成独立检查项</td></tr><tr><td>巡检与事件响应混用</td><td>平时不看，出事时按巡检清单一条条念，错过止损窗口</td><td>事件走第 6 节触发清单；巡检只在平静期做</td></tr></tbody></table>
+<hr>
+<h2>8. 一句话结论</h2>
+<p>这份表的价值不在条目，而在<strong>四个字段：判定阈值、责任人、证据、例外期限</strong>。</p>
+<ul><li>个人：季度 60–90 分钟做主表 12 项 + 年度做一次 #101/#102/#96 的长期项；例外台账可以只有三列（内容、补偿措施、下次看的时间）。</li><li>企业/小团队：全量 + 抽样，把 3 个数字拿出来——<strong>版本覆盖率、暴露窗口 P95（#85）、例外平均关闭周期</strong>；这三个数比&quot;我们做了几次巡检&quot;更能说明状态。</li><li>一切条目都来自既有文章，本篇不新增攻击面分析；新增的只是执行方式。</li></ul>
+<p>一句提醒：<strong>如果只能做一件事，做主表第 3、4 行（验证因子与设备清单）</strong>——#89/#99/#100 的结论在这里同样成立，账户层的失控不是设备加固能补的。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a103.html">← 第 103 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
