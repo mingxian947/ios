@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 数字遗产、急救与失能接管：持有人不在场时，谁能打开什么 | iOS 安全研究文章库</title>
+<meta name="description" content="三种&quot;持有人不在&quot;（急救/失能/身后）的不同需求与互斥取舍、不解锁设备与长期授权两组机制及各自边界（遗产联系人给的是 iCloud 数据而非设备密码）、安排强度三档与高危档的反向做法、事发后三条流程（文件先行、锁定设备不乱试密码）、六个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a102.html">
+<meta property="og:title" content="iOS 数字遗产、急救与失能接管：持有人不在场时，谁能打开什么">
+<meta property="og:description" content="三种&quot;持有人不在&quot;（急救/失能/身后）的不同需求与互斥取舍、不解锁设备与长期授权两组机制及各自边界（遗产联系人给的是 iCloud 数据而非设备密码）、安排强度三档与高危档的反向做法、事发后三条流程（文件先行、锁定设备不乱试密码）、六个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a102.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 102 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 数字遗产、急救与失能接管：持有人不在场时，谁能打开什么</h1>
+<blockquote><p>本文是防御视角的机制清点与流程建议，<strong>不提供可利用代码</strong>，不包含解锁他人设备、绕过认证或任何规避法律程序的细节。面向需要提前安排的人（慢病、高龄、独居、高风险职业、单独出差）、需要替家人处置的家属，以及需要处理员工账户与设备的企业管理者。各机制的名称与可用性随 iOS 版本与地区差异很大，涉及法律程序的部分请以当地规定与专业意见为准，本文不构成法律意见。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>整个系列的每一条都默认一件事：<strong>持有人本人在场、能决策、能输入密码</strong>。#84 讨论锁屏与强制解密，#89 讨论支付凭证，#96 讨论设备流转，#98 讨论监护关系，#99 讨论&quot;攻击者住在同一个屋檐下&quot;。</p>
+<p>本篇把主语换成&quot;持有人<strong>不在</strong>&quot;，而这恰好是唯一一种<strong>双向的风险结构</strong>：</p>
+<table><thead><tr><th>方向</th><th>提前收紧的后果</th><th>提前放开的后果</th></tr></thead><tbody><tr><td>急救（分钟级）</td><td>医护人员拿不到过敏史、用药、紧急联系人，直接造成人身伤害</td><td>—</td></tr><tr><td>失能（天—月）</td><td>家属无法缴费、无法取用医保/病历、无法暂停订阅与续费、无法处理账号安全事件</td><td>相当于把完整访问权交给另一个人（#99 的暴露面）</td></tr><tr><td>身后（周—年）</td><td>照片、通信记录与账户资产变成&quot;打不开的东西&quot;，法律程序漫长</td><td>生前授权过宽，等于把自己最敏感的数据交给一个未来不确定的人</td></tr></tbody></table>
+<p>所以这一层的正确问题不是&quot;该不该设置&quot;，而是：<strong>哪些内容必须在分钟级公开、哪些必须在长期私密、两者之间用哪个机制隔开</strong>。系列里没有别的主题需要同时优化这两个方向。</p>
+<p>还有一个常被忽略的事实：<strong>账户与数据的处置路径几乎都在 Apple 之外</strong>——死亡证明、法院命令、遗嘱、运营商合同、银行与保险。设备能做的只有一部分，把它当成&quot;全在里面&quot;会做出错的安排。</p>
+<hr>
+<h2>2. 三种&quot;持有人不在&quot;，需要的东西完全不同</h2>
+<table><thead><tr><th>场景</th><th>时间窗口</th><th>谁需要访问</th><th>需要什么</th><th>不该给什么</th></tr></thead><tbody><tr><td><strong>A 急救</strong></td><td>几十秒—几分钟，现场可能有陌生人</td><td>急救人员、路人</td><td>锁屏可见的医疗卡（过敏、用药、疾病、紧急联系人）、SOS 通路、锁屏可用的通话与&quot;查找&quot;部分能力（#84 的锁屏可访问项）</td><td>完整相册、信息、密码、财务类 App 的免认证入口</td></tr><tr><td><strong>B 失能/住院</strong></td><td>数天—数月</td><td>指定的家属或授权人</td><td><strong>一份外部书面安排</strong>（谁有权做什么）+ 关键账户的替代访问方式（邮箱恢复、支付卡挂失通道、订阅管理）；医疗决策依据（预嘱/授权书，非 iOS 范畴）</td><td>把 Apple ID 密码直接共享（一旦共享，#99/#89 的账户层全部暴露，且很难事后证明&quot;哪笔操作是谁做的&quot;）</td></tr><tr><td><strong>C 身后</strong></td><td>数周—数年</td><td>继承人/遗嘱执行人</td><td>生前安排好的<strong>遗产联系人</strong>、必要时的法律程序文件、账户清单与订阅清单</td><td>依赖&quot;他知道密码&quot;作为唯一方案（未告知的密码等于永久失联）</td></tr></tbody></table>
+<p><strong>这张表是本篇的骨架</strong>：A 类要&quot;公开窄内容&quot;，B 类要&quot;分工明确的替代访问&quot;，C 类要&quot;提前指定 + 文件&quot;。把三者混为一谈是绝大多数安排失败的原因——常见做法是&quot;把密码写在纸条上给家人&quot;，它同时解决了 A 之外的所有问题，代价是把 A 场景里最坏的那一面（任何捡到纸条的人=完整账户，见 #99）暴露出来。</p>
+<hr>
+<h2>3. 可提前布置的机制清单（含各自的边界）</h2>
+<p>按&quot;是否解锁设备&quot;分组，这是最关键的差别。</p>
+<h3>不解锁设备、只公开窄内容（适合所有人）</h3>
+<table><thead><tr><th>机制</th><th>提供什么</th><th>明确不提供什么</th></tr></thead><tbody><tr><td>医疗卡 / 紧急信息</td><td>锁屏下可见的医疗概况：血型、过敏、用药、疾病、紧急联系人、医疗标识</td><td>不解锁设备，不暴露健康 App 全量数据（#100 的敏感类别要逐条删，别整份公开）</td></tr><tr><td>锁屏可访问项核查</td><td>通知预览、控制中心、SIRI/回拨、&quot;查找&quot;等的锁屏可用性（#84 给的是四态矩阵，这里用作配置口径）</td><td>—</td></tr><tr><td>紧急 SOS 与快捷触发</td><td>侧键组合触发求救与紧急联系人通知，部分配置下无需先输密码</td><td>触发方式与顺序需要本人实际练过一次，现场不会有人读说明书</td></tr><tr><td>紧急联系人</td><td>由他人主动呼叫你指定的人</td><td>不等于对方能看你设备</td></tr></tbody></table>
+<h3>长期授权、事后生效（C 类）</h3>
+<table><thead><tr><th>机制</th><th>提供什么</th><th>边界（必须如实知道）</th></tr></thead><tbody><tr><td><strong>遗产联系人（Legacy Contact）</strong></td><td>生前指定的人，在你去世后按流程（通常需死亡证明等文件）访问 <strong>iCloud 数据</strong>：照片、邮件、备忘录等（具体范围与可用性随地区变化）</td><td><strong>不给设备密码</strong>：锁着的 iPhone 本身仍打不开；<strong>可提前撤销</strong>（这一点常被忽略，年度核对要包含它）；数据范围只是 iCloud，不含第三方 App、银行、社交平台的账户</td></tr><tr><td>账户访问的司法请求路径</td><td>在无遗产联系人安排时，继承人可通过 Apple 的专门账户访问流程申请，通常需法院命令、死亡证明与继承人身份材料</td><td>周期长、材料要求严格、且<strong>不保证解锁设备</strong>；这是&quot;最后一道门&quot;，不是替代安排</td></tr><tr><td>密码与密钥的托管安排</td><td>第三方密码管理器（受控共享/紧急访问功能）、纸质密封信封+遗嘱执行人、密钥分片给两人</td><td>托管本身就是攻击面：托管方的账户安全等级要按 #89 的&quot;谁批准恢复&quot;标准审，不要拿它当免风险的方案</td></tr></tbody></table>
+<h3>设备之外的清单（真正决定家属能否办事的部分）</h3>
+<ul><li><strong>账户与订阅清单</strong>：Apple ID 上的付费订阅、自动续费、家庭共享组织者身份（你死后仍是组织者会造成扣费与管理僵局，见 #89/#98）；</li><li><strong>号码归属</strong>：蜂窝/eSIM 合同的签约人是谁（#89 的结论：签约关系在运营商手里，不在 Apple 手里），换机与停机都需要它；</li><li><strong>支付侧</strong>：卡片/钱包里的卡由谁挂失、如何挂失（#89 的事件响应顺序）；</li><li><strong>企业场景</strong>：员工死亡或失联时，MDM 侧能做什么、不能做什么（#76 的能力边界），以及设备与账户的处置责任人（#96 的回收流程适用，但需要多一条&quot;谁有权签字&quot;）。</li></ul>
+<hr>
+<h2>4. 安排强度的三档（不同人做不同事）</h2>
+<table><thead><tr><th>档</th><th>适用</th><th>最小安排</th></tr></thead><tbody><tr><td><strong>基础档</strong></td><td>大多数成年人</td><td>① 医疗卡填好并删掉敏感条目（#100）；② 紧急联系人设置并<strong>实际演练一次 SOS</strong>；③ 指定遗产联系人（若所在区域可用）；④ 一份纸质/密封的账户与订阅清单，写明谁可以拿</td></tr><tr><td><strong>加强档</strong></td><td>独居、慢病、高频单独出差、高龄父母</td><td>基础档 + ⑤ 给一个可信的人<strong>限范围</strong>的替代访问（不是完整密码）；⑥ 一个每日/隔日的报平安机制（无人响应时的联系人链路）；⑦ 医疗决策文件与设备安排互相对应</td></tr><tr><td><strong>高危档</strong></td><td>记者、活动人士、被跟踪者（#99）、掌握敏感资产者</td><td><strong>与基础档相反的方向</strong>：先决定&quot;哪些内容绝对不能落在这台设备上&quot;（#89/#94/#100 同一条原则），再考虑可及性。此档的默认答案通常是&quot;急救信息只放不敏感的部分 + 敏感内容本来就不在设备上&quot;，因为<strong>提前放开访问权本身就是给对手的一条通路</strong>（#99 的合法 foothold 里最常见的就是&quot;我以为只有家人知道&quot;）</td></tr></tbody></table>
+<p>一句判读：<strong>基础档是所有人都该做的，因为它的成本不到一小时；高危档要反过来做，因为对高危个体而言可及性与安全性是直接冲突的</strong>。</p>
+<hr>
+<h2>5. 事情已经发生时的三条流程</h2>
+<h3>A 急救现场（你或旁人）</h3>
+<ol><li>打开锁屏的医疗卡入口（不需要解锁设备）；</li><li>需要呼叫时用紧急 SOS 的侧键组合，让设备自己通知紧急联系人；</li><li>把设备交给医护人员时<strong>不要</strong>当场输入密码除非你确认需要（输入之后锁屏状态就变了，#84 的窗口原则；后续如果涉及事件，见下条 C）。</li></ol>
+<h3>B 家属临时接管（住院/失能）</h3>
+<ol><li><strong>先列&quot;要办的事&quot;再决定&quot;要什么访问&quot;</strong>：多数事项（缴费、停订阅、联系医院、处理银行）不需要 Apple ID，只需要对应的服务商通道；把&quot;给我你的密码&quot;当默认动作通常过度且不必要；</li><li>需要暂停资金与订阅时，优先走支付侧（#89 的顺序：先在支付网络与运营商侧锁死，再动设备）；</li><li>若确有设备内数据必须读取，按最小必要原则：让本人在可能的范围内自己操作、或只对特定 App 给出一次性协助，并<strong>事后收回</strong>。</li></ol>
+<h3>C 身后处置（继承人/执行人）</h3>
+<p>顺序建议固定，因为搞错顺序会让材料白跑：</p>
+<ol><li><strong>文件先行</strong>：死亡证明若干份、遗嘱/继承材料、身份关系证明；</li><li><strong>有遗产联系人</strong>：按其流程访问 iCloud 数据（注意它不解锁设备）；</li><li><strong>无遗产联系人</strong>：走司法/账户访问请求路径（通常需法院命令）；</li><li><strong>设备仍处于锁定</strong>：不要在设备上试密码（锁定与数据保护状态变化，#84；且若后续可能涉及争议，任何失败尝试都会改变证据状态）；判断这台设备里是否真有需要的内容，很多时候<strong>云端那份比设备那份更容易合法拿到</strong>；</li><li><strong>同步处理清单外事项</strong>：号码合同、订阅与自动续费、钱包内的卡（#89/#101）、家庭共享组织者身份的移交（#98）、门禁与车钥匙发放方的撤销（#101）；</li><li>若涉及诉讼、事故或争议：<strong>证据先于清除</strong>（#92/#99 的同一原则），不要抹机、不要恢复出厂，先做固化并咨询专业渠道。</li></ol>
+<hr>
+<h2>6. 六个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;遗产联系人能解开我的 iPhone&quot;</td><td>它给的是 <strong>iCloud 数据访问</strong>，不包含设备密码；锁着的设备仍打不开</td></tr><tr><td>&quot;把密码写下来给家人就都解决了&quot;</td><td>解决的同时制造最大暴露面（任何人拿到=完整账户，#99）；且事后无法区分&quot;是谁的操作&quot;</td></tr><tr><td>&quot;急救时设备里什么都看不到&quot;</td><td>医疗卡与紧急信息就是为此设计、锁屏可见；正确做法是删敏感条目而不是不设</td></tr><tr><td>&quot;我死后订阅会自己停&quot;</td><td>不会；组织者身份、自动续费、家庭共享会持续造成扣费与管理问题（第 3 节最后一组）</td></tr><tr><td>&quot;走法律流程就能拿到一切&quot;</td><td>材料要求严格、周期长、范围以数据为主，且不保证设备解锁；提前安排比事后申请有效得多</td></tr><tr><td>&quot;企业可以替离职/去世员工处理账户&quot;</td><td>MDM 管设备与配置，不能替个人账户做决定（#76/#89 的能力边界）</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>这一方向的全部工作量可以压成一次约一小时的安排 + 每年一次的核对：</p>
+<ul><li><strong>公开窄内容</strong>：医疗卡 + 紧急联系人 + 实际演练一次 SOS，删掉 #100 里列出的敏感类别。</li><li><strong>指定长期接收人</strong>：遗产联系人（区域可用时），并在年度核对里检查它是否仍是你想要的那个人。</li><li><strong>别用&quot;共享密码&quot;当方案</strong>：改成分工的替代访问 + 密封的账户清单，事后能收回、能归因。</li><li><strong>清单在 Apple 之外</strong>：号码、支付、订阅、门禁与车钥匙、组织者身份——这些才是家属真正会卡住的地方。</li><li><strong>高危个体反过来做</strong>：最敏感的内容不落在这台设备上，可及性问题自然消失（与 #89/#94/#99/#100 是同一条原则）。</li></ul>
+<p>设备端维持 #80/#84/#96/#99 的既有结论即可；本篇补的是<strong>&quot;当持有人不在时，谁按什么顺序能拿到什么&quot;</strong>这一格。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a101.html">← 第 101 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
