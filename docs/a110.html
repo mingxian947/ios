@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 多身份与备用设备的架构设计：几台设备、几个账户、什么内容放哪 | iOS 安全研究文章库</title>
+<meta name="description" content="四根设计轴（账户域/设备角色/数据放置/关系共享）与各自的可判定问题、六种常见架构的代价与失效模式表、每台设备只能有一种的五种命名与准入纪律、三类内容的放置规则、七条会跨域的同步与共享边界、三档维护成本与五种故障的第一步、三步决策树与退出条件">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a110.html">
+<meta property="og:title" content="iOS 多身份与备用设备的架构设计：几台设备、几个账户、什么内容放哪">
+<meta property="og:description" content="四根设计轴（账户域/设备角色/数据放置/关系共享）与各自的可判定问题、六种常见架构的代价与失效模式表、每台设备只能有一种的五种命名与准入纪律、三类内容的放置规则、七条会跨域的同步与共享边界、三档维护成本与五种故障的第一步、三步决策树与退出条件">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a110.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 110 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 多身份与备用设备的架构设计：几台设备、几个账户、什么内容放哪</h1>
+<blockquote><p>本文是防御视角的架构设计与取舍分析，<strong>不提供可利用代码</strong>。多设备与多账户只用于<strong>正当的角色分离</strong>（工作/个人、敏感项目、家庭共用、差旅副本、恢复用途），不得用于规避平台规则、他人知情权、合同义务或法律程序；涉及后者的判断须以律师与平台条款为准，本文不构成法律意见，也不提供任何隐匿手法。</p></blockquote>
+<h2>1. 为什么这是架构问题，不是偏好问题</h2>
+<p>系列里的其他篇目都在处理&quot;一台设备 + 一个账户&quot;的加固：#80 的清单、#95 的可见性、#103 的出口、#107 的数据出口。但当角色变多（工作/个人、家庭/敏感项目、常驻/差旅），单设备方案的性质就变了：</p>
+<ul><li><strong>它把不同信任域放进同一个容器</strong>。同一个设备清单、同一份相册库、同一条钥匙串、同一组订阅与付款方式（第 6 节的七条同步边界，每一条都会跨域）。</li><li><strong>它的失效是整体的</strong>。一台被拿走、一个账户被锁，所有角色同时失去（#91 的可逆性维度在这一步归零）。</li><li><strong>它的变更不可归因</strong>。所有角色共用一个配置面，于是&quot;谁改的&quot;无法判断——这恰恰是 #99/#106 里最重要的信号来源。</li></ul>
+<p>于是问题不是&quot;我需不需要第二台设备&quot;，而是：<strong>我的角色之间有多少条边界会跨域；设备数与账户数应当等于边界数，还是等于角色数。</strong></p>
+<p>一句判读：<strong>多加一台设备很容易，定义清楚&quot;这台设备允许放什么&quot;很难</strong>。架构的价值全在后者。</p>
+<hr>
+<h2>2. 四根设计轴：每根轴上都有一个可判定的问题</h2>
+<table><thead><tr><th>轴</th><th>内容</th><th>可判定的问题</th><th>设计错误</th></tr></thead><tbody><tr><td><strong>A1 账户域</strong></td><td>有几个 Apple ID、各自持有谁的关系（家庭组、订阅、付款、&quot;查找&quot;）</td><td>每个账户能否一句话说出&quot;它代表哪个角色、谁可能想访问它&quot;</td><td>用同一个 Apple ID 承载工作与个人，或让家庭成员共用一个账户</td></tr><tr><td><strong>A2 设备角色</strong></td><td>每台设备的职责与准入（第 4 节的五种命名）</td><td>这台设备上是否存放<strong>任何</strong>其他角色的原件</td><td>把备用机当&quot;临时放东西的地方&quot;，角色随时间漂移</td></tr><tr><td><strong>A3 数据放置</strong></td><td>什么内容只在一处、什么可以同步、什么不进任何云（第 5 节）</td><td>能否当场口述&quot;某类内容此刻存在于哪几处&quot;（#96 的残留物口径）</td><td>靠&quot;我记得没同步&quot;来判定，而不是靠设置</td></tr><tr><td><strong>A4 关系与共享</strong></td><td>同步、共享、代持、连接（跨设备与跨人）</td><td>每条关系是否有对象、范围、期限与撤销方式（#95/#106/#109 同一条）</td><td>关系只增不减：分离做得好，被一条共享相册抵消</td></tr></tbody></table>
+<p>四轴的顺序不能换：<strong>先定角色边界（A2/A1），再定放置（A3），最后才加设备</strong>。先买设备再想用途，结果一定是角色漂移。</p>
+<hr>
+<h2>3. 六种常见架构与各自的代价、失效模式</h2>
+<table><thead><tr><th>架构</th><th>适用</th><th>真实代价</th><th>典型失效模式</th></tr></thead><tbody><tr><td><strong>单一全合一</strong>（1 账户 / 1 设备）</td><td>角色少、无敏感工作</td><td>无维护成本</td><td>一次扣押/丢失=全盘暴露；变更无法归因（第 1 节）</td></tr><tr><td><strong>主 + 工作</strong>（2 账户 / 2 设备）</td><td>有工作数据但无高风险</td><td>双份账单、双份恢复方式、消息分散</td><td>工作设备&quot;顺手&quot;登了个人账户；照片与钥匙串跨域回流（第 6 节）</td></tr><tr><td><strong>主 + 敏感项目</strong>（2 账户 / 2 设备，敏感侧不备份）</td><td>#108 场景的从业者</td><td>摩擦显著：文件传递、协作工具、可用性</td><td>为省事把敏感材料同步回主力设备或云（最常见的失败）</td></tr><tr><td><strong>主 + 差旅副本</strong>（副本不承载原件）</td><td>#109 场景</td><td>需要月度维护否则副本不可用</td><td>副本里&quot;临时&quot;留下原件；回程后未清理就回归日常使用</td></tr><tr><td><strong>家庭主账户 + 成员账户</strong>（组织化配置）</td><td>有孩子或受照护成员</td><td>组织者权限集中，成为最强单点（#92/#98/#106）</td><td>关系在成员成年/脱离照护后不解除；管理员身份无人清点</td></tr><tr><td><strong>机构发放 + 个人设备共存</strong>（MDM/BYOD）</td><td>雇员</td><td>归属与隐私争议；采集范围不清</td><td>离职时只回收设备、不撤服务端关系（#96 的退出流程未执行）</td></tr></tbody></table>
+<p><strong>判据</strong>：架构选错的最主要表现是<strong>同一份内容出现在两处而你不知道</strong>（不是&quot;设备不够用&quot;）。</p>
+<hr>
+<h2>4. 设备角色的五种命名（每台设备只能有一个）</h2>
+<p>给每台设备一个名字，名字决定它允许放什么：</p>
+<ol><li><strong>主力</strong>：日常全部角色。可备份、可同步、允许长期关系。准入代价最高，因此它的加固按 #80/#95 全量执行。</li><li><strong>工作</strong>：只承载雇主数据与账户；不放私人原件；允许企业 MDM。<strong>退出流程要预先存在</strong>（#96/#98）。</li><li><strong>隔离</strong>：只在敏感任务时开机使用；不加入家庭组、不开照片与钥匙串同步、不长期保持登录的第三方连接（#107）。<strong>它的价值来自&quot;可证伪地空&quot;</strong>。</li><li><strong>副本</strong>：为设备损失或差旅准备的可用替身。要求是<strong>随时可用</strong>而非数据齐全：登录态、必要 App、离线可达的凭据与联系人。</li><li><strong>弃用/过渡</strong>：正在交出或接手过程中的设备，按 #96 的顺序流程处置；不允许长期存在（过渡态一旦常态化，架构就退化为不知用途的设备堆）。</li></ol>
+<p><strong>命名纪律</strong>：任何一台设备无法回答&quot;我是哪一种、我能放什么、什么时候该退役&quot;，就说明架构已经漂移。漂移比缺少设备危险得多。</p>
+<hr>
+<h2>5. 数据放置规则：三类内容，三条不同的规则</h2>
+<table><thead><tr><th>类别</th><th>规则</th><th>判据</th></tr></thead><tbody><tr><td><strong>只在一处（原件类）</strong></td><td>原件只存在于唯一设备，其余一律不留；包括未公开材料、身份影像、亲密影像、录音原始文件、病历原文（#100）</td><td>&quot;如果这台设备被完整读取，我是否接受&quot;——不接受的必须进隔离类</td></tr><tr><td><strong>可以同步（恢复必需类）</strong></td><td>联系人、日历、密码管理器主库（在启用硬件密钥与强口令前提下）、必要文档</td><td>同步的意义是<strong>失去设备也能恢复</strong>；不为便利而同步</td></tr><tr><td><strong>永不进云与共享（不可回收类）</strong></td><td>位置历史与作息、精确家庭地址、凭据与验证码、他人未同意的通信与影像、账号关系与家庭组结构、第三方连接的授权范围</td><td>一旦上行进入可披露与可二次流转范围（#105/#107），且<strong>无法回收</strong>（#107 第 5 节）</td></tr></tbody></table>
+<p>两条常被忽略的补充：<strong>钥匙串是跨设备同步的</strong>（在 A 设备上保存的凭据会在 B 设备出现，这是最容易造成角色回流的通道）；<strong>iCloud 备份会把 App 数据一起带走</strong>（第 4 节&quot;隔离&quot;设备若参与备份，隔离只是形式）。</p>
+<hr>
+<h2>6. 七条会跨域的同步与共享边界（逐条检查）</h2>
+<p>这些是&quot;分离&quot;被抵消的全部常见路径。每一条都可当场查看：</p>
+<ol><li><strong>iCloud 钥匙串 / 密码同步</strong>：凭据跨设备与跨账户域回流。</li><li><strong>照片库与共享相册</strong>：单设备删除不等于清除（#96/#100 的同一诚实边界）。</li><li><strong>Handoff 与通用剪贴板</strong>：正在编辑的内容与复制的凭据跨设备可见（#99 的第 ④ 类）。</li><li><strong>短信转发与呼叫转移</strong>：把一条验证通道复制到其他设备（#99/#107 的最高优先项）。</li><li><strong>家庭共享与购买/订阅</strong>：付款关系把不同角色的消费串成一条链（#89/#106）。</li><li><strong>&quot;查找&quot;与位置共享</strong>：把设备关系变成人的位置关系，且<strong>不随角色结束自动解除</strong>（#95/#96）。</li><li><strong>第三方连接与登录</strong>（使用某账户登录的 App、各类集成）：每加一个连接就多一条独立出口（#107 第 2 节）。</li></ol>
+<p><strong>检查频率</strong>：这七项纳入 #104 的季度巡检，任何新增设备或账户时当场做一次全量（而不是等下次巡检）。</p>
+<hr>
+<h2>7. 成本、故障与可用性：把&quot;多一套&quot;的代价算进去</h2>
+<p>多身份架构最常见的失败不是被攻击，而是<strong>维护成本压垮了纪律</strong>。三档成本要如实写清：</p>
+<ul><li><strong>一次性成本</strong>：设备与订阅、初始配置约 1–2 小时/台；账户建立带来的验证与恢复方式设置（这一步做不好，后面全是负债）。</li><li><strong>周期成本</strong>：月度一次副本可用性核验（开机、登录态、必要 App 可用）、季度一次第 6 节七项全量核对（并入 #104）。</li><li><strong>摩擦成本</strong>：跨设备传文件、双份通知、切换记忆。<strong>摩擦是设计的产出而不是缺陷</strong>——当某项分离带来极低摩擦时，通常意味着有一条同步边界没关（第 6 节）。</li></ul>
+<p>故障场景按代价排序处理：</p>
+<table><thead><tr><th>故障</th><th>影响面</th><th>正确第一步</th></tr></thead><tbody><tr><td>主力设备丢失/被盗</td><td>全部角色的入口</td><td>服务端先行：标记丢失、改密、清设备清单、锁卡锁号（#91 剧本 A）；副本顶替</td></tr><tr><td>某账户被锁/无法恢复</td><td>该账户内全部数据与关系</td><td>按恢复流程走；<strong>不要用旧备份在新账户上复原</strong>（#99/#106 的禁令）</td></tr><tr><td>隔离设备被扣押</td><td>取决于第 5 节的放置是否守住</td><td>只按&quot;该设备允许放的内容&quot;评估后果；若出现越界内容，按放置纪律失误处理</td></tr><tr><td>同步边界未关导致回流</td><td>分离失效（最常见）</td><td>立刻断开该条边界、清点已回流内容、按 #96/#107 的顺序清理</td></tr><tr><td>副本长期未核验、需要时不可用</td><td>应急能力归零</td><td>把&quot;月度核验&quot;纳入 #104，而不是事后加设备</td></tr></tbody></table>
+<hr>
+<h2>8. 三步选择你的架构（决策树）</h2>
+<ol><li><strong>数边界</strong>：列出你的角色（工作/个人/敏感项目/家庭/差旅/受照护），对每一对角色问：&quot;有没有一条第 6 节的边界会让它们互相看见？&quot;若全部答案为&quot;否&quot;，单一架构就够了——<strong>不要为了安全感增加设备</strong>。</li><li><strong>定账户域（A1）</strong>：只有当两个角色的<strong>关系与付款结构</strong>必须分开时，才建第二个账户。账户比设备贵：它带来第二套恢复方式、第二组订阅关系与第二个可被锁的对象。</li><li><strong>再决定设备数（A2）</strong>：设备数等于&quot;必须同时在线且不互通的角色数&quot;，通常 1–3 台。<strong>第四台设备的用途必须能写成一句准入规则</strong>，否则它是架构的债而不是防御。</li></ol>
+<p>补一条退出条件：任何设备或账户都要预先写明退役流程（按 #96 的顺序：先撤关系与服务端访问，再注销，后处置设备，并留台账）。<strong>没有退出流程的多身份，是三到五年后最难清理的东西。</strong></p>
+<hr>
+<h2>9. 七个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;多一台设备就多一层安全&quot;</td><td>若同步边界未关，多设备是把同一份暴露复制到更多位置（第 6 节）</td></tr><tr><td>&quot;备用机不用维护&quot;</td><td>副本的价值是随时可用；未核验等于没有（第 7 节）</td></tr><tr><td>&quot;隔离设备可以顺便存点东西&quot;</td><td>角色漂移是架构失效的主因（第 4 节命名纪律）</td></tr><tr><td>&quot;工作设备登个人账户方便&quot;</td><td>一次登录就把两个账户域接进同一设备清单与备份（第 3 节）</td></tr><tr><td>&quot;删掉就等于清除&quot;</td><td>同步、备份与共享相册各自留有独立副本（#96/#100）</td></tr><tr><td>&quot;家庭共用一个账户更省事&quot;</td><td>组织者权限集中成为最强单点，且关系不会自动解除（#92/#98/#106）</td></tr><tr><td>&quot;先买设备再想用途&quot;</td><td>顺序必须是边界 → 账户 → 设备（第 8 节）</td></tr></tbody></table>
+<hr>
+<h2>10. 一句话结论</h2>
+<p>多身份与备用设备的设计里，&quot;买什么、开几个账户&quot;是最不重要的问题。真正决定结果的是三件事：</p>
+<ul><li><strong>边界数决定架构</strong>：先数角色之间会跨域的同步边界（第 6 节的七条），再决定账户数与设备数（第 8 节）。</li><li><strong>准入规则命名每台设备</strong>：主力 / 工作 / 隔离 / 副本 / 弃用，每台只能有一种，且必须能说出&quot;我能放什么、什么时候退役&quot;（第 4、5 节）。</li><li><strong>维护成本被算进去</strong>：月度副本核验、季度七项全量核对，纳入 #104 的台账；摩擦过低通常说明有一条边界没关。</li></ul>
+<p>分离只在&quot;内容不放错地方&quot;时才产生安全；其余部分按 #80 与 #95 的通用清单维持即可。多账户与多设备不得用于规避平台规则、合同义务或法律程序，相关边界以条款与法律意见为准。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a109.html">← 第 109 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
