@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 追踪、指纹与隐私指标攻击面：不读你的文件，也能知道你在哪里、和谁、什么作息 | iOS 安全研究文章库</title>
+<meta name="description" content="四层泄露来源（标识/连接/内容交互/聚合推断）、四类采集者与危害、&quot;能关—只能收窄—关不掉&quot;诚实边界表、分人群核对清单（普通人 8 项 / 高可见度 +4 / 被跟踪者顺序不能倒）、端侧可见与不可见的表述纪律">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a95.html">
+<meta property="og:title" content="iOS 追踪、指纹与隐私指标攻击面：不读你的文件，也能知道你在哪里、和谁、什么作息">
+<meta property="og:description" content="四层泄露来源（标识/连接/内容交互/聚合推断）、四类采集者与危害、&quot;能关—只能收窄—关不掉&quot;诚实边界表、分人群核对清单（普通人 8 项 / 高可见度 +4 / 被跟踪者顺序不能倒）、端侧可见与不可见的表述纪律">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a95.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 95 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 追踪、指纹与隐私指标攻击面：不读你的文件，也能知道你在哪里、和谁、什么作息</h1>
+<blockquote><p>本文是防御视角的分析与设置核对方法，<strong>不提供可利用代码</strong>，不包含规避检测、反追踪工具部署或任何可照做的操纵手法。面向需要评估隐私泄露风险的个人用户、高可见度个体与企业安全负责人。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>前面的攻击面文章都默认一件事：<strong>损失来自&quot;内容被读到&quot;</strong>。#2/#81/#90/#91 那张体系里，追踪与元数据只占一格（C7），因为它的技术形态不像&quot;漏洞&quot;。</p>
+<p>但它有三个特殊性，值得单独成篇：</p>
+<ol><li><strong>大部分形态不需要任何漏洞</strong>。它是合法功能的正常输出：标识符、连接行为、聚合推断。所以&quot;升级与补丁&quot;对它几乎无效（阶段属于 #93 的 L1 设计格）。</li><li><strong>损失不可撤回</strong>。内容泄露可以在拿到之前阻止，追踪数据一旦积累就形成了对你的历史画像，事后无从收回。</li><li><strong>对特定人群它是主要伤害</strong>，而不是附带伤害。被跟踪者、需要出席公开活动的人、行程本身敏感的人——对他们，&quot;知道你明天在哪&quot;比&quot;读到你的照片&quot;更直接地造成危险（与 #86 的 stalkerware 结论同源：<strong>账户与关系结构优先</strong>）。</li></ol>
+<p>这一篇处理的不是&quot;能不能被入侵&quot;，而是<strong>你的设备在替谁生产关于你的事实</strong>。</p>
+<hr>
+<h2>2. 四层泄露来源</h2>
+<pre><code>┌─ 标识层 ─────────────────────────────────────────────┐
+│  广告标识与重置、App 厂商标识、账号与设备号、号码与 SIM │
+│  蓝牙/Wi-Fi 广播类标识（配件、耳机、车机）             │
+├─ 连接层 ─────────────────────────────────────────────┤
+│  Wi-Fi 与蜂窝探测、私有地址与随机化边界、配对记录      │
+│  推送令牌与通知通路（#65）、位置粗粒度来源             │
+├─ 内容交互层 ─────────────────────────────────────────┤
+│  邮件远程资源与打开回执、链接参数、二维码与短链         │
+│  网页侧指纹（渲染特征、字体、传感器）、跨站存储         │
+├─ 聚合推断层 ─────────────────────────────────────────┤
+│  健康与运动、日历与提醒、共享清单、照片索引与键盘词库   │
+│  （#87 讨论过：这些是&quot;合法聚合&quot;，不需要读取内容也能推断）│
+└──────────────────────────────────────────────────────┘</code></pre>
+<p>四层里最容易被忽略的是<strong>第四层</strong>：单个权限看起来无害（步数、日历、照片索引），组合起来能确定作息、社交圈、就医与出行。#87 里那句&quot;合法聚合风险&quot;在这里是主角而不是脚注。</p>
+<hr>
+<h2>3. 三类采集者与它们的现实危害</h2>
+<table><thead><tr><th>采集者</th><th>主要手段</th><th>危害形态</th><th>你的可行动空间</th></tr></thead><tbody><tr><td>广告与数据经纪</td><td>标识符、App 内埋点、SDK 出口（#83）、网站侧跟踪</td><td>画像、精准营销、价格与内容歧视、把敏感属性推给你</td><td>较大：设置项 + App 选择</td></tr><tr><td>跟踪骚扰者</td><td>家庭共享、&quot;查找&quot;与位置共享、共享设备、已装监控类 App、运营商侧套餐附属功能</td><td>实时定位、作息规律、社交关系；与 #92 的破坏类常同时出现</td><td><strong>最大但最被低估</strong>：多为&quot;合法权限&quot;，清点关系比清设备有效</td></tr><tr><td>采集即服务的第三方</td><td>输入法、键盘、健康与保险类 App、企业与校园管理配置</td><td>二次转售、数据泄露时的连带暴露</td><td>中等：靠准入与权限最小化</td></tr><tr><td>机构合规采集（企业/边境与执法）</td><td>设备管理策略、日志留存、现场要求</td><td>与你是否&quot;被看着&quot;有关的暴露</td><td>有限：靠数据不落在这台设备上（#80/#84 原则）</td></tr></tbody></table>
+<p><strong>第二行是这篇里最实际的建议来源</strong>：绝大多数咨询场景中，&quot;追踪我的人在不在我的账户结构里&quot;这个问题的答案，比任何浏览器设置都重要。</p>
+<hr>
+<h2>4. 能关的、只能收窄的、关不掉的（诚实边界）</h2>
+<table><thead><tr><th>状态</th><th>项</th><th>说明</th></tr></thead><tbody><tr><td><strong>能关</strong></td><td>广告标识追踪授权、跨 App 跟踪、限追踪类开关</td><td>关掉后仍可被指纹式关联，但标识符通路断了</td></tr><tr><td><strong>能关</strong></td><td>位置共享清单、家庭共享成员、&quot;查找&quot;设备与联系人</td><td>逐项核对，重点看&quot;谁有权限看我在哪&quot;</td></tr><tr><td><strong>能关</strong></td><td>通知预览与锁屏可见内容、邮件加载远程内容、Safari 第三方 Cookie 与跨站跟踪</td><td>属于 #80 清单里的默认项核对</td></tr><tr><td><strong>只能收窄</strong></td><td>浏览器侧设备指纹（渲染/字体/传感器特征组合）</td><td>只要需要正常渲染网页就无法完全隐藏；插件与&quot;防指纹&quot;方案常反成独特特征</td></tr><tr><td><strong>只能收窄</strong></td><td>号码与 SIM 侧关联、运营商记录</td><td>你的可行动项是<strong>减少号码的公开面</strong>，不是消除绑定（#72/#89）</td></tr><tr><td><strong>关不掉</strong></td><td>服务端侧的推送与令牌关联、访问日志的服务端可见性</td><td>端侧看不到也不控制，属于结构性边界（#65）</td></tr><tr><td><strong>关不掉</strong></td><td>已经积累的历史画像</td><td>不可撤回；这也是本篇与&quot;内容泄露&quot;最大的处置差别</td></tr></tbody></table>
+<p>把这张表交给用户时，<strong>必须同时给&quot;关不掉&quot;那一列</strong>。否则读者会按&quot;全部可消除&quot;的预期去评估风险，实际效果差，且容易转向不可信的第三方工具（这类工具自身的采集往往是净负收益）。</p>
+<hr>
+<h2>5. 分人群核对清单</h2>
+<h3>普通用户（30 分钟，一次做完）</h3>
+<ol><li>逐项过一遍跨 App 跟踪与广告标识授权，重置标识符并关闭限追踪之外的授权。</li><li><strong>位置共享清单</strong>：谁能看到我在哪（联系人、家庭组、共享设备），删掉不再需要的。</li><li><strong>家庭共享与订阅</strong>：确认管理员是谁（这是 #92 里的&quot;合法擦除权限&quot;来源之一）。</li><li>邮件默认不加载远程内容；Safari 开启阻止跨站跟踪；核对已保存密码与自动填充域。</li><li>通知预览收敛到锁屏不可见（同时降低 shoulder-surfing 型泄露）。</li><li>键盘与文本替换、照片索引等会持续吸收个人数据的权限，按&quot;是否用过&quot;决定去留。</li><li>App 权限逐条核对：麦克风/摄像头/位置/健康/通讯录/日历，把&quot;每次询问&quot;设为默认。</li><li>备份与云同步侧核对一次（#74）：哪些数据在云端可读、密钥归谁。</li></ol>
+<h3>高可见度个体（追加）</h3>
+<ol><li>假设<strong>号码是公开的</strong>：把敏感通信迁到不依赖号码可见性的账户结构，减少入站面（#90 的 V3）。</li><li>出席活动的行程不落在这台设备的日历与照片索引里（内容不落机原则）。</li><li>浏览器与邮件按&quot;打开即被记录&quot;设计预期，敏感链接不在可被截获的通道里点。</li><li>每季度重跑一次上面 1–8 项：权限会随 App 更新回来。</li></ol>
+<h3>被跟踪/家暴场景（追加，顺序不能倒）</h3>
+<ol><li><strong>先查账户关系，再查设备</strong>：家庭共享、屏幕使用时间管理员、共享 iCloud、号码附属套餐功能（#86/#89/#92 的同一结论）。</li><li>换密码、退出所有会话、清设备清单，都在<strong>物理安全的环境</strong>里做（在对方可能看到屏幕的位置改密码等于告知）。</li><li>需要专业协助时，优先联系可记录取证的机构而不是下载&quot;检测工具&quot;——后者既不可验证也可能上报你的位置。</li></ol>
+<hr>
+<h2>6. 能看到什么、看不到什么</h2>
+<ul><li><strong>端侧可见</strong>：App 权限授予状态、位置共享与家庭成员清单、隐私报告类的域名访问聚合、已装 App 与配置描述文件（#65/#76 的口径）、通知与订阅清单。</li><li><strong>端侧不可见</strong>：服务端如何把令牌、IP、账号、号码关联成一个人；已转售给谁；历史画像。</li><li><strong>表述纪律</strong>：能给的是&quot;暴露面被收窄&quot;，不能给的是&quot;证明没人跟踪我&quot;。这两句话的区别，是所有隐私类咨询里最该守住的一条（同 #70/#88 的诚实边界原则）。</li></ul>
+<hr>
+<h2>7. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;没漏洞就没隐私问题&quot;</td><td>第四层的聚合推断完全靠合法权限，与漏洞无关</td></tr><tr><td>&quot;关掉追踪开关就不被追踪了&quot;</td><td>标识符通路断了，浏览器指纹与服务端关联仍在（只能收窄）</td></tr><tr><td>&quot;反指纹插件一定更安全&quot;</td><td>插件本身是独特特征，且引入新的采集者；普通用户收益常为负</td></tr><tr><td>&quot;追踪的人是熟人，技术能解决&quot;</td><td>熟人靠的是合法账户关系，清点关系比加固设备有效（#92 同一结论）</td></tr><tr><td>&quot;隐私泄露只是广告烦人&quot;</td><td>对行程与作息敏感的人，画像是现实安全事件的前置条件</td></tr></tbody></table>
+<hr>
+<h2>8. 一句话结论</h2>
+<p>这一方向的评价口径与漏洞系列不同：<strong>不是&quot;能不能被打&quot;，而是&quot;你的设备在替谁生产关于你的事实&quot;</strong>。</p>
+<ul><li>对个人：把 §5 的 1–8 项当作一次 30 分钟的事，并每季度重跑；收益最大的是位置共享与家庭组清点。</li><li>对高可见度个体：接受&quot;入站面与号码是公开的&quot;这一前提，把敏感内容留在不落机的地方。</li><li>对被跟踪者：<strong>先账户关系、后设备</strong>，在物理安全的环境里操作，不要下载不可验证的检测工具。</li><li>对企业：把&quot;员工设备上的采集面&quot;当作数据治理而非安全加固问题——它不在补丁周期里，MDM 能关的也只有前两层（#76 的能力边界）。</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a94.html">← 第 94 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
