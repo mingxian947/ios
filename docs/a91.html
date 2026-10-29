@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 漏洞按后果类型分类：影响维度与处置优先级框架 | iOS 安全研究文章库</title>
+<meta name="description" content="七类后果 C1–C7（读取/篡改/接管/常驻/破坏/控制旁路/追踪元数据）逐类可逆性与工件、可逆性×范围×持续性三维判定、五档响应剧本 A–E、同一事件三轴坐标对照用于情报分流、修复归属矩阵说明&quot;等 Apple 修&quot;在哪四类上是错的">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a91.html">
+<meta property="og:title" content="iOS 漏洞按后果类型分类：影响维度与处置优先级框架">
+<meta property="og:description" content="七类后果 C1–C7（读取/篡改/接管/常驻/破坏/控制旁路/追踪元数据）逐类可逆性与工件、可逆性×范围×持续性三维判定、五档响应剧本 A–E、同一事件三轴坐标对照用于情报分流、修复归属矩阵说明&quot;等 Apple 修&quot;在哪四类上是错的">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a91.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 91 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 漏洞按后果类型分类：影响维度与处置优先级框架</h1>
+<blockquote><p>本文是防御视角的分类与响应方法，<strong>不提供可利用代码</strong>，不包含入侵构造、痕迹清除或任何可照做的攻击操作。面向需要把&quot;漏洞情报&quot;翻译成&quot;该做什么&quot;的个人用户、企业安全负责人与咨询场景。</p></blockquote>
+<h2>1. 为什么还要按后果分一次</h2>
+<p>系列里已有三根轴分别回答&quot;错在哪&quot;（#2 系统层）、&quot;错成什么形态&quot;（#81 缺陷类别）、&quot;打的是谁&quot;（#82–#89 组件与通路）、&quot;对手从哪儿出发&quot;（#90 起始位置）。这四根都在描述<strong>事件的技术侧</strong>。</p>
+<p>但真实处置从来不是按技术侧组织的：</p>
+<ul><li>法务与通报问的是&quot;个人信息有没有被读走&quot;；</li><li>员工问的是&quot;这台设备还能不能用&quot;；</li><li>财务问的是&quot;钱还能不能出账&quot;；</li><li>取证问的是&quot;证据还剩下多少&quot;。</li></ul>
+<p>这些问题共同指向同一个维度——<strong>后果</strong>。同一个内存越界，落在只读辅助服务里和在能读钥匙串的进程里，技术描述几乎一样，处置完全不同。所以本篇把后果做成一根独立的轴，并给出可以直接执行的优先级判定法。</p>
+<hr>
+<h2>2. 七类后果</h2>
+<table><thead><tr><th>后果类</th><th>定义</th><th>iOS 里的代表形态</th><th>可逆性</th><th>主要工件</th><th>修复归属</th></tr></thead><tbody><tr><td>C1 机密性读取</td><td>数据被读到</td><td>照片/聊天记录/位置/麦克风摄像头、钥匙串项（#63/#83）</td><td><strong>不可逆</strong></td><td>极少，常需主动 hunt（#70/#76）</td><td>Apple + 开发者 + 用户</td></tr><tr><td>C2 完整性篡改</td><td>数据或行为被改</td><td>配置描述文件替换、记录注入、App 数据改写、转发规则被改</td><td>部分可逆</td><td>配置审计、时间线矛盾（#65）</td><td>Apple + 管理员</td></tr><tr><td>C3 控制接管 / 权限提升</td><td>攻击者获得更高控制权</td><td>沙箱逃逸+内核提权（#29/#41）、账户侧接管（#89）</td><td>需重置才可靠</td><td>签名/entitlement 异常、异常持久化</td><td>Apple 为主</td></tr><tr><td>C4 持久化与常驻</td><td>入侵能活过重启与升级</td><td>配置文件、代理、重签名 App、订阅类滥用（#86）</td><td>可逆但需逐项清除</td><td>持久化点清单（MVT 类工具可查）</td><td>Apple + 分发治理</td></tr><tr><td>C5 可用性与破坏</td><td>设备/数据/功能不可用</td><td>远程 panic、存储耗尽、激活锁与账户锁、远程擦除</td><td><strong>数据类不可逆</strong></td><td>崩溃日志、抹除轨迹</td><td>混合（详见 #92）</td></tr><tr><td>C6 安全控制旁路</td><td>防线被关掉或假装在</td><td>锁定模式被削弱、MDM 限制绕过、备份豁免、验证因子被替换（#34/#83/#89）</td><td>可逆，但<strong>损失窗口已经打开</strong></td><td>策略漂移、豁免记录</td><td>管理员 + 流程方</td></tr><tr><td>C7 追踪与元数据可见</td><td>不读内容也能定位与画像</td><td>通知与共享状态、合法聚合推断、连接行为（#65/#87）</td><td>不可撤回</td><td>几乎无端侧工件</td><td>平台 + 数据治理</td></tr></tbody></table>
+<p>三件事从这张表里能直接读出来：</p>
+<ol><li><strong>不可逆的两类（C1、C5 的数据子类）优先于一切</strong>——其余都能靠重置挽回，这两类只能靠&quot;有没有备份 / 有没有被读到&quot;。</li><li><strong>C6 是最容易被低估的一类</strong>：它本身不是损失，但它把其他六类的门槛一起降低。旁路了锁定模式，等于把 P0 档对手的成本砍一截（坐标见 #90）。</li><li><strong>C7 在个人语境里常被视为&quot;不算事&quot;</strong>，但它恰恰是跟踪骚扰场景的主要伤害形态——受害人不丢数据，丢的是&quot;不被定位&quot;。</li></ol>
+<hr>
+<h2>3. 三维判定法：把后果变成优先级</h2>
+<p>单看 CVSS 分数不够：分数衡量影响强度，不衡量可逆性与持续性。用三个维度打分（低/中/高）：</p>
+<ul><li><strong>可逆性 R</strong>：重置设备/改密码能否真正结束损失。</li><li><strong>范围 S</strong>：一次事件能覆盖多少数据、多少设备、多少张卡。</li><li><strong>持续性 D</strong>：不采取行动时，损失是否每个小时都在继续。</li></ul>
+<table><thead><tr><th>组合</th><th>优先级</th><th>响应剧本</th></tr></thead><tbody><tr><td>R 高 + S 高 + D 高</td><td><strong>P1 立即</strong></td><td>剧本 A：账户侧先动手</td></tr><tr><td>R 低（不可逆）+ S 高</td><td><strong>P1 立即</strong></td><td>剧本 B：止损 + 取证并行</td></tr><tr><td>R 高 + S 低 + D 低</td><td>P2 当日</td><td>剧本 C：本地清理 + 复查</td></tr><tr><td>主要为 C6/C7</td><td>P3 计划内</td><td>剧本 D：策略收紧 + 监控</td></tr><tr><td>仅为理论存在（无证据）</td><td>P4 观察</td><td>剧本 E：只加固不响应</td></tr></tbody></table>
+<h3>剧本 A：账户侧先动手（对应 #89 的结论）</h3>
+<p>适用于 C3/C6 且怀疑账户或号码被用作通路。顺序固定：<strong>锁卡与锁号 → 改密并退出所有会话 → 清 Apple ID 设备清单 → 再看设备</strong>。反过来会留下一段持续失血窗口。设备侧证据在这类事件里价值很低，因为授权轨迹主要握在发卡行与运营商侧。</p>
+<h3>剧本 B：止损与取证并行</h3>
+<p>适用于 C1 与 C5 的数据子类（数据已被读走或被销毁）。要点：不要先重置设备——#70 的&quot;缺口即证据&quot;纪律在这里成立，重置会把唯一的时间线证据一起灭失。同时立刻确认备份侧：#74 说明了备份、加密备份与云端备份各自能把损失放大或缩小到什么程度，备份的密钥归属决定这次能不能恢复。</p>
+<h3>剧本 C：本地清理加复查</h3>
+<p>适用于 C4 与部分 C2：删配置文件、移除不明描述文件与代理、卸载来源存疑 App、复查订阅与屏幕使用时间共享项。清理之后必须复查持久化点清单，否则只清了最上层那一个。</p>
+<h3>剧本 D：策略收紧加监控</h3>
+<p>适用于 C6/C7 且无直接损失证据：把被绕过的控制恢复（重开锁定模式、去掉豁免、收紧验证因子），并给这类事件加检测项——注意 #88 与 #76 都提到过，某些形态端侧可见性接近零，监控只能覆盖能被记录的那部分，不要把&quot;没有告警&quot;读成&quot;没有发生&quot;。</p>
+<h3>剧本 E：只加固不响应</h3>
+<p>适用于只有&quot;漏洞存在&quot;而没有&quot;我被打了&quot;的情况：升级、开关收敛、清单化巡检（#80）。这一档占绝大多数情报订阅的实际内容，把它们放进 A/B 剧本是浪费应急资源。</p>
+<hr>
+<h2>4. 同一事件的三轴坐标</h2>
+<table><thead><tr><th>场景</th><th>#81 缺陷类别</th><th>#90 起始位置</th><th>本篇后果类</th><th>处置档</th></tr></thead><tbody><tr><td>预认证消息通路内存越界，读到照片</td><td>越界写入</td><td>P0</td><td>C1（+ 可能 C3）</td><td>P1 剧本 B</td></tr><tr><td>钓鱼网页诱导装描述文件</td><td>逻辑误用/社会工程</td><td>P1</td><td>C6 + C4</td><td>P1 剧本 A/C 混合</td></tr><tr><td>号码被劫持后往钱包加卡</td><td>授权逻辑</td><td>P2</td><td>C3</td><td>P1 剧本 A</td></tr><tr><td>共享设备被装跟踪 App</td><td>配置与审核缺口</td><td>P4</td><td>C7 + C1</td><td>P2 剧本 C + D</td></tr><tr><td>一条畸形内容让设备反复重启</td><td>越界/断言失败</td><td>P0</td><td>C5</td><td>P2（见 #92）</td></tr><tr><td>侧信道式密钥恢复研究</td><td>密码学/硬件</td><td>P5</td><td>C1</td><td>P4（现实门槛极高，见 #88）</td></tr></tbody></table>
+<p>这张表的用途是<strong>给情报订阅做分流</strong>：同一批 CVE，按后果类落到不同剧本，而不是一律&quot;高危立即处理&quot;。#85 的暴露窗口指标决定时间压力，本篇的后果类决定动作内容，两者正交。</p>
+<hr>
+<h2>5. 修复归属：该向谁提要求</h2>
+<p>后果轴还有个直接用处——它决定你能要求谁动手：</p>
+<table><thead><tr><th>归属</th><th>能改的东西</th><th>典型场景</th></tr></thead><tbody><tr><td>Apple</td><td>代码、缓解机制、静默修补与 RSR（#61）</td><td>C1/C3/C5 的技术根因</td></tr><tr><td>App 开发者</td><td>存储加密与 Keychain 类、鉴权、SDK 出口（#83）</td><td>C1/C2 的应用侧放大</td></tr><tr><td>管理员 / 企业</td><td>描述文件、MDM 限制、豁免与备份策略</td><td>C6、部分 C4/C7</td></tr><tr><td>平台外第三方（发卡行、运营商）</td><td>验证因子、限额、号码变更约束</td><td>C3 的账户侧（#89）</td></tr><tr><td>用户本人</td><td>更新纪律、锁屏状态、密码强度、设备清单</td><td>全部六类的窗口收敛</td></tr></tbody></table>
+<p><strong>&quot;等 Apple 修&quot;这句话在四类归属里是错的</strong>：C6 的验证因子与 C3 的账户通路不在 Apple 手里，App 侧的 C1 放大不在 iOS 补丁里，管理员的豁免也不是设备更新能解决的。这也是 #83 那句&quot;Apple 补丁修不到的那一片攻击面&quot;在后果维度的重述。</p>
+<hr>
+<h2>6. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;分数高的先处理&quot;</td><td>分数不表达可逆性；不可逆的中等影响往往应先于可逆的高危项</td></tr><tr><td>&quot;重置设备就干净了&quot;</td><td>C1 与 C5 的数据子类不受重置影响；C4 若清不全仍会回来</td></tr><tr><td>&quot;没有告警说明没被读&quot;</td><td>C1/C7 的端侧可见性极低（#76/#88），缺证据不等于未发生</td></tr><tr><td>&quot;先取证再动账户&quot;</td><td>账户侧持续失血时顺序反过来：先锁，再做证据（#89 的事件响应顺序）</td></tr><tr><td>&quot;旁路类不算真损失&quot;</td><td>C6 把其他六类的门槛整体降低，应视为一次安全事件而不是一次配置问题</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>按后果分不是为了再多一张表，而是让每次情报都能落到具体动作：<strong>它是哪类后果 → 可逆吗、范围多大、会持续吗 → 落哪个剧本 → 该向谁提要求</strong>。</p>
+<ul><li>对个人：把&quot;要不要立刻处理&quot;改成&quot;是不是不可逆的两类&quot;，其余按 #80 的巡检清单走即可。</li><li>对高危个体：C6 与 C7 是你最该盯的两类，因为它们不会在告警里出现。</li><li>对企业：应急剧本按后果类分档，比按 CVE 分数分档省一半人力；同时把&quot;修复归属&quot;写进流程，避免所有事件都被塞成&quot;等厂商补丁&quot;。</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a90.html">← 第 90 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
