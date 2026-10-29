@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 商业间谍软件归因方法论：如何区分 Coruna、DarkSword 与其他套件 | iOS 安全研究文章库</title>
+<meta name="description" content="四层证据交叉印证、以&quot;是否落地&quot;做第一分流、基础设施关联、置信度分级与八类常见归因错误">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a78.html">
+<meta property="og:title" content="iOS 商业间谍软件归因方法论：如何区分 Coruna、DarkSword 与其他套件">
+<meta property="og:description" content="四层证据交叉印证、以&quot;是否落地&quot;做第一分流、基础设施关联、置信度分级与八类常见归因错误">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a78.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 78 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 商业间谍软件归因方法论：如何区分 Coruna、DarkSword 与其他套件</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Citizen Lab、Google Project Zero、Amnesty International、Lookout、ESET、MITRE ATT&amp;CK Mobile、公开 CVE 情报 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p><strong>归因（Attribution）</strong> 是威胁情报中最困难也最关键的一步：不仅要判断&quot;这是一次攻击&quot;，还要判断&quot;<strong>这是谁的哪一款套件</strong>&quot;。</p>
+<p>归因的价值不是学术的：</p>
+<table><thead><tr><th>归因结果</th><th>直接带来的行动</th></tr></thead><tbody><tr><td>确定套件型号</td><td>可推导其<strong>架构弱点</strong>（如是否有持久化）→ 选择正确检测手段</td></tr><tr><td>确定供应商</td><td>可预测其<strong>能力边界</strong>（版本覆盖、漏洞来源）→ 评估剩余风险</td></tr><tr><td>确定客户方</td><td>支持法律保护、外交行动、受害者赔偿</td></tr><tr><td>识别复用</td><td>修补一处可同时防护多处</td></tr></tbody></table>
+<p>本文整理一套<strong>可执行的 iOS 间谍软件归因方法框架</strong>：以 Coruna 与 DarkSword 为主要对照，说明从何种工件出发、按何种顺序、用什么判据做区分，以及归因中最常犯的错误。</p>
+<hr>
+<h2>2. 归因的四个证据层次</h2>
+<pre><code>层次 1：工件层（最易获取，价值最低）
+        崩溃报告、日志、缓存、文件残留
+              ↓
+层次 2：载荷层（中高价值）
+        模块结构、ABI、加密方案、字符串、代码风格
+              ↓
+层次 3：基础设施层（高价值，可跨事件关联）
+        域名、证书、IP、ASN、注册信息、TLS 指纹
+              ↓
+层次 4：漏洞层（最高技术价值，最难获取）
+        使用的 CVE 组合、组件选择、利用链编排顺序</code></pre>
+<p><strong>关键原则</strong>：<strong>单层次证据不足以归因</strong>。可信归因需要至少两个独立层次交叉印证。</p>
+<hr>
+<h2>3. 层次 1：工件层归因</h2>
+<h3>3.1 从&quot;有什么&quot;判断</h3>
+<table><thead><tr><th>观察到的工件</th><th>指向</th></tr></thead><tbody><tr><td>落地文件 + 启动项 plist</td><td><strong>持久化型</strong>：Coruna、Pegasus、Predator 类</td></tr><tr><td>完全无文件痕迹 + 有可疑网络事件</td><td><strong>无持久化型</strong>：<strong>DarkSword</strong> 类</td></tr><tr><td>大量混淆 JS + 分层载荷下载</td><td>平台化套件（Coruna）</td></tr><tr><td>单次会话 + 极简请求</td><td>一次性架构（DarkSword）</td></tr></tbody></table>
+<h3>3.2 工件层的核心判据：持久化</h3>
+<p><strong>&quot;有没有文件&quot;是最强的第一分流判据</strong>（详见 #47、#45）：</p>
+<pre><code>是否存在落地文件？
+  ├─ 是 → 持久化阵营
+  │        → 可用备份扫描 / MVT / IOC 匹配
+  │        → 样本可提取，逆向可获得完整技术细节
+  └─ 否 → 无持久化阵营
+           → 文件扫描完全无效
+           → 必须依赖网络日志 + 运行时取证
+           → 归因难度大幅上升（往往需要主动研究）</code></pre>
+<blockquote><p><strong>这一条分流决定了后续所有工作该怎么做</strong>——也是为什么 DarkSword 的归因主要靠 Project Zero 而非 IOC 匹配。</p></blockquote>
+<h3>3.3 崩溃报告的归因价值</h3>
+<table><thead><tr><th>报告中的信息</th><th>可推断</th></tr></thead><tbody><tr><td>崩溃进程（WebContent / mediaserverd / GPU 服务）</td><td><strong>链条所处阶段</strong></td></tr><tr><td>异常类型（EXC_BAD_ACCESS 地址模式）</td><td>越界/UAF 类型缺陷</td></tr><tr><td>故障偏移</td><td>可定位到具体函数 → <strong>具体 CVE</strong></td></tr><tr><td>二进制映射与 slide</td><td>环境信息</td></tr><tr><td>栈中的模块组合</td><td>逃逸路径特征</td></tr></tbody></table>
+<p><strong>实例化判据</strong>：</p>
+<ul><li>崩溃发生在 <strong>IOGPU/AGX 相关调用栈</strong> → 图形栈逃逸尝试（Coruna 部分链 / DarkSword）</li><li>崩溃发生在 <strong>JSC 内部</strong> → 初始执行阶段失败（所有 WebKit 链共有，需其他证据区分）</li><li>崩溃发生在 <strong>mediaserverd</strong> → 媒体服务注入（<strong>DarkSword 强特征</strong>，见 #44）</li></ul>
+<hr>
+<h2>4. 层次 2：载荷层归因</h2>
+<h3>4.1 结构特征对比</h3>
+<table><thead><tr><th>特征</th><th>Coruna</th><th>DarkSword</th><th>Pegasus 类</th></tr></thead><tbody><tr><td>载荷形态</td><td>多文件 + 模块清单</td><td><strong>无文件</strong>（内存态）</td><td>分层 implant（KiteRisa/Carthage）</td></tr><tr><td>模块 ABI</td><td>明确的 init/run/cleanup</td><td>不适用</td><td>有成熟 ABI 规范</td></tr><tr><td>混淆方式</td><td>多层 JS 混淆 + 编码</td><td>依赖无痕，混淆较轻</td><td>强混淆 + 加密</td></tr><tr><td>字符串特征</td><td>存在可搜索 IOC</td><td><strong>极少可搜索</strong></td><td>丰富（历史 IOC 来源）</td></tr><tr><td>更新机制</td><td>版本协商 + 增量下发</td><td>每次会话全量</td><td>版本协商</td></tr></tbody></table>
+<h3>4.2 加密与协议指纹</h3>
+<table><thead><tr><th>项</th><th>归因价值</th></tr></thead><tbody><tr><td>会话密钥协商算法组合</td><td>高（同一厂商常复用实现）</td></tr><tr><td>自定义消息头字段顺序</td><td><strong>极高</strong>（近乎&quot;签名&quot;级别）</td></tr><tr><td>加密库特征（自研 vs 开源）</td><td>高</td></tr><tr><td>消息序列化格式（protobuf/自定义/JSON）</td><td>中高</td></tr><tr><td>HMAC 截断长度等细节选择</td><td>中（易被复制，不宜单独使用）</td></tr></tbody></table>
+<h3>4.3 代码风格与&quot;作者指纹&quot;</h3>
+<p>安全研究中反复验证的现象：<strong>同一团队的代码有可识别习惯</strong>。</p>
+<table><thead><tr><th>可观察习惯</th><th>说明</th></tr></thead><tbody><tr><td>错误处理结构</td><td>一致性 vs 分散</td></tr><tr><td>内存分配模式</td><td>是否统一走自研分配器</td></tr><tr><td>日志/断言残留</td><td>即使被剥离，常留下痕迹</td></tr><tr><td>内部命名缩写</td><td>模块代号风格</td></tr><tr><td>数据结构选型偏好</td><td>红黑树 vs 跳表 vs 哈希</td></tr></tbody></table>
+<blockquote><p><strong>谨慎使用</strong>：风格证据易受&quot;复制他人代码&quot;（如 GHOSTBLADE 复用泄露链）干扰，只能作为辅助。</p></blockquote>
+<hr>
+<h2>5. 层次 3：基础设施层归因（最高实战价值）</h2>
+<h3>5.1 关联维度</h3>
+<table><thead><tr><th>关联线索</th><th>方法</th><th>强度</th></tr></thead><tbody><tr><td><strong>证书公钥/序列号复用</strong></td><td>跨域名查找同一公钥或签发模式</td><td><strong>极高</strong></td></tr><tr><td><strong>注册信息（邮箱/电话/名字）</strong></td><td>WHOIS 历史 + 关联注册</td><td>高</td></tr><tr><td><strong>ASN/托管商偏好</strong></td><td>是否集中于特定云/小众 VPS</td><td>中</td></tr><tr><td><strong>IP 历史复用</strong></td><td>被动 DNS 追溯</td><td>高</td></tr><tr><td><strong>TLS 自研栈指纹</strong></td><td>JA3/JA4 聚类</td><td><strong>极高</strong>（同一实现 → 同一工具）</td></tr><tr><td><strong>DGA 算法种子</strong></td><td>逆向后可预测域名 → 强聚类</td><td><strong>极高</strong></td></tr><tr><td><strong>时间模式</strong></td><td>运营时区、维护窗口</td><td>中</td></tr><tr><td><strong>目标画像重合</strong></td><td>受害者集合的相似度</td><td>中高</td></tr></tbody></table>
+<h3>5.2 Coruna vs DarkSword 的基础设施差异（可用作分流）</h3>
+<table><thead><tr><th>特征</th><th>Coruna</th><th>DarkSword</th></tr></thead><tbody><tr><td>架构层级</td><td><strong>三层洋葱</strong>（前端/中转/后端）</td><td>扁平 1–2 节点</td></tr><tr><td>域名策略</td><td>分层轮换 + 云服务混入</td><td><strong>DGA 生成</strong></td></tr><tr><td>托管偏好</td><td>主流云 + CDN + 小众 VPS</td><td>小众 VPS 为主</td></tr><tr><td>会话模式</td><td>长周期心跳（分层频率）</td><td><strong>单次短会话</strong></td></tr><tr><td>流量伪装</td><td>模仿合法 App API</td><td>模仿合法 REST 请求</td></tr><tr><td>存活周期</td><td>数月级运营</td><td>极短（小时–天级）</td></tr></tbody></table>
+<p><strong>实用推论</strong>：</p>
+<pre><code>网络侧观察到：
+  多次长周期心跳 + 域名分层 + 云托管       → 强烈指向 Coruna/平台化套件
+  单次短时外连 + 高熵新域名 + 之后完全静默 → 强烈指向 DarkSword 类无持久化
+  同目标反复出现&quot;新的单次外连&quot;（重启后重来）→ DarkSword 的架构缺陷特征（见 #55）</code></pre>
+<h3>5.3 基础设施归因的优势</h3>
+<table><thead><tr><th>优势</th><th>说明</th></tr></thead><tbody><tr><td><strong>攻击者无法清除</strong></td><td>与你无关的日志，他删不掉</td></tr><tr><td><strong>可跨事件关联</strong></td><td>一套基础设施服务多次行动</td></tr><tr><td><strong>不依赖接触设备</strong></td><td>无设备也能分析（企业/公民社会常用）</td></tr><tr><td><strong>可提供法律价值</strong></td><td>注册与托管记录可支持司法请求</td></tr></tbody></table>
+<hr>
+<h2>6. 层次 4：漏洞层归因</h2>
+<h3>6.1 CVE 组合指纹</h3>
+<table><thead><tr><th>方法</th><th>说明</th><th>强度</th></tr></thead><tbody><tr><td>CVE 集合完全重合</td><td>同一套件特征</td><td>高（但泄露链会打破唯一性）</td></tr><tr><td>组件类型组合</td><td>JSC + GPU + mediaserverd 这种组合较少见</td><td>中高</td></tr><tr><td>版本覆盖范围</td><td>Coruna 13–17.2.1 是明确特征</td><td>高</td></tr><tr><td>原语实现顺序</td><td>泄露在前 / 逃逸在中 / 提权在后（通用）</td><td>低（各家相同）</td></tr></tbody></table>
+<p><strong>Coruna 的强特征</strong>：5 条链 × 23 CVE × iOS 13–17.2.1 的覆盖矩阵，是<strong>极难误认的指纹</strong>。</p>
+<p><strong>DarkSword 的强特征</strong>：JSC DFG GC + <strong>ANGLE/WebGPU 两阶段</strong> + <strong>mediaserverd 注入</strong> + 无持久化——这个组合在公开案例中独特。</p>
+<h3>6.2 漏洞复用的干扰（归因最大的陷阱）</h3>
+<pre><code>套件 A 使用漏洞组合 X
+     ↓
+A 被分析、样本泄露
+     ↓
+套件 B（不同厂商）复用 X
+     ↓
+观察到 X → 归因到 A？  ❌ 错误</code></pre>
+<p><strong>GHOSTBLADE 就是这一模式的实例</strong>。因此：</p>
+<blockquote><p><strong>漏洞组合是必要但非充分证据。必须与基础设施/载荷层交叉印证。</strong></p></blockquote>
+<h3>6.3 从漏洞推断&quot;套件所处供应链位置&quot;</h3>
+<p>（详见 #77）</p>
+<table><thead><tr><th>观察</th><th>推断</th></tr></thead><tbody><tr><td>大量 N-day</td><td>采购导向，成本敏感</td></tr><tr><td>单批高质量新洞</td><td>独家供给或自研能力强</td></tr><tr><td>版本覆盖突然截止</td><td>供给断点（可预测其后续行为）</td></tr></tbody></table>
+<hr>
+<h2>7. 完整归因工作流</h2>
+<h3>7.1 推荐顺序（按证据易逝性）</h3>
+<pre><code>【0】 冻结现场，禁止重启（内存证据最易逝）
+
+【1】 运行时采集
+     sysdiagnose / 进程线程 / 网络快照 / 内存（若有能力）
+     → 判定：有无落地、有无注入、有无异常执行页
+
+【2】 备份与文件采集
+     完整备份 + AFC 提取
+     → 判定：持久化 or 无持久化（第一分流）
+
+【3】 网络侧证据
+     DNS 日志、TLS 元数据、流量时序
+     → 判定：心跳型 or 突击型；提取域名/证书做关联
+
+【4】 崩溃报告分析
+     → 定位失败组件 → 反推 CVE → 锁定链条阶段
+
+【5】 样本逆向（若拿到文件）
+     → 模块 ABI、协议指纹、加密实现
+     → 与已知套件特征库比对
+
+【6】 基础设施关联
+     证书公钥 / 注册信息 / DGA 种子 / ASN
+     → 跨事件聚类，判断是否同一家族
+
+【7】 交叉印证与置信度评定
+     至少两个独立层次一致 → 才给出归因结论</code></pre>
+<h3>7.2 置信度分级表述（专业惯例）</h3>
+<table><thead><tr><th>等级</th><th>判据</th><th>表述方式</th></tr></thead><tbody><tr><td><strong>确认（Confirmed）</strong></td><td>载荷代码 + 基础设施 + 漏洞组合三重一致，且有厂商样本比对</td><td>&quot;归因于 X 套件&quot;</td></tr><tr><td><strong>高（High）</strong></td><td>两个独立层次一致，无冲突证据</td><td>&quot;高度可能为 X&quot;</td></tr><tr><td><strong>中（Moderate）</strong></td><td>单一层次强证据 + 间接支持</td><td>&quot;与 X 特征一致&quot;</td></tr><tr><td><strong>低（Low）</strong></td><td>仅行为相似或单一弱线索</td><td>&quot;不能排除 X&quot;</td></tr><tr><td><strong>未知</strong></td><td>工件不足以区分</td><td>&quot;确认攻击但无法归因&quot;</td></tr></tbody></table>
+<blockquote><p><strong>实践要求</strong>：报告必须写明置信度与支撑证据。<strong>&quot;归因于某国/某厂商&quot;这类无置信度表述是行业常见错误。</strong></p></blockquote>
+<h3>7.3 归因矩阵（实用速查）</h3>
+<table><thead><tr><th>观察组合</th><th>最可能指向</th><th>置信度依据</th></tr></thead><tbody><tr><td>落地文件 + 多链 + 长心跳 + 分层域名</td><td><strong>Coruna / 平台化套件</strong></td><td>三层一致，高</td></tr><tr><td>零文件 + 单次会话 + DGA + mediaserverd 异常</td><td><strong>DarkSword / 无持久化型</strong></td><td>架构特征独特，高</td></tr><tr><td>崩溃含 IOGPU 栈 + 无持久化</td><td>DarkSword 类逃逸失败</td><td>中高</td></tr><tr><td>落地 + 泄露链特征与他家重合</td><td><strong>复用型（GHOSTBLADE 类）</strong></td><td>需基础设施另证</td></tr><tr><td>0-click + 基带/固件层</td><td><strong>Triangulation 类国家级</strong></td><td>能力天花板特征，极高</td></tr><tr><td>崩溃在 JSC，无其他证据</td><td>任意 WebKit 链</td><td><strong>低——不足以归因</strong></td></tr></tbody></table>
+<hr>
+<h2>8. 常见归因错误</h2>
+<table><thead><tr><th>错误</th><th>说明</th><th>后果</th></tr></thead><tbody><tr><td><strong>单一证据下结论</strong></td><td>只看 CVE 重合</td><td>泄露链导致误归因</td></tr><tr><td><strong>代码风格过度解读</strong></td><td>把通用做法当特征</td><td>聚类污染</td></tr><tr><td><strong>基础设施短期复用</strong></td><td>攻击者换基础设施极快</td><td>时间错配导致漏关联</td></tr><tr><td><strong>忽略目标画像差异</strong></td><td>同一套件服务多客户，目标不同</td><td>误以为不同套件</td></tr><tr><td><strong>把&quot;未检出&quot;当&quot;未发生&quot;</strong></td><td>无持久化攻击本就不留痕</td><td>漏判</td></tr><tr><td><strong>忽视误投</strong></td><td>攻击者误把研究员当目标</td><td>样本被公开，链条归零</td></tr><tr><td><strong>混淆厂商与客户</strong></td><td>套件供应商 ≠ 行动方</td><td>严重归因错误（政治/法律风险）</td></tr><tr><td><strong>公开时机不当</strong></td><td>提前披露破坏受害者取证</td><td>损害法律与人身安全</td></tr></tbody></table>
+<p><strong>最严重的一条</strong>：把&quot;供应商&quot;当成&quot;使用者&quot;。商业套件的供应商是固定几家，而客户是众多机构——<strong>归因到套件不等于归因到委托方</strong>，后者需要额外的基础设施、时间与目标证据链支撑。</p>
+<hr>
+<h2>9. 归因能力建设建议</h2>
+<h3>9.1 组织应具备的最低能力</h3>
+<table><thead><tr><th>能力</th><th>为什么必需</th></tr></thead><tbody><tr><td><strong>≥60 天网络元数据留存</strong></td><td>唯一攻击者无法清除、且跨越设备重启的证据</td></tr><tr><td>备份采集与解析流程</td><td>判定持久化型攻击</td></tr><tr><td>sysdiagnose 采集与初步分析</td><td>运行时证据（DarkSword 类唯一设备侧解）</td></tr><tr><td>IOC/TI 订阅与自动更新</td><td>基础设施关联</td></tr><tr><td>外部取证机构合作渠道</td><td>多数组织不具备深度逆向能力</td></tr></tbody></table>
+<h3>9.2 需要外部协作的情形</h3>
+<table><thead><tr><th>情形</th><th>建议对接</th></tr></thead><tbody><tr><td>目标是记者/活动人士/政要</td><td>Citizen Lab、Amnesty、Access Now</td></tr><tr><td>需要法律效力证据</td><td>专业数字取证公司 + 法律顾问</td></tr><tr><td>发现未知新链条</td><td>上报 Apple Security + 联系研究机构</td></tr><tr><td>需要跨组织关联</td><td>行业 TI 共享机制</td></tr></tbody></table>
+<h3>9.3 归因结果的产出规范</h3>
+<p>一份合格的归因报告应包含：</p>
+<ol><li><strong>证据清单</strong>（含采集时间、采集人、哈希）</li><li><strong>各层次独立分析</strong>（工件 / 载荷 / 基础设施 / 漏洞分开陈述）</li><li><strong>交叉印证说明</strong>（哪些层次一致、哪些存在冲突）</li><li><strong>置信度等级与理由</strong></li><li><strong>替代解释</strong>（已排除的其他可能性及排除依据）</li><li><strong>明确区分</strong>：套件归因 vs 行动方归因</li><li><strong>影响评估</strong>：受影响设备范围、数据类型、时间窗</li><li><strong>处置建议</strong>：修补、清除、凭证轮换、监控</li></ol>
+<hr>
+<h2>10. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>归因是四层证据的交叉印证（工件/载荷/基础设施/漏洞），<strong>单层证据不足以支撑结论</strong></td></tr><tr><td><strong>2</strong></td><td><strong>第一分流判据是&quot;有没有落地文件&quot;</strong>——它决定后续所有工作该用什么方法</td></tr><tr><td><strong>3</strong></td><td>基础设施层是实战价值最高的层次：攻击者无法清除、可跨事件关联、不需要接触设备</td></tr><tr><td><strong>4</strong></td><td><strong>漏洞组合会被复用（GHOSTBLADE 现象），单独使用会误归因</strong></td></tr><tr><td><strong>5</strong></td><td>Coruna 的强指纹 = 多链 + 23 CVE + 宽版本 + 三层 C2；DarkSword 的强指纹 = 无文件 + mediaserverd 注入 + ANGLE 两阶段 + DGA 短会话</td></tr><tr><td><strong>6</strong></td><td>必须严格区分&quot;套件归因&quot;与&quot;行动方归因&quot;——后者需要额外证据链</td></tr><tr><td><strong>7</strong></td><td>归因必须按置信度分级表述，&quot;确认/高/中/低/未知&quot;是行业惯例而非修辞</td></tr><tr><td><strong>8</strong></td><td>采集顺序错了等于没归因：运行时证据最易逝，必须最先采集</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>归因的真正难点不是&quot;识别恶意代码&quot;，而是<strong>在攻击者刻意不留证据的前提下，仅凭他无法控制的那部分痕迹（网络日志、基础设施、受害者自身备份）重建完整链条</strong>。 Coruna 留下了文件，因此可被逆向；DarkSword 没留下文件，因此只能被&quot;观测行为&quot;。 <strong>两者的归因方法根本不同——这正是防御体系必须同时具备静态与运行时两种能力的理由。</strong></p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Attribution Methodology &amp; Coruna Analysis</a></li><li>Amnesty International: <a href="https://www.amnesty.org/en/latest/research/2021/07/forensic-methodology-report-how-to-catch-nso-groups-pegasus/" rel="nofollow noopener" target="_blank">The Pegasus Project — Forensic Methodology Report</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/2024/01/a-new-zero-click-exploit-chain-targeting-ios.html" rel="nofollow noopener" target="_blank">A new zero-click exploit chain targeting iOS (DarkSword)</a></li><li>Citizen Lab / Lookout / ESET: 跨机构商业间谍软件协作调查报道</li><li>MITRE ATT&amp;CK Mobile: <a href="https://attack.mitre.org/matrices/enterprise/mobile/" rel="nofollow noopener" target="_blank">Enterprise ATT&amp;CK Mobile Matrix</a></li><li>MANDIANT / Google Threat Intelligence: <a href="https://www.mandiant.com/" rel="nofollow noopener" target="_blank">Attribute 框架与归因方法论</a></li><li>Amnesty International: <a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">Mobile Verification Toolkit (MVT)</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a77.html">← 第 77 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
