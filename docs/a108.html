@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>高危个体的 iOS 安全方案书：记者、活动人士与 NGO 从业者的交付结构与验收判据 | iOS 安全研究文章库</title>
+<meta name="description" content="三条通用清单失效前提（暴露期有起止、危害主形态是元数据、代价不对称）、方案书的六个输入与缺项即停笔判据、消息源保护作为独立约束改写同步与通讯录处理、六模块最小档/升档/不要做三列对照、八条可当场核对的验收判据、维持成本与六条交付纪律">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a108.html">
+<meta property="og:title" content="高危个体的 iOS 安全方案书：记者、活动人士与 NGO 从业者的交付结构与验收判据">
+<meta property="og:description" content="三条通用清单失效前提（暴露期有起止、危害主形态是元数据、代价不对称）、方案书的六个输入与缺项即停笔判据、消息源保护作为独立约束改写同步与通讯录处理、六模块最小档/升档/不要做三列对照、八条可当场核对的验收判据、维持成本与六条交付纪律">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a108.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 108 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>高危个体的 iOS 安全方案书：记者、活动人士与 NGO 从业者的交付结构与验收判据</h1>
+<blockquote><p>本文是防御视角的方案组织方法与交付结构，<strong>不提供可利用代码</strong>，不包含规避合法程序、销毁证据或任何可照做的对抗执法细节。涉及具体司法辖区的义务与权利问题，须以当值律师意见为准，本文不构成法律意见。面向需要为自身或所在机构拟定方案的从业者，以及为其做评估与陪跑的技术支持者。</p></blockquote>
+<h2>1. 为什么这一类人需要的不是清单，而是方案书</h2>
+<p>#80 给了通用分层加固清单，#104 给了季度巡检执行表。两者对多数用户够用，因为他们的对手是随机的：不针对个人、只要基本盘做好就大概率无事后。高危个体的对手是<strong>有针对性的</strong>，于是三条前提失效：</p>
+<ol><li><strong>暴露期是有起止时间的</strong>。选题周期、报道对象、抗议与集会、审判与出访，风险随事件起伏；一份&quot;永久有效&quot;的方案在事件前后必然错位。</li><li><strong>危害的主形态是元数据而非内容</strong>。谁在什么时间联系过谁、设备去过哪、和谁的相册里出现过同一地点，这些就足以造成损害（#95 的关联面在这里从隐私问题变成职业风险）。</li><li><strong>代价不对称</strong>。方案失手不是账号被盗，而是消息源被识别、人被拘押、同事被牵连。因此<strong>接受度、可维持性与失效方式</strong>必须写进方案，而不是写完就散。</li></ol>
+<p>所以这一篇的口径不是&quot;该开哪些开关&quot;，而是：<strong>怎样把威胁建模转成一份能在半年后仍然被执行、并且能被验收的方案书</strong>。</p>
+<hr>
+<h2>2. 方案书的六个输入（缺一项就不要动笔）</h2>
+<table><thead><tr><th>输入</th><th>要得到的答案</th><th>决定什么</th><th>常见失败</th></tr></thead><tbody><tr><td><strong>对手画像</strong></td><td>谁可能对你感兴趣：商业跟踪、境外情报、本地执法、犯罪组织、还是泄密的内部人</td><td>是否需要假设 0-click 与持久化（#90 的 P0–P1）；是否值得开锁定模式（#34/#94）</td><td>用&quot;最坏情况&quot;做统一假设，导致人人都是国家级对手、方案无人能执行</td></tr><tr><td><strong>资产与暴露面</strong></td><td>什么丢了就不可挽回：未公开消息源身份、录音与影像原件、草稿、通讯录、位置历史</td><td>决定&quot;必须离线/必须分离&quot;的数据清单</td><td>把&quot;所有数据&quot;当资产（无法排序）</td></tr><tr><td><strong>暴露期</strong></td><td>未来 6–12 个月内的风险窗口与事件日历</td><td>决定分档方案的升降档时点</td><td>方案与选题周期无关，事件前才临时改配置（改配置本身就是信号，#99）</td></tr><tr><td><strong>可承受损失</strong></td><td>单台设备被拿走/单账户被攻破，你能接受什么后果</td><td>决定设备与账户的切分粒度</td><td>一台设备承担全部职能，任何一次扣押都等于全盘暴露</td></tr><tr><td><strong>法律处境</strong></td><td>是否已被要求配合、是否处于调查/诉讼、设备是否可能被依法提取</td><td>决定证据留存义务与&quot;绝不能删&quot;的边界（#105）</td><td>把加固误解为对抗程序，做出销毁证据的动作</td></tr><tr><td><strong>退出与支持</strong></td><td>方案失效时找谁、多久能恢复、由谁承担费用</td><td>决定可维持性</td><td>无人陪跑，两周后回到旧配置</td></tr></tbody></table>
+<p><strong>判据</strong>：六项里有任何一项答不上来，方案书就只能写成&quot;待补齐清单&quot;，不能写成结论。</p>
+<hr>
+<h2>3. 消息源保护是一条独立约束，它会改写技术选择</h2>
+<p>通用建议里&quot;打开全部同步、开备份、用同一个 Apple ID 全家桶&quot;是效率最优；在消息源场景里这些恰恰是要拆开的东西：</p>
+<ol><li><strong>同步即扩散</strong>。iCloud 同步把一次接触复制到多设备与云端，云端进入可披露范围（#105）。需要保护的消息源相关材料，落点应当是<strong>可数的</strong>：明确&quot;这份东西存在哪几台设备、有没有云端副本&quot;。</li><li><strong>通讯录与日历是第二泄漏面</strong>。消息源的名字、通话记录、会议邀请都属于元数据危害。处理方式：材料侧不留真名（编号制）、日历侧不留可关联标题、通信侧不留长链。</li><li><strong>共享相册与家庭组是隐蔽外流</strong>（#100/#95 的同一位置）。影像原件一旦进入共享集合，可关联的就不止你一个人。</li><li><strong>转交与销毁是流程问题不是技术问题</strong>。消息源要求&quot;删掉我的号码&quot;时，需要执行的是多份副本与备份的对称清理；这属于 #96 的残留物清点，不是&quot;删了联系人&quot;。</li><li><strong>备份与恢复的不对称</strong>。一次设备丢失后从旧备份恢复，会把已经清理的关系与文件一起带回（#106 的同一条禁令在此更严格：<strong>不要用旧备份复原敏感期数据</strong>）。</li></ol>
+<p>一句判读：这一场景里最有价值的动作，是把&quot;和谁、什么时候、在哪见过&quot;这件事从任何<strong>持续同步的容器</strong>里搬出来。</p>
+<hr>
+<h2>4. 六个模块的最小方案与升档方案</h2>
+<p>分两档是为了让方案在预算与心理承受力内可执行。<strong>最小档 = 现在就该做完；升档档 = 有明确事件触发时才做</strong>。</p>
+<table><thead><tr><th>模块</th><th>最小档</th><th>升档档（触发条件写明）</th><th>不要做</th></tr></thead><tbody><tr><td><strong>账户</strong></td><td>独立 Apple ID、强密码与硬件密钥、恢复方式登记在可控第三方处（#84/#89）；关闭不必要的家族与订阅共享</td><td>敏感工作完全不用主 Apple ID；为特定项目建独立账户与支付关系（结构见 #110）</td><td>用手机号当唯一恢复因子</td></tr><tr><td><strong>设备</strong></td><td>系统保持在受支持版本、锁定模式按 #94 的自画像决定；关闭锁屏通知全文（#84/#95）</td><td>工作专用第二设备，不与个人设备共享相册/通讯录/账户；敏感任务只在工作设备（#110）</td><td>把&quot;越少的设备&quot;当成安全（单设备=单点全暴露）</td></tr><tr><td><strong>通信</strong></td><td>端到端加密消息、关闭短信转发与呼叫转移（#99 第 ④ 类）；重要谈话不落在普通短信里</td><td>敏感期改用可自毁/不留存服务器的信道，并按 #103 审查出口（代理、描述文件、根证书）</td><td>用短信协调高风险会面（短信会进备份、进对方设备、进云侧可披露范围）</td></tr><tr><td><strong>差旅与出入境</strong></td><td>行前把随身设备做到&quot;被看一遍也不出事&quot;：原件不留、副本可数、密码分层（#90 的 P5 物理接触）</td><td>高风险国家/地区只带最小设备，工作设备与数据不出境；行前重置、行后不复用（按 #96 的处置流程退出）</td><td>用&quot;临时装个新系统&quot;当作清理手段而不清关系</td></tr><tr><td><strong>扣押与人身事件</strong></td><td>事先约定响应顺序（服务端先行、证据先于清除，#91 剧本 A/#92 顺序原则）；家属与支持方知道找谁</td><td>被要求解锁时的合法应对由律师预先说明；设备被留置后按暴露处理，不假设还能取回</td><td>自行远程抹除以&quot;防止被看&quot;（同时灭失证据且暴露你有心虚信号，#92）</td></tr><tr><td><strong>组织与同事</strong></td><td>把方案与例外登记成台账（#104），人员离职/项目结束时的收回流程对称（#96/#98）</td><td>为同事做代持登记、共享材料的分级交付；把&quot;谁可以对某人下手&quot;的权限收拢</td><td>靠一次培训交付全部风险（培训不改变配置，演练才改变）</td></tr></tbody></table>
+<p><strong>分档判据</strong>：升档动作都有代价（时间、成本、心理负担、社交可见性）。代价大而无触发条件的动作，应当删除而不是保留——方案书的厚度不是安全性。</p>
+<hr>
+<h2>5. 验收判据：让方案书可以在三个月后被检查</h2>
+<p>每一条方案必须写成可判定语句，否则等于没写。示例形状（按 #104 的&quot;可判定阈值&quot;规则）：</p>
+<table><thead><tr><th>方案条目</th><th>验收判据（可当场核对）</th><th>不合格的表现</th></tr></thead><tbody><tr><td>账户独立</td><td>敏感工作的 Apple ID 不出现在任何个人设备的登录列表中</td><td>两个账户在同机切换登录</td></tr><tr><td>恢复方式登记</td><td>存在一份记录&quot;谁持有什么、何时开始、如何结束&quot;的书面登记</td><td>只有&quot;我记着是我妹妹的号&quot;</td></tr><tr><td>元数据收缩</td><td>通讯录/日历/共享相册内不存在可关联到敏感对象的字段</td><td>用真名+完整单位记录</td></tr><tr><td>通知暴露</td><td>锁屏上验证码、消息、位置共享提示均不显示内容</td><td>只关了部分 App</td></tr><tr><td>出口配置</td><td>描述文件/VPN/受信任根证书三项均能说明安装者与目的（#103）</td><td>存在&quot;不知道为什么装了&quot;</td></tr><tr><td>差旅最小化</td><td>出境设备的数据清单可由本人当场口述（无原件、无云端自动同步）</td><td>依赖&quot;到了再删&quot;</td></tr><tr><td>事件可执行</td><td>有一名支持方能按书面流程独立完成服务端止损</td><td>流程只存在于本人脑子里</td></tr><tr><td>台账运行</td><td>例外项有登记、有责任人、有复查日期</td><td>只有一份一次性加固清单</td></tr></tbody></table>
+<p><strong>执行节奏</strong>：交付后第 2 周做一次实操抽查（不是复述），此后按 #104 的季度巡检；每个高风险事件前后各做一次增补检查。<strong>方案书的失效绝大多数发生在第 2 周之后</strong>，而不是交付当天。</p>
+<hr>
+<h2>6. 维持成本：方案书里最常被删掉的一节</h2>
+<p>一份不写明成本的技术方案会被无声放弃。要如实写清：</p>
+<ul><li><strong>时间成本</strong>：每项动作的一次性耗时与周期耗时（清点约 20–40 分钟，季度巡检按 #104）。</li><li><strong>效率代价</strong>：设备分离带来传文件的摩擦、强验证带来登录摩擦。<strong>不写代价的方案会被使用者自行打折执行</strong>。</li><li><strong>社交代价</strong>：同事与消息源需要理解你为何不用熟悉的工具；这一项需要预先沟通，而不是临时解释。</li><li><strong>金钱成本</strong>：额外设备、硬件密钥、订阅与替换周期；NGO 场景要写明由机构承担还是个人承担。</li><li><strong>心理成本</strong>：持续警惕是消耗品。把&quot;不需要判断力的硬规则&quot;数量控制在 5–7 条（#97/#106 的做法），其余交给周期巡检而不是交给警觉。</li></ul>
+<p>一句判读：<strong>高危个体的实际安全性 ≈ 最小档的执行完整度 × 维持时长</strong>，与升档项的多少关系很小。</p>
+<hr>
+<h2>7. 交付纪律（写给做评估与陪跑的人）</h2>
+<ol><li><strong>先给可执行的最小档，再谈升档</strong>。一次交付二十项配置的结果是十项没做完。</li><li><strong>不要替对方做决定，要把代价摆出来</strong>：升降档的取舍依赖当事人的处境与承受力，外人无从代判。</li><li><strong>不做不可撤销的建议</strong>。任何&quot;删掉/抹掉/注销&quot;的动作先确认证据与义务边界（涉及未决程序时删除数据本身可能构成违规或违法，请以律师意见为准）。</li><li><strong>不给话术与对抗脚本</strong>。本文与相关篇目只提供识别与阻断（#97），不生产面对执法场景的应对台词。</li><li><strong>写明你的判断依据与不确定项</strong>：威胁画像的推断部分要标注&quot;依据/假设&quot;，不能写成事实。</li><li><strong>留下退路</strong>：方案里必须包含&quot;如果失效，第一步做什么、找谁&quot;。没有恢复路径的加固只会加重损失后的瘫痪。</li></ol>
+<hr>
+<h2>8. 八个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;对手是国家级的，所以个人措施没用&quot;</td><td>决定结果的多是接触面与授权环节的失误（#90 的 P4/P5、#97），不是零日</td></tr><tr><td>&quot;全加密就安全了&quot;</td><td>元数据不在加密保护范围内（第 3 节、#103 的诚实边界）</td></tr><tr><td>&quot;设备越多越危险&quot;</td><td>无分离的单设备把一次扣押变成全盘暴露（第 4 节、#110）</td></tr><tr><td>&quot;开了锁定模式就到位了&quot;</td><td>档位不覆盖账户关系、同步范围与出口配置（#34/#94/#103）</td></tr><tr><td>&quot;被扣押时先远程抹除&quot;</td><td>灭失自己的证据、并释放明确信号（#92/#106 的顺序原则）</td></tr><tr><td>&quot;做一次培训就安全了&quot;</td><td>培训不改变配置；抽查与台账才会（第 5 节、#104）</td></tr><tr><td>&quot;方案越全越稳&quot;</td><td>超负荷方案在第 2 周被无声放弃（第 6 节）</td></tr><tr><td>&quot;加固就是对抗调查&quot;</td><td>方案书处理的是暴露面，不处理义务；程序问题以律师意见为准（#105）</td></tr></tbody></table>
+<hr>
+<h2>9. 一句话结论</h2>
+<p>高危个体的方案书不是一份更长的加固清单，而是四件事的组合：</p>
+<ul><li><strong>六个输入</strong>决定档位（对手、资产、暴露期、可承受损失、法律处境、支持退出）。</li><li><strong>消息源保护</strong>作为独立约束改写同步、通讯录与影像的处理方式——把接触记录搬出持续同步的容器。</li><li><strong>可判定的验收条款</strong>让方案在三个月后仍可检查，配合 #104 的台账与季度节奏。</li><li><strong>维持成本与交付纪律</strong>决定它是否真的被执行；不写代价的方案会被使用者自行打折。</li></ul>
+<p>从业者先做最小档并写出触发条件，技术支持者按第 5 节验收、按第 7 节交付；法律处境与出境场景必须在动笔前把义务边界问清。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a107.html">← 第 107 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
