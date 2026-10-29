@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 漏洞按攻击者起始位置分类：从&quot;预认证远程&quot;到&quot;物理接触&quot;的六道门槛 | iOS 安全研究文章库</title>
+<meta name="description" content="三维坐标压成 P0–P5 六档、同一 CVE 在三根轴上坐标独立、逐档门槛抬升机制与抬完后的现实入口、对手类型×可负担档位预算表、三步定位法（先定档再决定要不要开锁定模式）、五个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a90.html">
+<meta property="og:title" content="iOS 漏洞按攻击者起始位置分类：从&quot;预认证远程&quot;到&quot;物理接触&quot;的六道门槛">
+<meta property="og:description" content="三维坐标压成 P0–P5 六档、同一 CVE 在三根轴上坐标独立、逐档门槛抬升机制与抬完后的现实入口、对手类型×可负担档位预算表、三步定位法（先定档再决定要不要开锁定模式）、五个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a90.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 90 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 漏洞按攻击者起始位置分类：从&quot;预认证远程&quot;到&quot;物理接触&quot;的六道门槛</h1>
+<blockquote><p>本文是防御视角的分类框架与处置方法，<strong>不提供可利用代码</strong>，不包含任何投递构造、链条拼接或可照做的攻击操作。面向需要判断&quot;我该防谁、先防哪一段&quot;的个人用户、企业安全负责人与咨询场景。</p></blockquote>
+<h2>1. 为什么还需要这根轴</h2>
+<p>系列里已有的分类方式各答各的问题：</p>
+<table><thead><tr><th>轴</th><th>回答的问题</th><th>出处</th></tr></thead><tbody><tr><td>系统层</td><td>错在哪个子系统</td><td>#2</td></tr><tr><td>缺陷类别</td><td>错成什么形态（UAF/越界/逻辑误用…）</td><td>#81</td></tr><tr><td>组件与通路</td><td>打的是谁（驱动、App 配置、锁屏、分发、智能输入、侧信道、支付）</td><td>#82–#89</td></tr></tbody></table>
+<p>这三根都<strong>不回答&quot;攻击者出发的时候手里已经有什么&quot;</strong>。而现实里决定损失的恰恰是这个：同样一个内存越界，出现在预认证远程通道和出现在只有本地低权限进程能碰到的辅助服务里，风险差三个数量级。</p>
+<p>按起始位置分类的价值就在这里——它把&quot;漏洞有多严重&quot;换成一个可以直接问客户的问题：<strong>你面对的是哪一档对手，他需要几步才能站到你设备面前</strong>。</p>
+<hr>
+<h2>2. 三个维度合成一个位置坐标</h2>
+<p>单独说&quot;远程&quot;或&quot;本地&quot;太粗，用三个维度定坐标：</p>
+<ul><li><strong>投递距离</strong>：预认证远程 / 认证后远程 / 近场无线 / 本地进程 / 物理接触。</li><li><strong>交互要求</strong>：无需交互（0-click）/ 需要一次交互（1-click）/ 需要被诱导完成多步 / 无需交互但需已解锁。</li><li><strong>落点权限</strong>：受限沙箱进程 / 非沙箱系统服务 / 内核外特权 / 内核 / 硬件与固件。</li></ul>
+<p>三维压成六档，从最贵到最便宜：</p>
+<table><thead><tr><th>档</th><th>起始位置</th><th>交互</th><th>典型落点</th><th>需要设备已有漏洞吗</th></tr></thead><tbody><tr><td>P0</td><td>预认证远程（可任意送达内容）</td><td>0-click</td><td>媒体/字体/消息解析等服务</td><td>是，且通常需要链条</td></tr><tr><td>P1</td><td>预认证远程</td><td>1-click</td><td>浏览器与 WebKit 栈</td><td>是</td></tr><tr><td>P2</td><td>认证后远程 / 账户侧接管</td><td>无需设备交互</td><td>备份、云同步、MDM、钱包加卡、配对</td><td><strong>不一定</strong>（见 #89 结论）</td></tr><tr><td>P3</td><td>近场无线（蜂窝/Wi-Fi/蓝牙/NFC 半径内）</td><td>0-click 或后台</td><td>基带与无线固件</td><td>是</td></tr><tr><td>P4</td><td>本地低权限起点（已装 App、已连电脑、共享设备）</td><td>无需</td><td>沙箱边界、内核接口</td><td>是，需逃逸+提权</td></tr><tr><td>P5</td><td>物理接触（锁屏态或解锁态）</td><td>无需</td><td>数据保护等级、启动链、配件</td><td>视状态而定（#84）</td></tr></tbody></table>
+<p><strong>一个 CVE 在这根轴上的坐标，和它在另外两根轴上的坐标是独立的</strong>。举例：#38 那次字体解析问题，在 #2 上是&quot;媒体/文本解析子系统&quot;，在 #81 上是&quot;越界写入&quot;，在这根轴上是 P0——三个描述都对，但只有 P0 这个描述告诉你&quot;任何人都能把这个字节流送到你手机上，不需要你做任何事&quot;。</p>
+<hr>
+<h2>3. 每档的门槛由什么抬高</h2>
+<p>不同档位的成本曲线不一样，抬门槛的机制也不一样：</p>
+<table><thead><tr><th>档</th><th>把门槛抬起来的东西</th><th>抬完之后剩下的现实入口</th></tr></thead><tbody><tr><td>P0</td><td>BlastDoor 独立沙箱、送达即解析的面收敛、锁定模式关停部分自动处理（#52/#34）</td><td>能进 BlastDoor 的解析面仍有价值，链条要额外一段逃逸</td></tr><tr><td>P1</td><td>WebKit 硬化、GOT/PAC、进程隔离、站点隔离</td><td>钓鱼仍是主变量：<strong>这类链条的第一段常常是人不是机器</strong></td></tr><tr><td>P2</td><td>账户侧因子强度、设备清单治理、eSIM/号码约束</td><td>因子弱的地方（短信验证、运营商线上补卡）与不修账户只修设备的错配（#89）</td></tr><tr><td>P3</td><td>基带与无线固件的更新周期、协议层特性开关</td><td>版本长尾：老机型与新固件的支持周期不同步（#72）</td></tr><tr><td>P4</td><td>沙箱策略、entitlement 收紧、SPTM/TXM 与 PAC（#27/#41）</td><td>已装恶意 App 或已越狱设备是既成事实的起点，只能靠分发治理（#86）</td></tr><tr><td>P5</td><td>数据保护类与解锁次数策略、DPUI/配件限制</td><td>密码强度与设备四态决定损失范围；启动链老芯片是不可修补项（#84/#88）</td></tr></tbody></table>
+<p>一个容易被误读的点：<strong>P2 和 P5 往往不需要任何设备漏洞</strong>。这两档上&quot;对手能力&quot;的评估口径要从&quot;他有没有 0-day 预算&quot;改成&quot;他能不能拿到你的合法流程&quot;。</p>
+<hr>
+<h2>4. 谁买得起哪一档（预算视角）</h2>
+<table><thead><tr><th>对手类型</th><th>现实可负担档位</th><th>说明</th></tr></thead><tbody><tr><td>国家级/采购商业框架</td><td>P0–P5 全档</td><td>只有 P0/P3 需要买或自建链条</td></tr><tr><td>商业间谍软件客户</td><td>P0/P1/P2</td><td>单目标高价值，P0 一条链能用数年（#15 的版本覆盖讨论）</td></tr><tr><td>企业犯罪与诈骗团伙</td><td>P1/P2/P4</td><td>钓鱼 + 账户接管 + 滥分发，几乎不打内存漏洞</td></tr><tr><td>跟踪骚扰与家庭暴力场景</td><td>P2/P4/P5</td><td>共享账户、已装 App、短时可及的设备（#86 的 stalkerware 结论在这里同样成立：<strong>账户优先</strong>）</td></tr><tr><td>opportunistic 盗窃</td><td>P5（且多为已解锁态）</td><td>目标不是数据，是设备本身 resale 价值</td></tr></tbody></table>
+<p>这张表的用处是把预算讨论从&quot;要不要防 APT&quot;变成&quot;我的处境落在哪两三行&quot;。<strong>绝大多数咨询场景的真正风险行是 P2/P4/P5</strong>，而这三档恰恰不需要 Apple 出补丁，也不需要用户买昂贵工具，需要的是账户与设备状态治理。</p>
+<hr>
+<h2>5. 三步定位法（可直接执行的评估）</h2>
+<ol><li><strong>谁能把内容送到我设备上</strong>：公开手机号/iMessage、邮箱、常见群组成员、可发布内容到你的时间线的人 → 决定 P0/P1 是否要当真。若答案是&quot;没有陌生人渠道&quot;，P0 类链条对你的优先级应显著下调。</li><li><strong>我的哪些东西能被合法流程改到</strong>：Apple ID 登录方式与受信设备清单、运营商号码变更约束、每张卡的加卡验证因子、家庭共享与屏幕使用时间管理员 → 决定 P2 暴露面（可执行清单见 #89、#80）。</li><li><strong>我的设备离开视线的频率与状态</strong>：是否经常解锁交给他人（维修、代拿、试用、餐厅结账）、密码是否 6 位数字、是否连接过不可控电脑或配件 → 决定 P5；共享设备与已装不明 App 则决定 P4。</li></ol>
+<p>结论落点：<strong>每档只需要加固对应的那一两件事，不需要为了 P0 把自己活成情报机构</strong>。个人可执行的分层清单在 #80，这里只补一句：先定档，再决定要不要开锁定模式——为 P2/P5 开锁定模式几乎没有收益。</p>
+<hr>
+<h2>6. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;CVE 数量多说明我更危险了&quot;</td><td>数量不分档。当年新增里大量是 P4/P5 起点的本地问题，对无接触者的现实风险接近 0</td></tr><tr><td>&quot;0-click 是最严重的类型&quot;</td><td>0-click 是最贵的能力，不是最普遍的损失来源；P2 的账户接管便宜得多也常见得多</td></tr><tr><td>&quot;把 iOS 升到最新就挡住了 P0&quot;</td><td>升版本解决的是暴露窗口（#75），但 P2/P5 与补丁无关，取决于验证因子与设备状态</td></tr><tr><td>&quot;有 MDM 就不用管 P2&quot;</td><td>MDM 管设备，不管发卡行、运营商与 Apple ID 登录方式（#76/#89 的边界结论）</td></tr><tr><td>&quot;近场无线（P3）对我不适用&quot;</td><td>只要人在公共场所带设备，P3 半径就存在；只是它的现实门槛与成本使它主要出现在高价值目标场景</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>按系统层、缺陷类别、被攻击组件分完了&quot;错误在哪&quot;，这一篇分的是<strong>&quot;对手从哪儿出发&quot;</strong>。</p>
+<ul><li>对个人：先回答上面三步定位法，把注意力放在自己实际命中的两三档，其余档位的焦虑可以删掉。</li><li>对高危个体：P0/P3 是你必须假设对手具备的能力，锁定模式、更新纪律与&quot;敏感内容不落在这台设备上&quot;才是主战场。</li><li>对企业：把资产清单按档位而不是按 CVE 分数排优先级，P2 类风险要走账户与身份治理，不要塞进设备加固项目里。</li></ul>
+<p>系列里的 #91 会把这根轴换成另一个视角——同一个起点，造成的损失本身也可以分类；#92 专讲最被低估的一类后果。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a89.html">← 第 89 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
