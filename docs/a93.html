@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 漏洞按引入阶段分类：缺陷是什么时候被写进去的，决定了谁能修、修得多快 | iOS 安全研究文章库</title>
+<meta name="description" content="L1 设计/L2 实现/L3 配置构建/L4 演进回归/L5 依赖第三方/L6 长尾弃用六格、&quot;错误 vs 选择&quot;的复发概率判读、阶段→该改哪个流程的责任映射表、补丁周期与产品周期两条时间曲线混用的代价、三步给新 CVE 贴标签的情报读法">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a93.html">
+<meta property="og:title" content="iOS 漏洞按引入阶段分类：缺陷是什么时候被写进去的，决定了谁能修、修得多快">
+<meta property="og:description" content="L1 设计/L2 实现/L3 配置构建/L4 演进回归/L5 依赖第三方/L6 长尾弃用六格、&quot;错误 vs 选择&quot;的复发概率判读、阶段→该改哪个流程的责任映射表、补丁周期与产品周期两条时间曲线混用的代价、三步给新 CVE 贴标签的情报读法">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a93.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 93 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 漏洞按引入阶段分类：缺陷是什么时候被写进去的，决定了谁能修、修得多快</h1>
+<blockquote><p>本文是防御视角的分类框架与评估方法，<strong>不提供可利用代码</strong>，不包含漏洞构造、变体挖掘或任何可照做的研究操作。面向需要判断&quot;这条补丁之后同类问题还会不会再来、该向哪个环节提要求&quot;的用户、企业安全负责人与咨询场景。</p></blockquote>
+<h2>1. 为什么&quot;何时被写进去&quot;是一根独立轴</h2>
+<p>系列里已有的分类方式各答各的问题：#2 错在哪个系统层，#81 错成什么形态，#82–#89 打的是谁，#90 对手从哪儿出发，#91 造成什么后果，#92 其中破坏类那一格单独展开。</p>
+<p>这六根轴描述的都是<strong>缺陷存在之后的事</strong>。而咨询里有两个问题它们答不了：</p>
+<ol><li><strong>这个补丁打完之后，同类问题还会反复出现吗？</strong>（同一形态在&quot;实现阶段&quot;和&quot;设计阶段&quot;的答案完全相反）</li><li><strong>要减少这类问题，该让谁改流程？</strong>（改代码、改默认值、改架构评审、改供应链、改版本支持政策是五个不同的部门）</li></ol>
+<p>按引入阶段分一次类，这两个问题就变成可以直接问的表。它也是唯一能预测&quot;复发概率&quot;的轴。</p>
+<hr>
+<h2>2. 六个引入阶段</h2>
+<table><thead><tr><th>阶段</th><th>缺陷在哪一步被写进去</th><th>典型形态</th><th>Apple 侧的修法是</th><th>补丁能否真正修完</th></tr></thead><tbody><tr><td><strong>L1 设计与架构</strong></td><td>写第一行代码之前的信任模型、协议与流程选择</td><td>离线小额授权窗口、账户即密钥、送达即解析、无法关闭的功能通道、配对信任</td><td>改设计（下一代机制、新沙箱模型、协议替换）</td><td><strong>不能</strong>。补丁只能收窄，不能消除这个选择本身</td></tr><tr><td><strong>L2 实现</strong></td><td>具体代码里的错误</td><td>越界读写、UAF、类型混淆、整数溢出、TOCTOU、并发误用（#81 那张表）</td><td>改代码 + 编译器/运行期加固</td><td><strong>能</strong>，修一处少一处</td></tr><tr><td><strong>L3 配置与构建</strong></td><td>出厂默认值、权限声明、签名与打包环节</td><td>entitlement 过宽、备份豁免、调试标记残留、描述文件默认允许项</td><td>改默认值、收紧门禁、重新签名策略</td><td>半能：默认值能改，<strong>已经按旧默认配好的存量不会自动变</strong></td></tr><tr><td><strong>L4 演进与回归</strong></td><td>改动旧代码时带进来的</td><td>新特性引入的同类缺陷、修复不完整留下变体、功能耦合导致的边界失效</td><td>再修 + 回归测试与变体清理</td><td>能，但<strong>这是&quot;同一个 CVE 号出现第三次&quot;的主要原因</strong></td></tr><tr><td><strong>L5 依赖与第三方</strong></td><td>别人的代码或别人的配置进入你的产品</td><td>开源/媒体/字体解析组件、SDK 数据出口、App 侧存储与鉴权选错（#83）、Web 内容</td><td>Apple 只能替换或加固上游；App 侧要开发者改</td><td><strong>Apple 修不完</strong>：这一格的供给是外部持续的</td></tr><tr><td><strong>L6 长尾与弃用</strong></td><td>产品生命周期政策与硬件世代遗留</td><td>停更版本的未修问题、老芯片不可改的启动层（#88/#64）、旧固件支持周期不同步（#72）</td><td>只能靠 RSR/静默修补延长（#61），或干脆不修</td><td><strong>不能</strong>。要么延长支持，要么承认这台设备停在某个能力上限</td></tr></tbody></table>
+<p>一句读法：<strong>L2/L4 是&quot;错误&quot;，L1/L3/L5/L6 是&quot;选择&quot;</strong>。前者的数量会随工程投入下降，后者的数量只会随产品政策改变。</p>
+<hr>
+<h2>3. 阶段决定谁该改流程</h2>
+<table><thead><tr><th>阶段</th><th>要改的东西</th><th>现实信号（说明流程没改）</th></tr></thead><tbody><tr><td>L1</td><td>威胁建模与架构评审、默认信任范围的取舍</td><td>同类损失在不同子系统里反复出现，只是换了入口</td></tr><tr><td>L2</td><td>语言与内存安全投入、编译与运行期加固、自动化挖掘覆盖</td><td>同一子系统内同一形态集中出现</td></tr><tr><td>L3</td><td>出厂默认值评审、签名与发布门禁、配置审计</td><td>出现&quot;能用但从未需要&quot;的宽权限、豁免项长期存在</td></tr><tr><td>L4</td><td>回归测试、变体清理机制、修复范围定义</td><td>同一份公告里反复出现同一子系统的相邻编号</td></tr><tr><td>L5</td><td>上游组件治理与 SDK 准入、应用审核与开发者文档</td><td>漏洞标题里出现第三方组件名、SDK 版本成为影响范围</td></tr><tr><td>L6</td><td>版本支持政策、老机型安全更新节奏、退役沟通</td><td>设备仍在售卖/使用，但已拿不到安全更新</td></tr></tbody></table>
+<p>这张表的价值在于<strong>把&quot;苹果不安全&quot;这类判断拆成可提要求的具体环节</strong>。企业采购、供应商评估、内部 App 治理，各自该问的行不一样。</p>
+<hr>
+<h2>4. 阶段 × 修复时长：两类完全不同的时间曲线</h2>
+<ul><li><strong>L2/L4 走&quot;补丁周期&quot;</strong>：从披露到 SWU 的延迟与暴露窗口（#61/#75/#85 讨论过），可度量、可运营，你的动作是尽快升级。</li><li><strong>L1/L6 走&quot;产品周期&quot;</strong>：以年为单位，且往往需要换设备或等新架构。你的动作不是&quot;等补丁&quot;，而是<strong>接受这一格的长期存在并做风险转移</strong>（关键内容不落在这台设备上、离线备份、把资金与账户从手机号验证的通路里拆出来，见 #89/#92）。</li></ul>
+<p>混用这两套时间尺度是防御规划里最常见的错误：<strong>把 L1/L6 当成&quot;苹果迟早会修&quot;来排期，等于无限期承担</strong>；反过来把 L2 当成&quot;结构性问题&quot;放弃跟进，又白丢了最容易拿到的一层收益。</p>
+<hr>
+<h2>5. 用这根轴读情报（可直接执行）</h2>
+<p>看到一条新 CVE，先按描述给它贴三个标签再决定动作：</p>
+<ol><li><strong>它是哪一格？</strong> 描述里出现&quot;越界/释放后/类型&quot;多为 L2；出现&quot;策略/默认/权限/可被诱导&quot;多为 L1 或 L3；出现第三方组件名多为 L5；只影响老机型或已停更版本多为 L6。</li><li><strong>它会不会复发？</strong> L2 → 修一处少一处；L1/L3/L5 → 会换入口再来；L4 → 关注同一子系统的相邻修补次数。</li><li><strong>动作落在哪？</strong> L2/L4 落到升级纪律；L1/L6 落到架构性风险转移；L3 落到配置与默认值核对；L5 落到 App 与 SDK 审计（#83 的三层审计法）。</li></ol>
+<p><strong>&quot;复发概率&quot;只有这根轴能给出</strong>：同一缺陷形态在不同机型/子系统反复出现，通常不是工程能力问题，而是它本来就长在 L1/L5 这类&quot;选择/外部供给&quot;里。</p>
+<hr>
+<h2>6. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;补丁数量多说明质量好&quot;</td><td>补丁数量衡量 L2/L4 的产出，与 L1/L6 的长期风险几乎无关</td></tr><tr><td>&quot;同一类 bug 反复出现说明没在修&quot;</td><td>要先看阶段：L1/L5 的同类会持续出现，这是结构与外部供给决定的</td></tr><tr><td>&quot;苹果修了就没有了&quot;</td><td>L3 的存量配置不会自动变（豁免一旦下发仍在设备上）；L6 根本不在补丁范围内</td></tr><tr><td>&quot;第三方组件的问题也是 iOS 的问题&quot;</td><td>是 iOS 的暴露，但要改的是上游与 App 侧；把它塞进设备加固项目会漏掉真正的动作（#83 结论）</td></tr><tr><td>&quot;升级了就免疫 L1&quot;</td><td>设计类缺陷的收窄靠新机制，不靠版本号；版本号解决的是暴露窗口</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>按引入阶段分完类之后，两件事第一次变得可预测：<strong>同类问题会不会再来</strong>，和<strong>该让谁改流程</strong>。</p>
+<ul><li>对个人：绝大多数你听到的严重漏洞在 L2/L4，动作就一个——维持升级纪律；真正需要长期策略的是 L1/L6，动作是风险转移而不是等补丁。</li><li>对高危个体：L1（送达即解析、账户即密钥）和 L6（机型与版本长尾）是你必须用架构手段对冲的两格，锁定模式与&quot;敏感内容不落在这台设备上&quot;就是为此存在。</li><li>对企业：把漏洞台账按 L1–L6 打标签，你会发现相当比例的&quot;未修复项&quot;本来就不该指望补丁，它们属于配置治理、供应链准入或设备退役政策——分错项目的结果是预算全花在升级上，而损失来自配置与依赖。</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a92.html">← 第 92 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
