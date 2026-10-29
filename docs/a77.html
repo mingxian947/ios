@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 漏洞供应链与商业采购生态 | iOS 安全研究文章库</title>
+<meta name="description" content="五层角色分工与经济学、由套件特征反推供应链位置、GHOSTBLADE 复用启示、链条覆盖加权补丁优先级">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a77.html">
+<meta property="og:title" content="Coruna 与 DarkSword 漏洞供应链与商业采购生态">
+<meta property="og:description" content="五层角色分工与经济学、由套件特征反推供应链位置、GHOSTBLADE 复用启示、链条覆盖加权补丁优先级">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a77.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 77 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 漏洞供应链与商业采购生态</h1>
+<blockquote><p>编制日期：2026-10-18 数据来源：Citizen Lab、Amnesty International、Washington Post / Guardian 调查报道、Project Zero、WikiLeaks Vault7 相关公开分析、CVE 情报库 性质：防御性安全研究分析（Defensive Security Research），不提供可利用代码</p></blockquote>
+<hr>
+<h2>1. 执行摘要</h2>
+<p>公众讨论 iOS 零日时通常聚焦&quot;漏洞本身&quot;，但真实的产业结构是：<strong>绝大多数发动攻击的组织并不自己发现漏洞</strong>。漏洞是一条分工明确的供应链上的商品——有研究者发现、有中间商打包、有集成商组装成套件、有客户按目标采购。</p>
+<p>Coruna 与 DarkSword 的技术差异，在很大程度上可以被<strong>它们在供应链中所处的位置</strong>解释：</p>
+<ul><li><strong>Coruna</strong> 展现出<strong>大规模采购 + 长期复用</strong>的特征：23 个 CVE、跨 5 个大版本、包含大量 N-day</li><li><strong>DarkSword</strong> 展现出<strong>高质量单一来源</strong>特征：组件集中、链条精悍、明显针对较新版本窗口</li></ul>
+<p>本文解析这条供应链的角色分工、定价结构、流通与泄露机制，以及防御者如何利用供应链知识提升检测与补丁效率。</p>
+<hr>
+<h2>2. 漏洞供应链的角色分工</h2>
+<h3>2.1 角色模型</h3>
+<pre><code>[发现者]
+  安全研究者 / 内部研究团队 / 竞赛参赛者
+  产出：单个 CVE 级漏洞 + PoC
+        ↓
+[采集方 / Broker]
+  与研究者签约、批量收购、组织竞赛
+  产出：漏洞组合、可交付 exploit 模块
+        ↓
+[集成商 / 套件厂商]
+  NSO、IntelCere、Var-11(Linear)、Cytb Technologies 等
+  产出：完整利用链 + 载荷 + C2 + 运营平台
+        ↓
+[转售方 / 区域代理]
+  面向政府客户的销售与部署支持
+        ↓
+[最终用户 / 客户]
+  情报、执法、军方机构（按目标授权数付费）</code></pre>
+<h3>2.2 各层的经济学特征</h3>
+<table><thead><tr><th>层</th><th>收入模式</th><th>成本结构</th><th>关键约束</th></tr></thead><tbody><tr><td>发现者</td><td>单洞出售（数万至数十万美元级）</td><td>时间与研究能力</td><td>漏洞唯一性一旦泄露即归零</td></tr><tr><td>采集方</td><td>差价 + 长期合同</td><td>关系网络、法律风险</td><td>需持续供给，不能断货</td></tr><tr><td>集成商</td><td>套件许可 + 部署 + 支持</td><td>研发人力（重资产）</td><td>需覆盖多版本以维持客户</td></tr><tr><td>转售方</td><td>佣金</td><td>低</td><td>合规与客户关系</td></tr><tr><td>客户</td><td>—</td><td>按目标数/年费</td><td>需要结果，不关心技术</td></tr></tbody></table>
+<h3>2.3 为什么这条链条存在</h3>
+<p><strong>核心原因：漏洞价值的时效性与不可储存性。</strong></p>
+<pre><code>漏洞价值 = f(唯一性, 版本覆盖范围, 未被修补时长)
+   ↓
+一旦被公开 / 被修补 → 价值趋近于零（仅剩旧版本设备）
+   ↓
+持有者必须在窗口期内变现，不能&quot;存着以后用&quot;</code></pre>
+<p>这催生了专业化中间商——研究者不擅长销售、买家不想被追溯，中间层负责<strong>匿名化与组合包装</strong>。</p>
+<hr>
+<h2>3. 从套件特征反推供应链位置</h2>
+<p>防御者与研究员可借助技术特征推断一款套件的资源来源——这对归因与优先级判断都有价值。</p>
+<h3>3.1 判据表</h3>
+<table><thead><tr><th>观察到的特征</th><th>供应链推断</th></tr></thead><tbody><tr><td>大量 N-day（已修补漏洞）</td><td>强调成本控制，采购成熟漏洞或复用泄露库</td></tr><tr><td>覆盖极宽版本跨度</td><td>长期多批次采购积累，非一次性投入</td></tr><tr><td>单版本窗口 + 组件极少</td><td>高质量单批采购或自研，赌新版本</td></tr><tr><td>多个不相关组件被精确组合</td><td>有专业集成团队（非个人研究者）</td></tr><tr><td>使用同一供应商的多代漏洞</td><td>长期供应商合同关系</td></tr><tr><td>漏洞组合与他人泄露高度重合</td><td><strong>复用泄露库</strong>（如 GHOSTBLADE）</td></tr><tr><td>组件新颖、公开研究中无先例</td><td>内部研究能力或独家买断</td></tr><tr><td>有明确的 ABI/模块化架构</td><td>平台型厂商，服务多客户</td></tr></tbody></table>
+<h3>3.2 应用到 Coruna</h3>
+<table><thead><tr><th>特征</th><th>推断</th></tr></thead><tbody><tr><td>23 个 CVE、跨 iOS 13–17.2.1</td><td><strong>长期多批次采购 + 复用积累</strong></td></tr><tr><td>多条独立链并行维护</td><td>具备规模化的集成工程团队</td></tr><tr><td>大量使用已修补漏洞</td><td>明确以 N-day 控制零日消耗成本</td></tr><tr><td>分层 C2 + 平台化载荷</td><td><strong>服务化产品</strong>，面向多客户运营</td></tr><tr><td>版本覆盖到 17.2.1 截止</td><td>供应链存在<strong>供给断点</strong>——某时点后未能拿到新漏洞或未完成集成</td></tr></tbody></table>
+<blockquote><p><strong>供应链视角下最有价值的一条</strong>：<strong>覆盖范围的截止点</strong>往往反映供应商交付能力的问题，而不是攻击者意愿。这类&quot;断供&quot;信号对预测下一代套件的能力边界有帮助。</p></blockquote>
+<h3>3.3 应用到 DarkSword</h3>
+<table><thead><tr><th>特征</th><th>推断</th></tr></thead><tbody><tr><td>组件集中于 JSC + 图形栈</td><td><strong>单批次高质量供给</strong>，可能来自同一供应商</td></tr><tr><td>针对较新 iOS 窗口</td><td>获取漏洞的时间较近，积累浅</td></tr><tr><td>无持久化、模块化程度低</td><td>载荷工程投入偏向隐蔽性而非运营广度</td></tr><tr><td>链条精悍但冗余少</td><td>更像&quot;精工单点武器&quot;，非平台产品</td></tr><tr><td>面向特定运营场景</td><td>客户数量可能有限，或高度定制</td></tr></tbody></table>
+<hr>
+<h2>4. 漏洞的流通与泄露机制</h2>
+<h3>4.1 四种流通形式</h3>
+<table><thead><tr><th>形式</th><th>说明</th><th>对防御的意义</th></tr></thead><tbody><tr><td><strong>正常商业销售</strong></td><td>供应商 → 集成商 → 客户</td><td>不可见，只能通过攻击反推</td></tr><tr><td><strong>跨集成商复用</strong></td><td>同一 exploit 出现在不同套件</td><td>一次分析保护多场景</td></tr><tr><td><strong>内部泄露</strong></td><td>供应商被攻破/员工外泄/客户间流转</td><td>突然出现的&quot;新&quot;套件使用旧漏洞</td></tr><tr><td><strong>被捕获后公开</strong></td><td>防御者抓取样本并公开发布</td><td>该链价值归零，生态共享情报</td></tr></tbody></table>
+<h3>4.2 GHOSTBLADE 的教科书意义</h3>
+<p>GHOSTBLADE（2024）直接使用了<strong>已泄露的其他套件利用链</strong>，其价值在于证明了三件事：</p>
+<ol><li><strong>exploit 作为资产可在生态中流转</strong>，不绑定于原始买家</li><li><strong>泄露使攻击能力快速民主化</strong>——原本只属于头部厂商的能力，二线厂商也能立即使用</li><li><strong>防御的乘数效应</strong>：修补一个被复用的漏洞，同时防护多个套件、多个客户场景</li></ol>
+<blockquote><p><strong>对补丁优先级排序的直接指导</strong>：不要问&quot;这个 CVE 影响我们多少产品&quot;，要问&quot;<strong>这个 CVE 出现在多少条已知在野链条中</strong>&quot;。</p></blockquote>
+<h3>4.3 泄露的常见触发点</h3>
+<table><thead><tr><th>触发点</th><th>说明</th></tr></thead><tbody><tr><td>供应商内部安全事件</td><td>邮件/存储被入侵，资产外流</td></tr><tr><td>客户间流转</td><td>某客户的部署被另一客户/机构获取</td></tr><tr><td>员工离职携带</td><td>研究者/工程师流动</td></tr><tr><td>分析样本公开</td><td>防御机构公开完整分析，代码逻辑随之扩散</td></tr><tr><td>执法/司法披露</td><td>诉讼、听证中文件被公开</td></tr><tr><td>内部举报</td><td>员工出于伦理动机泄露</td></tr></tbody></table>
+<h3>4.4 泄露对防御者的双面影响</h3>
+<table><thead><tr><th>正面</th><th>负面</th></tr></thead><tbody><tr><td>突然获得完整技术细节，检测规则可快速建立</td><td>更多组织获得攻击能力，攻击者基数扩大</td></tr><tr><td>可预测同类链条在其他套件中的复现</td><td>旧漏洞在存量设备上永久有效，长尾风险</td></tr><tr><td>归因与法律行动获得证据</td><td>供应商会加快转向更难获取的新面</td></tr></tbody></table>
+<hr>
+<h2>5. 定价与消耗结构（概念性）</h2>
+<h3>5.1 漏洞价值的决定因素</h3>
+<table><thead><tr><th>因素</th><th>说明</th></tr></thead><tbody><tr><td><strong>交互模型</strong></td><td>0-click 远高于 1-click（无探测机会 → 更稀缺）</td></tr><tr><td><strong>组件稀缺度</strong></td><td>基带/SEP &gt; GPU 驱动 &gt; WebKit</td></tr><tr><td><strong>版本覆盖范围</strong></td><td>能覆盖多个大版本的价值高于仅一版</td></tr><tr><td><strong>成熟度</strong></td><td>可直接集成的完整链 &gt;&gt; 需大量工程的 PoC</td></tr><tr><td><strong>独家性</strong></td><td>是否已出售给多家</td></tr><tr><td><strong>预期寿命</strong></td><td>距离 Apple 修补预计多久</td></tr></tbody></table>
+<h3>5.2 为什么集成商必须大量采购</h3>
+<pre><code>一个客户授权投放 100 个目标
+   ↓
+每条链条预期成功率有限 + 版本参差 + 部分被修补
+   ↓
+需要多条链 + 多版本适配 + 备用漏洞
+   ↓
+Coruna 式的&quot;23 个 CVE / 5 条链&quot;是这种成本结构的必然产物</code></pre>
+<p><strong>关键推论</strong>：<strong>多链架构不是技术偏好，而是采购成本摊薄的结果。</strong> 单链方案在大规模投放下会因失败率与版本失配导致整体收益不足。</p>
+<h3>5.3 消耗率与供应链压力</h3>
+<table><thead><tr><th>压力来源</th><th>效应</th></tr></thead><tbody><tr><td>Apple 修补速度加快</td><td>漏洞窗口期缩短 ⇒ 采购需求上升</td></tr><tr><td>分析机构公开披露</td><td>漏洞价值归零 ⇒ 需持续补充</td></tr><tr><td>客户交付压力</td><td>促成复用泄露链（GHOSTBLADE 路径）</td></tr><tr><td>研究者供给有限</td><td>推动竞赛/ bounty 与自研团队投入</td></tr></tbody></table>
+<blockquote><p><strong>可预测的趋势</strong>：随着单洞寿命缩短，集成商会越来越多地选择<strong>&quot;用已有资产做无持久化突击&quot;</strong>（DarkSword 式）而非&quot;建立长期驻留&quot;——<strong>因为无法保证驻留期间的持续供给</strong>。这条逻辑把供应链压力与架构选择直接连了起来。</p></blockquote>
+<hr>
+<h2>6. 供应链视角下的防御策略</h2>
+<h3>6.1 补丁优先级重构</h3>
+<p>传统优先级（CVSS 分数）在商业间谍场景下<strong>指引性不足</strong>。建议改为&quot;链条覆盖加权&quot;：</p>
+<pre><code>优先级 = CVSS 基础分
+       × 该 CVE 出现在已知在野链中的条数权重
+       × 该 CVE 影响的存量未更新设备比例
+       × 组件稀缺度（0-click/基带/SEP 类加权更高）</code></pre>
+<p><strong>实操表</strong>：</p>
+<table><thead><tr><th>情形</th><th>处理</th></tr></thead><tbody><tr><td>Apple 标注 &quot;actively exploited in the wild&quot;</td><td><strong>立即部署，不等维护窗口</strong></td></tr><tr><td>CVE 出现在 Citizen Lab/Project Zero 报告的链条中</td><td>最高优先级</td></tr><tr><td>图形栈/内核驱动类&quot;仅影响显示&quot;的措辞</td><td><strong>仍按提权入口对待</strong>（见 #58）</td></tr><tr><td>信息泄露类（无 RCE 措辞）</td><td><strong>与 RCE 同等优先</strong>（缺它链条不成立，见 #51）</td></tr><tr><td>影响范围覆盖大量存量设备</td><td>即使无在野证据也需提升</td></tr></tbody></table>
+<h3>6.2 缩短&quot;供给—部署&quot;时延差</h3>
+<pre><code>Apple 发布修补（Day 0）
+     ↓
+组织实际完成部署（Day N）
+     ↓
+N 就是攻击者的免费作战窗口</code></pre>
+<table><thead><tr><th>措施</th><th>效果</th></tr></thead><tbody><tr><td>MDM 强制最低版本 + 自动更新窗口</td><td>直接压缩 N</td></tr><tr><td>提前验证兼容性（而非等补丁发布再测）</td><td>消除测试阻塞</td></tr><tr><td>对 T0/T1 单独走快速通道</td><td>关键设备优先</td></tr><tr><td>盘点&quot;无法升级&quot;设备（老机型）</td><td>识别永久性风险资产</td></tr></tbody></table>
+<blockquote><p><strong>供应链最脆弱的一环正是这个 N</strong>。Coruna 覆盖到 iOS 17.2.1 这一事实说明：即使漏洞已被修补数月，仍有大量设备处于暴露状态。</p></blockquote>
+<h3>6.3 情报投资方向</h3>
+<table><thead><tr><th>情报类型</th><th>价值</th><th>获取渠道</th></tr></thead><tbody><tr><td><strong>在野利用清单</strong></td><td>最高（直接指导补丁）</td><td>Apple 公告、Citizen Lab、Project Zero</td></tr><tr><td>漏洞供应链市场动态</td><td>中高（预测下一代能力方向）</td><td>研究会议、行业报告</td></tr><tr><td>套件基础设施 IOC</td><td>高（网络检测）</td><td>MVT IOC 库、Lookout、商业 TI</td></tr><tr><td>目标人群威胁画像</td><td>高（决定投入强度）</td><td>内部风险评估</td></tr></tbody></table>
+<h3>6.4 异构与冗余防御</h3>
+<p>由于攻击者的核心优势是<strong>&quot;知道所有人用同一版本、同一配置&quot;</strong>：</p>
+<table><thead><tr><th>措施</th><th>原理</th></tr></thead><tbody><tr><td><strong>版本异构</strong>（在可行范围内）</td><td>使单一链条无法覆盖全员</td></tr><tr><td><strong>配置异构</strong>（部分人开锁定模式）</td><td>迫使攻击者维护多套投递逻辑</td></tr><tr><td><strong>平台异构</strong></td><td>同一水坑需适配多种目标</td></tr><tr><td><strong>补丁时间错峰</strong></td><td>减少&quot;同一批漏洞同时暴露&quot;的规模</td></tr></tbody></table>
+<hr>
+<h2>7. 伦理与治理维度</h2>
+<p>作为防御性研究，需要正视这条供应链的治理现实：</p>
+<table><thead><tr><th>议题</th><th>现状</th></tr></thead><tbody><tr><td><strong>出口管制</strong></td><td>多国已将入侵软件纳入管制清单，但跨境执行难</td></tr><tr><td><strong>客户滥用</strong></td><td>报道显示被用于记者、活动人士、政治对手，超出&quot;执法&quot;用途</td></tr><tr><td><strong>问责机制</strong></td><td>供应商多主张&quot;客户自负合规&quot;，缺乏实际审计</td></tr><tr><td><strong>研究者角色</strong></td><td>出售漏洞是否合乎伦理存在持续争议；bounty 与灰色市场并存</td></tr><tr><td><strong>受害者通知</strong></td><td>部分项目（如 Pegasus Project）通过媒体/公民社会而非厂商通知</td></tr></tbody></table>
+<p><strong>对防御研究者的实践建议</strong>：</p>
+<ol><li>公开披露前评估：公开分析会摧毁该链的攻击价值（防御收益），但也可能泄露受害者的取证线索（需与当事人协商）</li><li>与公民社会/专业机构协作而非单打独斗</li><li>敏感目标群体的取证需注意<strong>证据法律效力与人身安全</strong>（见 #62）</li></ol>
+<hr>
+<h2>8. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>iOS 攻击产业是<strong>分工明确的供应链</strong>：发现者→采集方→集成商→转售方→客户，绝大多数攻击者不自己发现漏洞</td></tr><tr><td><strong>2</strong></td><td><strong>漏洞不可储存</strong>——其价值随公开与修补迅速归零，这决定了中间商与囤货式采购的必然存在</td></tr><tr><td><strong>3</strong></td><td>套件的技术特征可以直接反推其供应链位置：多链宽覆盖 = 长期多批次采购；单链窄覆盖 = 单批高质量供给</td></tr><tr><td><strong>4</strong></td><td><strong>Coruna 的多链架构不是技术偏好，而是采购成本摊薄的结果</strong></td></tr><tr><td><strong>5</strong></td><td>GHOSTBLADE 证明 exploit 会跨套件流转——<strong>修补一个被复用的漏洞可同时防护多个套件与客户</strong></td></tr><tr><td><strong>6</strong></td><td>补丁优先级应按&quot;该 CVE 出现在几条在野链条中&quot;加权，而非仅看 CVSS</td></tr><tr><td><strong>7</strong></td><td><strong>攻击者真正的弹药库是&quot;存量未更新设备&quot;</strong>——组织暴露时长 N 天，就有 N 天免费窗口</td></tr><tr><td><strong>8</strong></td><td>供给断点（覆盖版本截止点）是可预测的信号，反映供应商交付能力而非攻击者意愿</td></tr><tr><td><strong>9</strong></td><td>供应链压力（单洞寿命缩短）正在推动架构向&quot;无持久化突击&quot;迁移——DarkSword 是这个压力的产物</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>把 iOS 零日理解为&quot;天才黑客的发现&quot;会误导防御投资。 它是一个<strong>受时效性约束的商品市场</strong>：库存会过期、供给会断链、商品会流通。 因此最有效的防御不是&quot;防住最厉害的漏洞&quot;，而是<strong>缩短自己的部署时延</strong>——那是这个市场唯一无法绕过的需求侧变量。</p></blockquote>
+<hr>
+<h2>参考来源</h2>
+<ul><li>Citizen Lab: <a href="https://citizenlab.ca/2024/03/gods-own-weapon-the-global-impact-of-nso-groups-exploit-as-a-service-arsenal/" rel="nofollow noopener" target="_blank">*God's Own Weapon': The Global Impact of NSO Group's Exploit-as-a-Service Arsenal*</a></li><li>Citizen Lab: <a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Coruna 供应链与 CVE 来源分析</a></li><li>Amnesty International: <a href="https://www.amnesty.org/en/latest/research/2021/07/forensic-methodology-report-how-to-catch-nso-groups-pegasus/" rel="nofollow noopener" target="_blank">The Pegasus Project</a></li><li>Google Project Zero: <a href="https://googleprojectzero.blogspot.com/" rel="nofollow noopener" target="_blank">DarkSword 分析</a></li><li>Lookout / Pressure Point: <a href="https://www.lookout.com/threat-report" rel="nofollow noopener" target="_blank">Commercial surveillance vendor ecosystem mapping</a></li><li>相关调查报道：Washington Post、The Guardian、Le Monde 关于商业监控软件供应链的公开调查</li><li>CITP / Princeton: <a href="https://citp.princeton.edu/" rel="nofollow noopener" target="_blank">漏洞市场与治理研究</a></li><li>Apple Security Updates: <a href="https://support.apple.com/en-us/HT201222" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a76.html">← 第 76 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
