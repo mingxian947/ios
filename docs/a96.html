@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 设备流转与退出边界：二手机、维修、回收与离职交接上被忽略的那一半风险 | iOS 安全研究文章库</title>
+<meta name="description" content="四个流转场景的下行/上行风险、十类残留物是否随抹机消失的清点表（eSIM、MDM 注册、家庭组关系、钱包 Pass 都不自动消失）、&quot;清除是否可信&quot;的三点诚实边界、交出/接手/企业回收三套顺序流程（先服务端后设备）、五个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a96.html">
+<meta property="og:title" content="iOS 设备流转与退出边界：二手机、维修、回收与离职交接上被忽略的那一半风险">
+<meta property="og:description" content="四个流转场景的下行/上行风险、十类残留物是否随抹机消失的清点表（eSIM、MDM 注册、家庭组关系、钱包 Pass 都不自动消失）、&quot;清除是否可信&quot;的三点诚实边界、交出/接手/企业回收三套顺序流程（先服务端后设备）、五个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a96.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 96 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 设备流转与退出边界：二手机、维修、回收与离职交接上被忽略的那一半风险</h1>
+<blockquote><p>本文是防御视角的处置流程与核对清单，<strong>不提供可利用代码</strong>，不包含解锁绕过、数据恢复手法或任何可照做的取证操作。面向需要处理转卖、回收、维修与人员交接的个人用户、IT 管理员与咨询场景。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>整个漏洞系列有一个隐含前提：<strong>这台设备一直属于你</strong>。#2/#81/#90–#94 讨论的都是&quot;外人怎么进来&quot;。</p>
+<p>但咨询里有一类高频问题跟入侵无关：</p>
+<ul><li>我把旧 iPhone 卖了，里面到底还剩什么？</li><li>我接手一台二手机，该检查什么才敢登录我的账户？</li><li>员工离职交回设备，公司怎么证明数据已经处理干净？</li><li>设备维修换件之后，之前那份暴露还在不在？</li></ul>
+<p>这些问题的共同结构是<strong>设备在时间轴上换主人</strong>。风险有两个方向：<strong>下行</strong>（你的残留暴露给下一任）与<strong>上行</strong>（上一任的残留与配置继续影响你）。这一层几乎不需要漏洞，主要损失来自<strong>账户关系、注册状态与密钥归属</strong>——所以它与 #84/#89/#92 的&quot;账户优先&quot;结论是同一条原则在流转场景里的应用。</p>
+<hr>
+<h2>2. 四个流转场景</h2>
+<table><thead><tr><th>场景</th><th>下行风险（你留给别人的）</th><th>上行风险（别人留给你的）</th><th>关键控制点</th></tr></thead><tbody><tr><td>个人转卖 / 以旧换新 / 赠送</td><td>账户未退出导致的锁与关系残留、备份与云侧仍在、iMessage 与通话继续路由到这台设备</td><td>—</td><td>退出账户与所有权转移，而不是只&quot;抹掉&quot;</td></tr><tr><td>企业离职回收 / 批量处置</td><td>员工个人数据留在公司设备（上行反向）、公司凭据留在个人设备</td><td><strong>BYOD 边界最乱的一格</strong>：谁的数据、谁有权擦</td><td>事先约定边界 + 处置留证明</td></tr><tr><td>维修 / 部件更换</td><td>维修期间设备的可见性与临时解锁</td><td>更换件带来的既往配置与信任状态</td><td>维修前的账户与可见内容收敛（#84 配件与时长原则）</td></tr><tr><td>丢失 / 被盗 / 被扣押后回流</td><td>已被他人长期持有形成的暴露史</td><td>回流设备带着未知既往</td><td>当成不可信设备重新开始，不做&quot;看起来干净就行&quot;</td></tr></tbody></table>
+<p>一句读法：<strong>转卖场景管下行，接手场景管上行</strong>。两个方向的清单不一样，混用会漏。</p>
+<hr>
+<h2>3. 残留物按类型清点（这是本篇的核心表）</h2>
+<table><thead><tr><th>残留类型</th><th>是否随&quot;抹掉所有内容和设置&quot;消失</th><th>需要额外动作</th></tr></thead><tbody><tr><td>本地照片、消息、备忘录</td><td>是（本机侧）</td><td><strong>但云侧与备份仍在</strong>：核对 iCloud 与本机备份条目（#74）</td></tr><tr><td>Apple ID 登录态与设备清单条目</td><td>通常需你主动退出登录</td><td>从账户设备清单移除，否则这台设备仍在你的受信集合里</td></tr><tr><td>钥匙串与已保存密码</td><td>本机消失</td><td>云钥匙串成员关系不变；改密才是有效动作</td></tr><tr><td>钱包卡片与 Pass（含门禁/房卡/车钥匙）</td><td>需从钱包移除且发卡方撤销</td><td><strong>凭证撤销由发卡方/门禁方执行</strong>，抹机不替代它（#89）</td></tr><tr><td>eSIM 与号码绑定</td><td><strong>不会</strong>因抹机自动释放</td><td>运营商侧删除或转移，否则套餐与号码关系仍在（#72/#89）</td></tr><tr><td>描述文件与证书、MDM 注册</td><td>多数随抹机移除，但<strong>注册记录在服务端</strong></td><td>企业侧需在管理控制台注销设备并归档（#76）</td></tr><tr><td>家庭共享 / 屏幕使用时间管理员关系</td><td>否</td><td>这是关系型暴露，必须在组织者账户里移除（#92 的&quot;合法擦除权限&quot;来源之一）</td></tr><tr><td>配对的电脑与配件信任</td><td>部分保留在对方侧</td><td>信任电脑需在那台电脑上取消；配件重新配对</td></tr><tr><td>订阅、自动化与快捷指令</td><td>随账户而非设备</td><td>核对账户侧订阅与自动化触发器</td></tr><tr><td>位置共享与&quot;查找&quot;</td><td>需退出且从共享清单移除</td><td>关系型暴露（#95 第 5 节的同一动作）</td></tr></tbody></table>
+<p><strong>读法</strong>：&quot;抹掉所有内容和设置&quot;只解决第一行的本机部分。剩下的要么在服务端（账户、运营商、MDM 平台、发卡方），要么是关系型（家庭组、共享），<strong>都不会因为设备被重置而自己消失</strong>。这是流转场景里最普遍的错误认知。</p>
+<hr>
+<h2>4. &quot;清除是否可信&quot;的诚实边界</h2>
+<p>被问得最多的一句话是：&quot;我抹过了，别人还能拿到什么？&quot;</p>
+<p>需要如实回答的三点：</p>
+<ol><li><strong>本机侧</strong>：现代 iOS 的设备密钥随账户与本机保护层级绑定，抹机在常规意义上会让本机数据不可读——这是可以给的结论。</li><li><strong>不可证明的部分</strong>：外部无法验证那一任使用者是否在抹机前做过备份、导出或云同步。<strong>&quot;设备干净&quot;不等于&quot;数据没走过&quot;</strong>。任何声称能证明&quot;彻底清除&quot;的第三方说法都应存疑。</li><li><strong>仍然活着的副本</strong>：iCloud、本机加密备份、App 自有同步、邮箱与聊天服务的服务器侧、运营商记录。<strong>这些才是流转场景里的主要泄露通路</strong>，而且都不在这台设备上（#74 的密钥归属结论在这里同样成立）。</li></ol>
+<p>所以对个人转卖的正确心态：<strong>抹机是必要的第一步，不是处置的全部</strong>；真正的收尾动作都在账户与关系侧。</p>
+<hr>
+<h2>5. 两套可直接执行的流程</h2>
+<h3>A. 交出设备前（个人，按顺序做）</h3>
+<ol><li>先决定<strong>这台设备是否还要接收任何东西</strong>：iMessage 转发、通话接力、邮件提醒都会继续路由到它。</li><li>从钱包逐张移除卡片与 Pass，并让发卡方/门禁方撤销（#89）。</li><li>退出 Apple ID（这会解除激活锁与&quot;查找&quot;），并<strong>在账户设备清单里确认它已经不在了</strong>。</li><li>组织者身份检查：家庭共享、屏幕使用时间管理员、共享日历与位置（#95）。</li><li>号码与 eSIM：若计划保留号码，先在运营商侧处理；若不保留，明确释放（否则号码关系跟着设备走）。</li><li>取消与此前电脑的配对信任（在那台电脑上操作）。</li><li>最后一步再执行抹机，并保留一次&quot;我已退出账户&quot;的界面证据（自用留档）。</li></ol>
+<h3>B. 接手二手机 / 回流设备（按顺序做）</h3>
+<ol><li><strong>先重置再登录自己的账户</strong>——不要带着上一任的状态登录（否则你的数据进入一台既往未知的设备）。</li><li>更新到当前支持版本（V2 暴露变量见 #94）。</li><li>核对：描述文件与证书清单、是否有企业 App 残留、MDM 注册状态提示（出现&quot;管理&quot;字样即为已注册，必须要求对方注销后再用）。</li><li>核对激活锁确已解除、账户无关联（否则这台设备的所有权并不干净，属于 #92 里的锁类不可逆问题）。</li><li>登录后再检查一次：订阅、屏幕使用时间管理员、位置共享清单里是否出现不属于你的项。</li></ol>
+<h3>C. 企业回收与批量处置</h3>
+<ol><li><strong>边界事先约定</strong>：BYOD 场景里个人与公司数据的分界必须在下发策略时说明，而不是在离职时讨论。</li><li>处置动作分步并留记录：先撤销访问（证书、SSO 会话、邮箱同步），再注销管理注册，最后执行抹除。顺序反了会留下&quot;设备已清但凭据仍可访问&quot;的窗口（#91 剧本 A 的同一原则：<strong>先服务端后设备</strong>）。</li><li>台账要能回答三件事：哪台设备、什么时候、以什么方式处理，由谁执行。这是合规争议里唯一有用的东西。</li><li>离职员工的<strong>个人设备</strong>里公司数据的处理权边界要按当地规则走，技术动作不能替法律判断（本系列一贯口径：不构成合规意见）。</li><li>回收设备重新下发前，按 B 的第 1–4 步当作接手设备处理一遍。</li></ol>
+<hr>
+<h2>6. 与维修、扣押与丢失相关的三条</h2>
+<ul><li><strong>维修</strong>：送修前收敛可见内容（锁屏通知、面容替代项、短期解锁窗口），维修时长本身是风险参数（#84/#88 关于物理接触时长的结论）。更换件带来的既往配置无法从设备外观判断，收修后按 C/B 流程核对一遍。</li><li><strong>被扣押后回流</strong>：按&quot;不可信设备&quot;处理，不要复用原有登录与钥匙串状态；能重新走一遍开户与账户治理的最省事。</li><li><strong>丢失/被盗</strong>：立即动作在服务端而非设备端（标记丢失、锁卡锁号、退出会话），设备端取证价值有限且可能被清除（#92 的顺序原则）。</li></ul>
+<hr>
+<h2>7. 五个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;恢复出厂就彻底干净了&quot;</td><td>只解决本机数据；云侧、备份、关系型暴露与注册记录都不随之消失</td></tr><tr><td>&quot;抹机就等于退出了账户&quot;</td><td>不退出登录可能保留锁与设备清单条目，所有权与路由都不干净</td></tr><tr><td>&quot;激活锁能保护我的数据&quot;</td><td>它保护设备 resale 价值，不保护已同步到云端的数据；对使用者它同时是&quot;不可逆锁&quot;（#92）</td></tr><tr><td>&quot;企业 MDM 注销就是数据清除&quot;</td><td>注销解除管理关系，抹除才是数据处理；两者都要做且要留证</td></tr><tr><td>&quot;二手机看着干净就能直接登录&quot;</td><td>上一任的描述文件、MDM 注册与账户关系是看不见的，必须先重置再登录</td></tr></tbody></table>
+<hr>
+<h2>8. 一句话结论</h2>
+<p>设备流转是&quot;账户与关系治理&quot;问题，不是&quot;设备加固&quot;问题——它属于 #93 里的 L1/L3 格（设计选择与配置），指望补丁没有任何意义。</p>
+<ul><li>对个人：交出设备前按 A 顺序做完，重点在钱包撤销、退出账户、号码与家庭组关系；接手二手机按 B，先重置再登录。</li><li>对企业：把回收流程写成&quot;先撤访问、再注销、后抹除、留台账&quot;，并把 BYOD 边界事先讲清楚。</li><li>对高危个体：任何回流、维修、赠机都按不可信设备重新开始，不要复用既往登录与钥匙串状态。</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a95.html">← 第 95 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
