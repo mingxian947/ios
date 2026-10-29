@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>老年与照护场景的 iOS 安全边界：决策能力衰减、照护授权与被切断的报告渠道 | iOS 安全研究文章库</title>
+<meta name="description" content="四个区别于儿童场景的结构（能力向下、持有人与控制人分离、对手是合法进入者、报告渠道被恐惧切断）、三种照护模型风险对照、七项授权机制的保护与副作用表、由第三方执行的 30 分钟十二项年度体检表、六类事件的正确第一步、保住报告渠道的四条硬规则">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a106.html">
+<meta property="og:title" content="老年与照护场景的 iOS 安全边界：决策能力衰减、照护授权与被切断的报告渠道">
+<meta property="og:description" content="四个区别于儿童场景的结构（能力向下、持有人与控制人分离、对手是合法进入者、报告渠道被恐惧切断）、三种照护模型风险对照、七项授权机制的保护与副作用表、由第三方执行的 30 分钟十二项年度体检表、六类事件的正确第一步、保住报告渠道的四条硬规则">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a106.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 106 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>老年与照护场景的 iOS 安全边界：决策能力衰减、照护授权与被切断的报告渠道</h1>
+<blockquote><p>本文是防御视角的场景分析与配置、响应方法，<strong>不提供可利用代码</strong>，不包含诱导、规避监护、代操作账户或任何可照做的操纵手法。面向子女与家属、养老与照护机构、以及需要为长辈做安全安排的咨询场景。</p></blockquote>
+<h2>1. 为什么这一场景必须单独评估</h2>
+<p>#98 处理的是儿童与校园：那里的核心结构是&quot;决策人和承担风险的人不是同一个人，且孩子会随年龄获得自主权&quot;。老年与照护场景的风险结构正好相反，有四个独特之处：</p>
+<ol><li><strong>决策能力是随时间下降的，不是上升的</strong>。儿童场景里监护强度应当逐步退出；这里恰恰相反——需要在还能自主决定的时候把授权与安排做完，之后越晚做越难做（与 #102 的失能/身后状态衔接）。</li><li><strong>持有人和实际控制人常常分离</strong>。设备在长辈手里，实际配置、改密、退款、订阅取消往往由子女代做。每一次代做都在转移控制权，而<strong>转移本身不留痕迹</strong>（#96 的关系型清点在同一个位置）。</li><li><strong>对手多数是&quot;合法进入的人&quot;</strong>。付费照护者、机构工作人员、上门维修、代办事务的人，先以合法身份获得接触与授权，之后才发生资金或隐私侵害（#99 的&quot;合法 foothold&quot;在这里更常见，因为合法授权是工作的一部分）。</li><li><strong>报告渠道是被恐惧切断的</strong>。长辈不报告的典型原因不是不知道，而是怕被说&quot;你老糊涂了&quot;、怕设备被收走、怕被送去机构。可见性归零的后果比技术漏洞严重（#98 里同一原则，机制不同）。</li></ol>
+<p>所以本场景的评估口径不是&quot;这台 iPhone 有没有漏洞&quot;，而是：<strong>谁在合法地控制这台设备与这个账户、这套授权是否有期限与复核、以及当事人是否还保有说出来的通道。</strong></p>
+<hr>
+<h2>2. 三种照护模型，风险方向完全不同</h2>
+<table><thead><tr><th>模型</th><th>合法控制权在谁手里</th><th>主要风险方向</th><th>最容易被忽略的一点</th></tr></thead><tbody><tr><td><strong>独居但子女协助</strong>（最常见）</td><td>长辈本人 + 子女持有恢复方式</td><td>上行：所有&quot;远程协助&quot;通道都可被仿冒（#97 的客服/亲属求助族在家庭内部同样有效）；下行：子女代管后长辈失去对自己账户的知情</td><td><strong>谁是可以改密码的那个人</strong>通常没人记录；一个手机号、一台备用设备就能长期持有账户控制权</td></tr><tr><td><strong>机构/住家照护</strong></td><td>长辈本人 + 工作人员的实际接触</td><td>接触面（设备解锁码被知晓、设备离手充电/清洁）、资金侧（代买代付、订阅、免密额度）</td><td><strong>接触与授权是分开的两件事</strong>：给了支付授权就等于把 #89 的发卡侧与账户侧一起交出去</td></tr><tr><td><strong>依赖型/失能</strong>（认知或躯体功能明显下降）</td><td>多由监护人持有</td><td>全部转为<strong>账户与资金治理</strong>问题：设备安全已不是瓶颈，授权是否被滥用在账目上才看得见</td><td>此时的技术加固收益极低，<strong>把可见性搬到第三方账目与定期核对上</strong>才有效</td></tr></tbody></table>
+<p>一句判读：家属侧最该做的是&quot;<strong>把授权写下来、给出期限、定期复核</strong>&quot;；机构侧最该做的是&quot;<strong>把资金可见性与接触面分开</strong>&quot;。两者都不是&quot;给老人装一个定位 App&quot;。</p>
+<hr>
+<h2>3. 授权与托管机制的副作用（必须如实告诉家属）</h2>
+<p>这些能力都在保护与侵害之间同时存在，只讲前者会做错决定：</p>
+<table><thead><tr><th>机制</th><th>提供的保护</th><th>同时产生的副作用</th><th>建议的取舍</th></tr></thead><tbody><tr><td>家庭共享与&quot;购买项目共享&quot;</td><td>长辈无需自己操作支付</td><td>消费入口集中在一个付款人身上：<strong>任何人拿到设备就拿到额度</strong>；争议退款时需要付款人身份配合</td><td>共享保留，但免密额度与订阅核对放在<strong>付款人</strong>一侧定期做</td></tr><tr><td>屏幕使用时间&quot;通信与 App 限额&quot;、内容限制</td><td>收窄诈骗类入口</td><td>常被理解为&quot;管小孩&quot;，导致当事人拒绝使用；且限制发起人的账户本身就是高价值目标（#92 的合法擦除权限）</td><td>只用于下载审批与联系人白名单，不作行为监控</td></tr><tr><td>位置共享与&quot;查找&quot;</td><td>走失、急救场景不可替代</td><td>形成持续位置历史；<strong>照护关系结束后不会自动解除</strong>（#95/#96 的同一清点动作）</td><td>明确共享对象清单与终止条件，每季度核对一次</td></tr><tr><td>子女代持恢复方式（备用手机号、受信任设备、恢复密钥）</td><td>防止账户永久锁死</td><td>这是整个场景里<strong>最强的单点</strong>：持有恢复方式的人可以重置密码、把设备清单换成自己</td><td>代持必须登记：谁持有、什么时候开始、目的、如何结束</td></tr><tr><td>医疗/健康类授权与急救信息</td><td>急救时可用</td><td>授权后<strong>二次流向不可观测</strong>（#100 的出院后流通在这里同样适用）</td><td>授权类别逐项勾选，不做&quot;全部允许&quot;</td></tr><tr><td>远程协助（屏幕共享类 App、代办软件、维修工具）</td><td>解决实际操作困难</td><td>协助期间设备内容对协助方可见，且诈骗族里&quot;屏幕共享&quot;是最高危形态（#97）</td><td>只允许<strong>当面、当事人主动发起、时长可解释</strong>的协助；任何&quot;电话里让你装&quot;的一律拒绝</td></tr><tr><td>代办（银行、保险、政务、退款）</td><td>必要</td><td>代办链条上的验证码、短信转发、邮箱访问一并交出（#99 第 ④ 类）</td><td>代办只交材料，不交验证码通道</td></tr></tbody></table>
+<p><strong>这张表的价值</strong>：让家属理解&quot;技术限制&quot;帮不上多少，真正决定结果的是<strong>授权登记</strong>与<strong>账目核对</strong>这两件事。</p>
+<hr>
+<h2>4. 年度体检：由第三方执行，不要求当事人自己查</h2>
+<p>#99 的 12 项清点要求当事人有能力、有意愿逐项查看界面。在认知功能下降或长期由他人代管的场景里，这个前提不成立。所以这里给一份<strong>可由家属或受托人当面完成、约 30 分钟</strong>的体检表，判读标准是&quot;是否出现了当事人说不清来源的变更&quot;：</p>
+<table><thead><tr><th>#</th><th>检查项</th><th>在哪看</th><th>异常判读</th></tr></thead><tbody><tr><td>1</td><td>Apple ID 登录设备清单</td><td>设置 → 顶部账户</td><td>有当事人无法说明的机型或时间</td></tr><tr><td>2</td><td>账户联系方式与恢复方式</td><td>登录与安全性</td><td>手机号/受信任设备被换成他人；救援邮箱非本人可控</td></tr><tr><td>3</td><td>双因子与通行密钥档位</td><td>登录与安全性</td><td>保护档位被下调（#105 的密钥位置问题）</td></tr><tr><td>4</td><td>iCloud 备份与照片同步开关</td><td>iCloud</td><td>从关闭变为开启（影像外流前置步骤，#100）</td></tr><tr><td>5</td><td>家庭组与屏幕使用时间管理员</td><td>设置 → 家人共享</td><td>组织者/管理员身份发生变化（#92/#98 同一位置）</td></tr><tr><td>6</td><td>位置共享对象清单</td><td>&quot;查找&quot;</td><td>出现已结束的照护者、机构或陌生人</td></tr><tr><td>7</td><td>描述文件与设备管理</td><td>通用 → VPN 与设备管理</td><td>任何非本人安装项（#95/#103 的最高信号项）</td></tr><tr><td>8</td><td>默认支付、钱包卡片与订阅</td><td>钱包与 Apple Pay、订阅</td><td>新增卡片/额度；不明订阅（#89 的发卡侧同源）</td></tr><tr><td>9</td><td>短信与通话转发、呼叫转移</td><td>信息、电话</td><td>转发被开启 = 验证码通道被复制（#99 第 ④ 类）</td></tr><tr><td>10</td><td>已装 App 中的远程访问、代办、&quot;监控/定位家人&quot;类</td><td>主屏幕 + App Store 购买记录</td><td>无法说明安装来源与目的（#86/#100）</td></tr><tr><td>11</td><td>通知暴露内容（锁屏可见范围）</td><td>通知设置</td><td>验证码、银行、健康类通知在锁屏全文可见（#84/#95）</td></tr><tr><td>12</td><td>紧急医疗信息与医疗急救卡</td><td>健康 App</td><td>联系人是他人且当事人不知情</td></tr></tbody></table>
+<p><strong>执行纪律</strong>：三项以上异常，或任一项变化但当事人&quot;不知道是谁改的&quot;，就按 #91 剧本 A 处理顺序——<strong>服务端先行</strong>：改密、清设备、锁卡锁号，再谈设备。不要把&quot;抹掉重来&quot;当第一步，那会把账目与证据一起灭失（#92 的顺序原则）。</p>
+<hr>
+<h2>5. 事件响应：这一场景特有的正确第一步</h2>
+<table><thead><tr><th>事件</th><th>第一步（不要跳）</th><th>后续</th><th>常见的错误第一步</th></tr></thead><tbody><tr><td>疑似被照护者/工作人员盗刷或代付</td><td><strong>先在支付与订阅侧止损并取回流水</strong>，不与对方当面对质</td><td>核对设备上的账户改动与描述文件（第 4 节表格）；机构侧走内部举报与劳动关系渠道</td><td>直接解雇或争吵，导致流水与设备权限同时丢失</td></tr><tr><td>被电话引导&quot;开通/退款/认证&quot;并装了远程协助</td><td>立刻终止会话、断网、核对屏幕期间被看到的内容</td><td>按 #97 的授权环节改支付与账户；必要时联系发卡方</td><td>只卸载 App（授权与已改的设置仍在）</td></tr><tr><td>长辈账户被他人长期代管，本人不知情</td><td>把账户控制权<strong>登记并归还</strong>：明确持有人、代持范围与期限</td><td>重置恢复方式；重新做设备清单；把支付与订阅核对转到付款人</td><td>继续代管（风险不变，只是没人负责）</td></tr><tr><td>认知能力下降，需要设立监护/委托</td><td>在还能表达意愿时完成授权与安排（与 #102 的三档安排衔接）</td><td>建立第三方账目核对机制；技术侧只保留急救必需项</td><td>先做设备加固，错过尚能自主决定的窗口</td></tr><tr><td>走失/急救风险</td><td>保留医疗急救卡与位置共享（第 3 节），并把联系人核实一遍</td><td>与 #90 的物理接触面一起评估谁持有解锁码</td><td>关掉一切共享换取隐私</td></tr><tr><td>机构要求统一托管设备/装管控</td><td>明确采集范围、留存期、访问人，以及<strong>退出时的注销流程</strong></td><td>按 #96 的企业回收顺序：先撤访问、再注销、后抹除、留台账</td><td>默认&quot;机构负责安全&quot;</td></tr></tbody></table>
+<p><strong>共同原则</strong>：这里最不可逆的损失通常是<strong>资金</strong>与<strong>当事人的知情与表达能力</strong>，不是设备。顺序是：支付与服务端 → 授权登记 → 设备。</p>
+<hr>
+<h2>6. 把报告渠道保住（比任何设置都有效）</h2>
+<p>技术措施的上限在这里更低，因为可执行性受认知与意愿限制。四条不需要判断力的家庭硬规则，收益高于任何设置项：</p>
+<ol><li><strong>付款人一侧每季度自己核对一次</strong>流水与订阅，不等长辈汇报——把发现责任放在还有能力的人身上。</li><li><strong>任何&quot;让你装东西/开屏幕共享/报验证码&quot;的电话，一律转给家属处理</strong>，长辈不需要判断真伪，只需要转交（#97 的&quot;不需要判断力的规则&quot;在此最适用）。</li><li><strong>改动要有记录</strong>：谁在设备上做了什么、改了什么设置。集中变更本身就是信号（#99 的核心判读），代管场景里这条只能靠家属执行。</li><li><strong>不因&quot;上当&quot;而收回设备或当面追责</strong>。一次羞辱换来的是一次隐瞒，之后所有事件都会晚三个月被发现。把话术固定为&quot;这件事我们处理，不用你解释&quot;。</li></ol>
+<p>一句经验值：<strong>照护关系里安全性的量度，是当事人愿意给你看原始内容（短信、扣费通知、安装的东西）的速率</strong>，不是设置的严格程度。</p>
+<hr>
+<h2>7. 六个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;老人不会用，所以不会被攻击&quot;</td><td>主要入口是电话与上门代办（#97），跟使用熟练度无关</td></tr><tr><td>&quot;我帮他管好手机就安全了&quot;</td><td>代管把最强控制点（恢复方式）转移到你身上，同时切断了本人的知情（第 3 节）</td></tr><tr><td>&quot;装了定位和防骗 App 就够了&quot;</td><td>资金侧的免密额度、订阅与共享付款才是持续损失来源（#89）</td></tr><tr><td>&quot;机构管设备，安全归机构&quot;</td><td>托管只覆盖设备与配置，账户、支付与关系结构仍在家庭侧（#98/#96 同一口径）</td></tr><tr><td>&quot;老人自己会说不合适&quot;</td><td>报告渠道被恐惧切断时，可见性归零；要把发现责任搬到付款人（第 6 节）</td></tr><tr><td>&quot;以后再说，现在还没到那步&quot;</td><td>授权与安排必须在还能自主表达时做；失能后只剩争议（#102）</td></tr></tbody></table>
+<hr>
+<h2>8. 一句话结论</h2>
+<p>老年与照护场景里，&quot;这台 iPhone 安不安全&quot;同样是最不重要的问题。真正决定结果的是三件事：</p>
+<ul><li><strong>授权登记</strong>：谁持有恢复方式、谁可以改密码、谁在付款、共享对象有谁、有效期到什么时候——这些都能当场清点（第 3、4 节）。</li><li><strong>发现责任的归属</strong>：把核对搬到还有能力执行的一方（付款人、家属、受托人），而不是指望当事人汇报。</li><li><strong>报告渠道</strong>：任何让当事人不敢给你看原始内容的做法都在降低安全性；羞辱一次，隐瞒三个月。</li></ul>
+<p>家属做第一、三项，机构做第一、二项并写下退出流程，其余按 #80 与 #95 的通用清单维持即可。涉及监护、委托与账户处置的效力问题，须按当地法律与专业意见办理，本文不构成法律意见。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a105.html">← 第 105 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
