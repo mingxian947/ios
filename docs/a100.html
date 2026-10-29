@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 健康与医疗数据的攻击面：不可更改、长期有效、大部分外流是你自己授权的 | iOS 安全研究文章库</title>
+<meta name="description" content="四层数据分布与&quot;出院后二次流转&quot;的不可观测边界、四条通路按&quot;谁必须失败&quot;分层、25 分钟八项端侧清点（授权类别/数据来源/通知暴露/云端档位/导出副本）、&quot;一次看 vs 持续读&quot;的三条交付决策规则、分人群最小动作集、六个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a100.html">
+<meta property="og:title" content="iOS 健康与医疗数据的攻击面：不可更改、长期有效、大部分外流是你自己授权的">
+<meta property="og:description" content="四层数据分布与&quot;出院后二次流转&quot;的不可观测边界、四条通路按&quot;谁必须失败&quot;分层、25 分钟八项端侧清点（授权类别/数据来源/通知暴露/云端档位/导出副本）、&quot;一次看 vs 持续读&quot;的三条交付决策规则、分人群最小动作集、六个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a100.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 100 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 健康与医疗数据的攻击面：不可更改、长期有效、大部分外流是你自己授权的</h1>
+<blockquote><p>本文是防御视角的数据流分析与清点、处置方法，<strong>不提供可利用代码</strong>，不包含任何读取他人健康数据的手法。面向使用健康/医疗类 App、可穿戴设备、慢病管理或生育/心理相关记录的个人，以及需要为员工健康数据划边界的企业与咨询场景。各设置项名称随 iOS 版本与地区变化，以设备实际界面为准。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>系列里的框架大多默认损失是<strong>可逆或可换的</strong>：#89 处理钱（可挂失、可拒付），#84 处理密钥（可换密码），#91 按后果分类时把&quot;可逆性&quot;当作分诊的第一根轴。</p>
+<p>健康与医疗数据不属于这一类：</p>
+<ol><li><strong>改不了</strong>。密码泄露可以换，病史、基因与生殖相关记录、精神科就诊、用药史不能撤回。一旦外流，危害是<strong>终身有效</strong>的。</li><li><strong>大部分外流来自合法授权</strong>，不来自漏洞。第三方 App 的读取授权、共享给家人/医生、以数据换保费的协议、导出的 PDF——没有一处需要 iOS 存在缺陷（#83 那句&quot;Apple 补丁修不到的那一片攻击面&quot;在这里最极端）。</li><li><strong>跨出 Apple 生态之后完全不可观测</strong>。数据一旦被授权给某家 App 或某家机构，它的留存、二次流转和再披露都不在设备侧，任何端侧清点都查不到（这是本篇的诚实边界）。</li><li><strong>危害不是经济损失，而是歧视、关系与自主权</strong>：保险与就业判断、家庭内部的知识不对等、被跟踪者对被照顾者行踪与症状的了解（#99 的接触面在这里叠加一层敏感内容）。</li></ol>
+<p>所以评估口径要换成：<strong>这份数据现在在哪些地方各有一份副本、每个副本是谁授权的、还能不能收回、收不回的那一份会造成什么</strong>。</p>
+<hr>
+<h2>2. 数据实际分布在四层</h2>
+<pre><code>┌─ 第 1 层：设备侧 ──────────────────────────────────────┐
+│  健康 App 的本地存储（按数据类型分类）                 │
+│  原始来源：iPhone 传感器、Apple Watch 等配件、手动录入  │
+├─ 第 2 层：App 与授权关系 ──────────────────────────────┤
+│  HealthKit 类读写授权、医疗/慢病/生育/心理类 App       │
+│  写回（App 写入健康数据）与读取（App 读取）是两种关系   │
+├─ 第 3 层：云端与同步 ──────────────────────────────────┤
+│  健康数据云同步、iCloud 设备备份（#74）                │
+│  第三方服务商自己的账户与服务器（不在 Apple 手里）      │
+├─ 第 4 层：出院后的二次流转 ────────────────────────────┤
+│  保险核保与体检、雇主健康计划、医疗机构病历系统、       │
+│  研究/数据合作、导出的 PDF/压缩文件、聊天里发出去的截图 │
+└───────────────────────────────────────────────────────┘</code></pre>
+<p>三条决定后续判断的设计事实：</p>
+<ul><li><strong>授权粒度是按数据类别给的</strong>，不是一次&quot;同意读取健康数据&quot;。所以历史上一连串&quot;当时随手同意&quot;会累积成一份很宽的权限面，而界面里可以逐项看到（第 4 节）。</li><li><strong>写入与读取不对称</strong>：App 往健康数据里写内容通常不需要同等提示，读取才有清单。这意味着&quot;某条记录从哪来&quot;需要单独核对来源。</li><li><strong>加密与可访问性会随账户保护档位变化</strong>：在开启高级数据保护（ADP）后，健康类数据被归入 Apple 声明不可解密的类别；未开启时走标准云端保护（#69/#74/#105 的同一分界，以 Apple 当期文档为准）。这一项是所有&quot;云端那份副本谁能拿到&quot;问题的开关。</li></ul>
+<p>第 4 层不在 iOS 的攻击面里，但它是真实损失最常发生的地方。设备加固做得再好，把报告发进一个聊天群就结束了控制——这一层只能靠<strong>决策纪律</strong>，不靠技术。</p>
+<hr>
+<h2>3. 四条通路，按&quot;谁必须失败&quot;分层</h2>
+<table><thead><tr><th>通路</th><th>需要 iOS 有漏洞吗</th><th>数据离开控制的方式</th><th>现实危害</th><th>防守杠杆位置</th></tr></thead><tbody><tr><td>① App 授权过宽 / 忘记收回</td><td>否</td><td>类别级读写授权 + 服务商条款</td><td>高（长期留存、二次流转不可观测）</td><td>授权清点与最小化（第 4 节）</td></tr><tr><td>② 账户与同步层被拿到</td><td>否（账户接管即可，#89/#99）</td><td>备份、健康数据同步、同一账户的其他设备</td><td>高，且<strong>批量</strong>（一次拿到全部类别）</td><td>验证因子、设备清单、ADP 档位</td></tr><tr><td>③ 设备/配件的物理与流转场景</td><td>否</td><td>送修、二手机、共享 Apple Watch、锁屏医疗卡可见</td><td>中，取决于对方是谁</td><td>#84/#96/#99 的既有结论逐字适用</td></tr><tr><td>④ 主动交付与诱导</td><td>否</td><td>核保材料、雇主健康计划、&quot;免费检测/测评&quot;换数据</td><td>中—高，且<strong>不可撤回</strong></td><td>交付前的决策规则（第 6 节）</td></tr></tbody></table>
+<p>注意①和④的防守动作完全不在 iOS 里；②是账户治理（#89/#99 的第①优先级在这里同样是第一位）；③只需要维持既有清单。</p>
+<p><strong>所以这一层真正新增的工作只有一件：把授权面清点出来并收窄，其余都是复用。</strong></p>
+<hr>
+<h2>4. 端侧清点表（约 25 分钟，全部可在自己设备上核验）</h2>
+<p>按顺序做，&quot;不确定&quot;要保留而不是猜。</p>
+<table><thead><tr><th>#</th><th>核对项</th><th>位置（大致路径）</th><th>看到的&quot;有&quot;意味着什么</th></tr></thead><tbody><tr><td>1</td><td>有读取授权的应用清单</td><td>设置 → 隐私与安全 →  Apple 与安全性 → 健康与身体（或直接搜索&quot;健康&quot;）</td><td>每一行都是一份持续的读取能力，历史授权不会自己失效</td></tr><tr><td>2</td><td>健康 App 内的&quot;共享与访问&quot;</td><td>健康 App → 概要 → 共享 → App 与服务 / 设备</td><td>显示类别粒度；逐个打开确认<strong>具体共享了哪些类别</strong></td></tr><tr><td>3</td><td>数据来源清单</td><td>健康 App → 浏览 → 各类型 → 数据来源与添加</td><td>回答&quot;这条记录是谁写进来的&quot;（写入与读取不对称，见第 2 节）</td></tr><tr><td>4</td><td>手动/他人录入的内容</td><td>健康 App → 医疗卡/标识、用药、症状记录</td><td>家人或照护者可能代填；这部分在别人知道密码时最易被改（#84/#99）</td></tr><tr><td>5</td><td>通知与锁屏暴露</td><td>设置 → 通知（健康/用药/周期类 App）；锁屏可见性</td><td>通知内容本身就是泄露面，不需要打开 App（#95 的同类判断）</td></tr><tr><td>6</td><td>配件与配对设备</td><td>手表等配对清单、送修前的配对解除</td><td>配对即同步历史数据（#96 的残留逻辑适用）</td></tr><tr><td>7</td><td>云端档位</td><td>设置 → 你的姓名 → iCloud 备份 / 高级数据保护</td><td>决定&quot;云端那份谁能拿到&quot;（第 2 节第三条）</td></tr><tr><td>8</td><td>导出的副本</td><td>文件 App、邮件、聊天记录、网盘、邮箱附件</td><td><strong>这些是最难追回的</strong>；只能清点已知外发点</td></tr></tbody></table>
+<p>第 8 项建议顺手做一次固化：健康 App 支持把记录导出为 PDF/数据文件，放到<strong>只有你控制的存储</strong>里（与 #92 的&quot;账户之外的离线副本&quot;同一原则）。用途有两个：一是换机/就医时的自备材料，二是当数据被质疑或篡改时你有一份原始版本。</p>
+<hr>
+<h2>5. 缺陷类别与归属（对齐 #81/#91/#93）</h2>
+<p>把这一层塞进既有表，结论很集中：</p>
+<table><thead><tr><th>维度</th><th>在这一层的读法</th></tr></thead><tbody><tr><td>主导缺陷类别（#81）</td><td><strong>逻辑与授权误用</strong>（授权粒度、默认勾选、条款允许二次使用），内存破坏/密码学几乎不参与</td></tr><tr><td>后果类型（#91）</td><td>信息泄露类，但<strong>可逆性为最低档</strong>（不可撤回）、影响范围可扩散到关系与身份，处置归属不在 Apple 而在<strong>服务商与你自己</strong></td></tr><tr><td>引入阶段（#93）</td><td>绝大多数是 <strong>L1 设计选择</strong>（默认宽松/提示粒度）与 <strong>L3 配置</strong>（用户当时怎么点的）——L1 的部分会随版本缓慢收窄，L3 的部分只能由当事人清</td></tr><tr><td>谁能修</td><td>授权模型由 Apple 改；条款与留存由服务商改；<strong>只有清点与最小化是你能做的</strong></td></tr></tbody></table>
+<p>一句判读：这一层&quot;等 Apple 修&quot;的空间比 #89 还小，因为最宽的那条通路（把数据交给某个机构）根本不是缺陷，是你签的字。</p>
+<hr>
+<h2>6. 交付前的三条决策规则（第 ④ 条通路唯一有效的防线）</h2>
+<p>比技术设置更有用，因为不可逆动作发生在交付那一刻：</p>
+<ol><li><strong>问&quot;对方要的最小集合是什么&quot;</strong>：核保/体检/健康计划常接受摘要或纸质报告，而不是全量设备数据或访问授权。给出类别化、时限化、用途写明的一次性副本，而不是持续授权。</li><li><strong>区分&quot;一次看&quot;与&quot;持续读&quot;</strong>：持续读取授权的危害远高于交付一份文件——文件会过期，授权不会（第 4 节第 1、2 项就是为此存在）。任何&quot;连接我的健康账户&quot;的引导，默认按持续授权评估。</li><li><strong>敏感类别单独设一条线</strong>：生殖与周期、精神健康、性传播感染、基因与家族病史、成瘾与用药。这几类一旦进入机构档案通常不会单独删除。原则与 #89 那句同构：<strong>最敏感的内容不要落在这份可能被二次流转的副本上</strong>，必要时用纸质来源、拆分账户或不在设备上留存。</li></ol>
+<p>另加一条给&quot;以数据换保费/换权益&quot;的判断框架：先把它当成一份长期合同看——比较的是<strong>折扣的金额</strong>与<strong>这份数据在 10 年后可能的用途</strong>，而不是当下的便利。这类决定的错误通常要多年后才可见。</p>
+<hr>
+<h2>7. 分人群的最小动作集</h2>
+<ul><li><strong>只用了计步/运动记录</strong>：做第 4 节的 1、2、5、7 四项即可，约 10 分钟。</li><li><strong>在用慢病/用药/心理健康类 App</strong>：全表 + 第 6 节规则 2（逐个确认持续授权是否仍必要）；对已停用的 App <strong>先撤销授权再卸载</strong>（卸载不自动撤销服务商侧的留存）。</li><li><strong>生育/周期相关记录</strong>：全表 + 第 5 项通知暴露 + 第 8 项外发点清点；这一类的通知文案与锁屏预览是最常被忽略的泄露点（#95/#99 同一动作）。</li><li><strong>为他人（老人/患儿）管理设备</strong>：第 3、4 项是重点——代填记录来源与管理员权限归属（#98 的&quot;管理员是谁&quot;在这里同样成立），并明确谁有权改。</li><li><strong>企业/雇主</strong>：把员工健康数据当成<strong>独立的最小化对象</strong>：谁可访问、留存多久、是否用于任何人事判断，需成文；设备侧能限的是功能（#76/#89 的能力边界），条款与流程才是杠杆。</li></ul>
+<hr>
+<h2>8. 六个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;健康数据加密了所以安全&quot;</td><td>加密防的是外部拿不走，不防<strong>你自己授权给谁</strong>；授权与条款是另一层（第 3 节 ①）</td></tr><tr><td>&quot;卸载 App 就收回了&quot;</td><td>卸载不等于撤销授权，更不等于服务商删除数据；顺序应是先撤销再卸载</td></tr><tr><td>&quot;只有 Apple 能看到&quot;</td><td>类别化授权后，读取方是 App 与它背后的服务商；第 4 层完全在 Apple 之外</td></tr><tr><td>&quot;导出 PDF 只是备份&quot;</td><td>导出等于新增一份不可追踪的副本；放在哪、会不会被看到（#96/#99）都要按泄露面看</td></tr><tr><td>&quot;锁屏医疗卡很危险，应全部关掉&quot;</td><td>医疗卡对急救有实际价值（#102 讨论急救与访问的取舍）；正确做法是删掉不必要的敏感条目而不是全关</td></tr><tr><td>&quot;设备不出问题就没有健康数据泄露&quot;</td><td>主要损失来自授权、账户与主动交付，与设备有无漏洞几乎无关</td></tr></tbody></table>
+<hr>
+<h2>9. 一句话结论</h2>
+<p>这一层是系列里少见的<strong>&quot;技术上几乎无新增动作，但不可逆性最高&quot;</strong>的方向：</p>
+<ul><li>一次 25 分钟的清点（第 4 节八项）+ 一次类别收窄，比任何加固都管用。</li><li>危害最高的通路是交付与持续授权，靠第 6 节三条规则拦住，不靠 iOS。</li><li>云端那份副本的可访问性由账户档位与验证因子决定（#69/#74/#89/#99 的既有结论在这里逐字适用）。</li><li>顺手做一次导出固化，放在只有你控制的地方（#92 的离线副本原则）。</li></ul>
+<p>设备端维持 #80 的通用清单即可；这里真正要动手的是<strong>授权关系</strong>和<strong>你准备把哪份副本交出去</strong>。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a99.html">← 第 99 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
