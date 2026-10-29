@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 人身安全与被持续控制场景：当攻击者是一个住在一起的人 | iOS 安全研究文章库</title>
+<meta name="description" content="对手已知密码、不需要漏洞的五个被推翻假设、五类合法 foothold（账户/定位/设备配置/通信/三方）、12 项一次约 40 分钟的清点表、&quot;集中变更本身就是信号&quot;的不察觉顺序约束、三种处境的最小方案、六个常见误解">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a99.html">
+<meta property="og:title" content="iOS 人身安全与被持续控制场景：当攻击者是一个住在一起的人">
+<meta property="og:description" content="对手已知密码、不需要漏洞的五个被推翻假设、五类合法 foothold（账户/定位/设备配置/通信/三方）、12 项一次约 40 分钟的清点表、&quot;集中变更本身就是信号&quot;的不察觉顺序约束、三种处境的最小方案、六个常见误解">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a99.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 99 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 人身安全与被持续控制场景：当攻击者是一个住在一起的人</h1>
+<blockquote><p>本文是防御视角的清点与处置方法，<strong>不提供可利用代码</strong>，不包含任何监控他人设备、规避检测或实施控制的操作指引。面向正在被亲密关系、家人、同住者或前伴侣持续查看/定位/控制设备的人，以及需要给出建议的咨询、支援场景。文中所有动作都是&quot;查看自己设备上的合法设置项并收回授权&quot;。</p></blockquote>
+<h2>1. 为什么这是一个独立的方向</h2>
+<p>系列里的框架全部默认对手是<strong>陌生人</strong>：#90 的 P0–P5 从远程 0-click 排到物理接触，#94 的人群画像按设备与场景划，#95 处理&quot;我不知道谁在采集我的数据&quot;，#97 处理&quot;我不认识但冒充官方的人&quot;。</p>
+<p>被亲密关系者持续控制的场景把这些默认全部推翻：</p>
+<table><thead><tr><th>常规假设</th><th>在这一场景里</th></tr></thead><tbody><tr><td>对手拿不到你的密码</td><td>对手<strong>知道</strong>密码，可能是他/她替你设置的</td></tr><tr><td>对手需要利用漏洞</td><td>对手不需要任何漏洞，用合法功能与合法流程</td></tr><tr><td>攻击是一次性的</td><td>攻击是<strong>持续</strong>的，重点是&quot;被发现的成本&quot;而不是&quot;入侵成本&quot;</td></tr><tr><td>加固越严越安全</td><td>加固动作本身可能被察觉，反而升级风险（这是本篇与普通加固文最大的区别）</td></tr><tr><td>设备是你的资产</td><td>设备/账户可能是共同财产，处置涉及法律归属</td></tr></tbody></table>
+<p>一句话：<strong>这一层的攻击面不是 iOS 的实现缺陷，而是&quot;共享的信任&quot;没有收回机制</strong>。所以评估口径不是&quot;有没有漏洞&quot;，而是：<strong>谁能在不接触我设备的情况下看到我在哪里、我在和谁说话、我买了什么</strong>。</p>
+<p>对照 #89 的结论&quot;损失范围由密钥与账户治理决定&quot;——在这里同样的结构成立，只是主语从&quot;银行&quot;换成了&quot;另一个人&quot;。</p>
+<hr>
+<h2>2. 五类合法 foothold（先清点，再决定动不动）</h2>
+<p>按&quot;撤销难度&quot;排序，不是按危害排序。每一项都只写在哪里看、怎么收回。</p>
+<h3>① 账户层（最难处理，影响最大）</h3>
+<ul><li><strong>Apple ID 是谁注册的</strong>：如果当初由对方协助注册、恢复邮箱/手机号是对方的，那么对方在<strong>任何设备上</strong>都能通过&quot;忘记密码&quot;重新拿到你的全部数据（iCloud 备份、钥匙串、照片、信息，见 #69/#74）。这一条优先于所有设备侧加固。</li><li><strong>双重验证的接收方</strong>：核对受信任电话号码与设备清单（设置 → 你的姓名）。只要验证码落在对方手里，改密码无效。</li><li><strong>家庭共享</strong>：组织者能看成员的购买与订阅记录；屏幕使用时间的家庭组织能看成员的活动汇总（内容取决于设置粒度）。</li><li><strong>订阅与付款方式</strong>：默认付款方式、家庭共享的订阅，都会在账单通知里暴露消费与购买（与 #89 同源）。</li></ul>
+<p><strong>收回顺序不能倒</strong>：先把验证因子换成只有自己掌握的 → 再换密码 → 再核对设备清单 → 最后才是改设置项。反过来做，对方一次重置就回到原状。</p>
+<h3>② 定位与&quot;查找&quot;层</h3>
+<ul><li>查找网络里的<strong>位置共享对象</strong>清单（家人、朋友）。</li><li>自己的设备是否出现在别人的&quot;查找&quot;里（设备被标记为家庭共享设备）。</li><li><strong>未知物品提醒</strong>：iOS 会提示疑似跟随的未知配件（AirTag 类）。收到提示时先记录时间、地点与提示内容截图，再按提示中的流程查看与处置。</li><li>照片的地理元数据与共享相簿、iCloud 照片图库（共享图库成员能看到你新拍的照片及位置）。</li></ul>
+<p>这一层最容易在<strong>换新设备后自动恢复</strong>：只要登录同一个 Apple ID，共享关系与设备清单会跟过来（#96 的残留表在这里逐字适用：<strong>关系不会因为你换手机而消失</strong>）。</p>
+<h3>③ 设备与配置层</h3>
+<ul><li><strong>设备清单里的旧设备</strong>：对方仍在使用的旧 iPhone/iPad/Mac 会持续同步信息、照片、密码。</li><li><strong>描述文件与设备管理</strong>（设置 → 通用 → VPN 与设备管理）：任何非本人安装的配置都应记录来源（#67/#86）。企业托管/MDM 场景下，可见性与限制策略由注册方下发。</li><li><strong>屏幕使用时间</strong>：对方若掌握屏幕使用时间密码，就能远程设置通信与联系人限制、查看部分活动汇总，且该密码<strong>独立于设备密码</strong>。</li><li><strong>锁屏可访问内容</strong>：通知预览、控制中心、&quot;查找&quot;、医疗卡、SOS 页面在锁屏下是否可见（#84 的四态矩阵在这里是操作口径而不是取证口径）。</li><li><strong>密码本身</strong>：如果对方知道解锁密码，前面所有加固都是零。面容/触控里是否有不认识的重叠或替代外观（#84 专门讨论过）。</li></ul>
+<h3>④ 通信与内容层</h3>
+<ul><li>信息的&quot;文本消息转发&quot;到其他设备、同一 Apple ID 在 iPad/Mac 上自动接收（#71/#69）。</li><li>共享的邮箱账户与日历订阅：订阅的日历会把行程写在对方设备上。</li><li>备份：iCloud 备份内容随账户走；一旦账户共享，备份等于镜像（#74）。</li><li>剪贴板接力、Handoff（#69）：在同一个账户与同一网络下，你复制的内容可能出现在另一台设备上。</li></ul>
+<h3>⑤ 应用与第三方层</h3>
+<ul><li>被要求安装的&quot;防丢/查找/家庭安全&quot;类 App，很多具备位置、通信或活动上报能力（#86/#95 的滥用生态）。</li><li>通过第三方账户（共同账号、共享会员、代付）产生的可见性——这类<strong>不在 iOS 里</strong>，只能在对应服务的账户设置里收回。</li></ul>
+<hr>
+<h2>3. 清点表：一次做完约 40 分钟</h2>
+<p>建议按顺序勾，每项写&quot;有 / 无 / 不确定&quot;。&quot;不确定&quot;本身要保留，不要为了清零而乱动。</p>
+<table><thead><tr><th>#</th><th>核对项</th><th>位置</th><th>若为&quot;有&quot;的处置</th></tr></thead><tbody><tr><td>1</td><td>受信任手机号/恢复邮箱</td><td>设置 → 你的姓名 → 登录与安全</td><td>换成只有你控制的号码与邮箱（第 ① 优先）</td></tr><tr><td>2</td><td>设备清单</td><td>同上页底部</td><td>移除不认识的与对方在用的旧设备</td></tr><tr><td>3</td><td>家庭共享组织者与成员</td><td>设置 → 你的姓名 → 家人共享</td><td>退出/移除，订阅账单逐个核对</td></tr><tr><td>4</td><td>屏幕使用时间密码与设备配对</td><td>设置 → 屏幕使用时间</td><td>改为自己掌握；解除&quot;通过另一台设备管理&quot;</td></tr><tr><td>5</td><td>位置共享对象</td><td>查找 → 人员</td><td>逐个取消；核对&quot;查找我的 iPhone&quot;设备归属</td></tr><tr><td>6</td><td>共享相簿/共享图库</td><td>照片</td><td>退出共享；核对新照片是否仍被看到</td></tr><tr><td>7</td><td>信息转发与多设备接收</td><td>设置 → 信息</td><td>关闭转发；退出不属于自己的其他设备上的信息</td></tr><tr><td>8</td><td>描述文件与设备管理</td><td>设置 → 通用 → VPN 与设备管理</td><td>记录来源后移除；企业托管需走管理方</td></tr><tr><td>9</td><td>锁屏可见内容</td><td>设置 → 面容 ID 与密码 / 通知</td><td>关闭锁屏通知预览、控制中心、&quot;查找&quot;等</td></tr><tr><td>10</td><td>未知配件提醒</td><td>设置 → 隐私与安全检查；查找</td><td>记录提醒的日期/位置/内容</td></tr><tr><td>11</td><td>密码与生物识别</td><td>面容 ID 与密码</td><td>更换密码；核查是否有不认识的替代外观</td></tr><tr><td>12</td><td>三方账户与代付</td><td>各服务自身设置</td><td>分离账户、取消代付与共享会员</td></tr></tbody></table>
+<hr>
+<h2>4. 与普通加固最大的不同：<strong>顺序里包含&quot;不察觉&quot;约束</strong></h2>
+<p>#80 与 #95 的建议是&quot;发现异常立刻收紧&quot;。在这一场景里，&quot;立刻、集中、一次性&quot;往往是最危险的：所有设置同时改变，等于通知对方&quot;我在检查&quot;。</p>
+<p>因此本篇只给原则，不给固定时间表：</p>
+<ol><li><strong>先做不可逆性最低的动作</strong>（查看、记录、截图、抄下设备清单里的型号与名称），把<strong>收回类动作</strong>留到你判断安全的时点。</li><li><strong>收回顺序按危害排</strong>：验证因子与账户 &gt; 定位共享 &gt; 设备清单 &gt; 配置与描述文件 &gt; 通知与外观类设置。前两项才是决定&quot;能不能被重新拿到&quot;的。</li><li><strong>改完不再回到旧账户</strong>：如果最终方案是新建 Apple ID，绝不能从旧设备恢复备份到新账户——备份里带着共享关系、密码与历史（#96 接手设备流程的反向适用）。</li><li><strong>保留证据优先于清除痕迹</strong>：与 #92 的结论一致——远程抹除会把证据一起灭失。若涉及事件处置、保护令或诉讼，先固化（截图、原始通知、时间线记录），并考虑把副本放在你独占控制的账户或线下位置。</li><li><strong>共同财产与法律归属</strong>：设备/账户可能是共同财产，擅自转移在部分司法辖区会产生法律后果。本篇不构成法律意见；涉及此类问题先咨询当地专业渠道或支援机构。</li></ol>
+<hr>
+<h2>5. 三种处境下的最小方案</h2>
+<table><thead><tr><th>处境</th><th>目标</th><th>只做这三件事</th></tr></thead><tbody><tr><td><strong>仍同住、无法让对方失去访问</strong></td><td>降低可见性，不触发对抗</td><td>① 锁屏通知预览与控制中心关掉；② 密码换掉并确保只有你知道；③ 最敏感的一段通信搬到只有你控制的账户/设备上</td></tr><tr><td><strong>准备离开 / 正在办理</strong></td><td>保住证据与账户主权</td><td>① 验证因子换成独占（号码、恢复邮箱）；② 位置共享与设备清单清点并记录；③ 证据固化到独占存储，不要抹除设备</td></tr><tr><td><strong>已经分开，但持续被定位/骚扰</strong></td><td>断链 + 可举证的记录</td><td>① 全量清点（第 3 节 12 项）；② 新建独立 Apple ID 并<strong>不恢复旧备份</strong>（新设备从空状态设置）；③ 保留每一次提醒与消息的时间线，走平台举报与法律渠道</td></tr></tbody></table>
+<p>高危个体的一条硬原则，与 #89/#94 完全同构：<strong>最敏感的信息不要落在这台可能被对方合法访问的设备上</strong>。设备加固做到 90 分，也挡不住&quot;对方知道密码&quot;或&quot;账户是他/她注册的&quot;。</p>
+<hr>
+<h2>6. 六个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;换一台新 iPhone 就断了&quot;</td><td>登录同一 Apple ID 后，共享关系、设备清单、备份内容全部跟过来（#96）</td></tr><tr><td>&quot;改了密码就安全了&quot;</td><td>若恢复邮箱/受信任号码仍在对方手里，重置一次即回到原状（第 ① 项）</td></tr><tr><td>&quot;关闭定位服务就够了&quot;</td><td>查找网络、共享相簿、日历订阅、家庭共享购买记录是四条独立通路，各要单独收</td></tr><tr><td>&quot;对方装不了监控软件&quot;</td><td>多数可见性来自<strong>合法功能与合法授权</strong>，不需要任何恶意 App（这正是 #83/#89 那句结论的重演）</td></tr><tr><td>&quot;先远程抹除设备最保险&quot;</td><td>涉及证据时抹除会连带灭失你自己的举证材料（#92 的顺序原则）</td></tr><tr><td>&quot;把所有异常一次清掉最干净&quot;</td><td>集中变更本身就是信号；第 4 节的顺序约束是为了让你能安全地做完</td></tr></tbody></table>
+<hr>
+<h2>7. 一句话结论</h2>
+<p>这一场景的评估口径要换掉：不问&quot;iOS 有没有漏洞&quot;，只问<strong>&quot;有哪些授权是当年给出去的、现在还能不能收回、由谁收回&quot;</strong>。</p>
+<ul><li>90% 的可见性来自账户与关系层，不来自设备层：先验证因子，再谈加固。</li><li>清点表（12 项）一次约 40 分钟，先记录、后收回，收回顺序按危害排。</li><li>若涉及新设备：<strong>从空状态设置，不恢复旧备份</strong>。</li><li>若涉及处置或法律程序：<strong>证据先于清除</strong>，并咨询当地专业渠道；本文不构成法律意见。</li></ul>
+<p>设备侧维持 #80/#84/#95 的既有结论即可。真正需要动手的是<strong>账户与关系</strong>这一层——而且它需要在你判断安全的时点动手。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a98.html">← 第 98 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
