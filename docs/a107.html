@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 上的第三方 AI 服务与个人数据出口：你发出去的那段文字去了哪一层 | iOS 安全研究文章库</title>
+<meta name="description" content="E0–E4 五个出口层按&quot;谁能读、谁能撤&quot;分级（E4 权限层是主要泄漏源）、内容生成/调用方/落点三条通路按谁必须失败分层、20 分钟十项端侧清点表、撤销的不对称性对照表（关闭≠回收）、四档内容准入规则、六类事后残留与清理顺序、团队侧未申报出口的五条治理项">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a107.html">
+<meta property="og:title" content="iOS 上的第三方 AI 服务与个人数据出口：你发出去的那段文字去了哪一层">
+<meta property="og:description" content="E0–E4 五个出口层按&quot;谁能读、谁能撤&quot;分级（E4 权限层是主要泄漏源）、内容生成/调用方/落点三条通路按谁必须失败分层、20 分钟十项端侧清点表、撤销的不对称性对照表（关闭≠回收）、四档内容准入规则、六类事后残留与清理顺序、团队侧未申报出口的五条治理项">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a107.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 107 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 上的第三方 AI 服务与个人数据出口：你发出去的那段文字去了哪一层</h1>
+<blockquote><p>本文是防御视角的数据流向分析与配置、决策方法，<strong>不提供可利用代码</strong>，不包含诱导、绕过审核或任何可照做的操纵手法。面向在 iPhone 上日常使用生成式能力（系统级写作与图像工具、语音转写、翻译、聊天助手、AI 修图与&quot;证件照&quot;类 App）的用户与需要制定使用规则的团队。</p></blockquote>
+<h2>1. 为什么这是独立的一个方向</h2>
+<p>#87 处理的是&quot;设备上的智能组件与被污染输入构成的攻击面&quot;——重点是<strong>别人让你输入的东西</strong>。本文处理相反的那一半：<strong>你主动交出去的东西</strong>。这两者不能互相替代：一个从不被注入攻击的正常使用习惯，仍然可能把相册、通讯录和健康文本全部送出设备。</p>
+<p>已有的其他篇目也不覆盖这一半：#95 讲的是设备标识与行为指纹（被动可关联），#100 讲的是医疗数据的授权与二次流转，#83 讲的是三方 App 的配置缺陷。本文的对象是一个更具体的问题：<strong>一次使用行为会让数据走到哪一层、这一层是否可撤销、以及你无法验证的部分有多大。</strong></p>
+<p>评估口径因此不是&quot;这个 App 有没有漏洞&quot;，而是：<strong>这段内容离开了设备之后，谁还能读到它、读到之后能留多久、以及你能否证明它没有被继续用。</strong></p>
+<hr>
+<h2>2. 五个出口层，差别不在&quot;是否加密&quot;而在&quot;谁能读、谁能撤&quot;</h2>
+<p>把 iOS 上所有生成式能力按<strong>数据落点</strong>分五层，是最省心的判读方式：</p>
+<table><thead><tr><th>层</th><th>典型能力</th><th>内容离开设备了吗</th><th>谁在原理上能读到内容</th><th>可撤销性</th></tr></thead><tbody><tr><td><strong>E0 端侧</strong></td><td>设备本地运行的写作/图像/转写能力</td><td>否</td><td>只有设备（与能物理接触的人，见 #84/#90）</td><td>完全：改动只影响本机</td></tr><tr><td><strong>E1 系统级云端能力（受限中继）</strong></td><td>需要服务器参与的系统功能，内容经服务商侧处理</td><td>是，但按公开口径为一次性/不驻留</td><td>服务商基础设施；<strong>这是&quot;依赖公开承诺&quot;的层</strong></td><td>部分：可关闭功能，无法验证已处理内容</td></tr><tr><td><strong>E2 你自己选择的账户型服务</strong></td><td>聊天助手、转写与纪要、翻译与写作服务的登录版</td><td>是，且成为服务端账户数据</td><td>服务商 + 其政策允许的复核/改进流程；若开了第三方集成，还包括被连的那家</td><td>部分：可删会话/关改进开关，<strong>删除后不可自证</strong></td></tr><tr><td><strong>E3 普通三方 App + API 转发</strong></td><td>AI 修图、证件照、算命、&quot;头像生成&quot;、写作类小工具</td><td>是，<strong>且经过两个主体</strong>：App 运营方 + 上游模型提供方</td><td>两方都可能留存；这一层的政策最不稳定</td><td>很弱：多数只能提请求，无法验证</td></tr><tr><td><strong>E4 剪贴板/截图/文件权限换到的额外一份</strong></td><td>任何被授了相册、文件、麦克风、通讯录权限的 AI 类 App</td><td>是，<strong>且范围由权限决定，不由你粘贴的内容决定</strong></td><td>App 运营方（在你授权的数据范围内可自主取用）</td><td>可收窄（撤权限）但不可回收（已取走的取不回）</td></tr></tbody></table>
+<p><strong>这张表最重要的一行是 E4</strong>：多数泄漏不是因为你粘贴了什么，而是因为<strong>一个 AI 类 App 拿到了整本相册的访问权</strong>。你上传了一张照片让它修图，和它能把相册里其他内容分批上传，是两件不同的事。</p>
+<p>一句判读：<strong>E0/E1 是&quot;能力选择&quot;问题，E2/E3/E4 是&quot;关系与权限&quot;问题</strong>。想靠&quot;少打几个字&quot;降低风险，方向就错了。</p>
+<hr>
+<h2>3. 三条出口通路，按&quot;谁必须失败&quot;分层</h2>
+<p>数据离开时依次经过三个环节，任一环节收紧就整体变窄：</p>
+<ol><li><strong>内容生成分支</strong>——这段文本/图片是从哪来的。手动输入 &lt; 从相册/文件选取 &lt; 从整个库自动抓取。判据：<strong>能否说清这个文件此刻为什么在你手里</strong>。</li><li><strong>调用方分支</strong>——谁替你发出这个请求。系统能力 &lt; 你登录的账户型服务 &lt; 三方 App &lt; 网页版（网页版把 Cookie 与浏览器上下文一起带上，见 #70 的 Safari 侧证据）。</li><li><strong>落点分支</strong>——请求被谁接住。上游模型提供方、App 运营方自己的存储、以及任何被授权&quot;读取你的账户&quot;的连接器。<strong>这一层是纯治理问题，端侧看不到、也拦不住。</strong></li></ol>
+<p><strong>响应顺序</strong>：先在第 2、3 层收权限与连接关系（当场可做、效果确定），再在第 1 层做内容习惯（长期有效但对单次无救）。这与 #99/#106 的&quot;账户与关系 → 服务 → 设备&quot;同构。</p>
+<hr>
+<h2>4. 一次 20 分钟的端侧清点（可当场做完）</h2>
+<p>按 #95/#100/#106 的做法，给一份能一次做完的表。判读全部是&quot;有没有出现在我的设备上&quot;，不要求你判断任何厂商政策。</p>
+<table><thead><tr><th>#</th><th>看什么</th><th>在哪看</th><th>判读</th></tr></thead><tbody><tr><td>1</td><td>AI 类 App 的清单</td><td>主屏幕 + 设置 → App 列表</td><td>按&quot;能不能删&quot;分两堆；已删但仍有订阅的记入 #89 的支付核对</td></tr><tr><td>2</td><td>每个 AI 类 App 的<strong>内容权限</strong></td><td>设置 → 隐私与安全（照片、麦克风、文件与文件夹、通讯录、语音识别）</td><td>只要拿到&quot;完整照片库/文件&quot;就是 E4，<strong>优先级最高</strong></td></tr><tr><td>3</td><td>照片权限的档位</td><td>设置 → App → 照片</td><td>是否为&quot;全部照片&quot;；能改成&quot;选中照片/无&quot;的一律改</td></tr><tr><td>4</td><td>系统级写作/图像/转写能力的开关与所在应用范围</td><td>设置中的相应能力项</td><td>决定内容走 E0/E1 还是走 E3；不需要就关掉</td></tr><tr><td>5</td><td>账户型服务的历史与导出副本</td><td>各家服务网页端的&quot;活动/历史/导出&quot;</td><td>有导出文件就等于多了一份未受保护的副本（#96 的残留物同类）</td></tr><tr><td>6</td><td>已连接的第三方应用与授权</td><td>Apple ID → 使用 Apple 账户登录的 App；各家服务的&quot;连接/集成&quot;</td><td>每个连接都是一条独立出口；断开不召回（第 5 节）</td></tr><tr><td>7</td><td>快捷指令/自动化里带网络请求的项目</td><td>快捷指令 App</td><td>自动化会在无人复核的情况下持续送出内容，最容易长期遗忘</td></tr><tr><td>8</td><td>云备份与会话数据的关系</td><td>iCloud 备份范围</td><td>端侧删掉 App，历史可能仍在别处（第 6 节）</td></tr><tr><td>9</td><td>邮件/日历/待办里由外部生成或同步的内容</td><td>邮件与日历账户设置</td><td>外部服务写入你邮箱的副本会进 #105 的可披露范围</td></tr><tr><td>10</td><td>浏览器里保存的站点登录与会话</td><td>Safari → 密码/自动填充</td><td>网页版 AI 服务把 Cookie 与站点上下文一起带走</td></tr></tbody></table>
+<p><strong>执行纪律</strong>：第 2、3、6 项任一异常，当场处理（收权限、断连接）；第 5、7 项处理不了的记入台账，按 #104 的例外登记与复发升级走。</p>
+<hr>
+<h2>5. 撤销的不对称性（这一节决定你该怎么做）</h2>
+<p>这一场景里最容易做错决定的地方，是把&quot;可关闭&quot;当成&quot;可回收&quot;：</p>
+<table><thead><tr><th>动作</th><th>实际效果</th><th>实际效果<strong>不</strong>包括</th></tr></thead><tbody><tr><td>删除会话/记录</td><td>你这一侧不再可见；按服务流程请求服务端删除</td><td>不证明服务端副本与备份已清；不撤回已进入改进/标注流程的部分</td></tr><tr><td>关闭&quot;用于改进&quot;类开关</td><td><strong>只对之后的内容生效</strong></td><td>不追溯此前已允许使用的数据</td></tr><tr><td>断开第三方连接</td><td>该 App 今后不能再调你的账户</td><td>不收回它此前已经拉走的数据</td></tr><tr><td>撤销权限</td><td>阻断后续自主取用</td><td>不处理已经上传的内容</td></tr><tr><td>卸载 App / 抹设备</td><td>端侧残留清除（#96 的三点诚实边界适用）</td><td>服务端、上游、导出副本、别人转存的副本全都不动</td></tr><tr><td>注销账户</td><td>通常进入一段保留期后按政策处理</td><td>不等于即时删除，也不覆盖法务/审计留存义务</td></tr></tbody></table>
+<p><strong>结论形状</strong>：这一场景里唯一有效的动作发生在<strong>发送之前</strong>。所以对个人而言真正省事的不是删除技巧，而是一条硬性的内容准入规则（第 6 节）——与 #92 里&quot;不可逆子集只能靠事前&quot;完全一致。</p>
+<hr>
+<h2>6. 内容准入规则：不需要判断力，只需要分类</h2>
+<p>按&quot;出去之后会发生什么&quot;分四档，比逐次斟酌有效得多：</p>
+<ol><li><strong>绝不进 E2–E4</strong>：身份证明原件与照片、病历与检验原文（#100）、账户凭据与验证码、含他人可识别信息且对方未同意的对话/照片/录音、雇主未公开数据与合同、精确位置与作息（#95/#99）。判据：<strong>&quot;这段内容落到一个我永不认识的复核人员手里，我是否能接受&quot;</strong>——能接受才可以发。</li><li><strong>改写后才可发</strong>：去掉可关联标识（姓名、手机号、单位、单据号、地名粒度、时间戳）、把&quot;某人&quot;换成不指向具体人的描述、把整段材料拆成不含身份的单段问题。<strong>改写只降低关联性，不降低内容敏感度</strong>——涉密内容改写后仍然涉密。</li><li><strong>可以直接发</strong>：本就不怕公开的通用问题、已发布的公开材料、完全虚构的示例数据。</li><li><strong>本地做</strong>：涉及本人或家人真实数据的处理，优先选端侧能力（E0）；没有端侧方案时接受&quot;不做&quot;也是一个决定。</li></ol>
+<p>补充两条容易漏的：<strong>图片不是文本</strong>（EXIF 与画面里的门牌、单据、白板都算数据出口）；<strong>语音不是匿名</strong>（声纹与背景对话属于不可更换的标识，见 #95）。</p>
+<hr>
+<h2>7. 用了几周之后才浮现的残留物</h2>
+<p>这些是端侧与账户两侧都会留下的东西，被清点的频率远低于它们出现的频率：</p>
+<ul><li><strong>会话历史与训练数据请求</strong>：网页端与 App 端各有一份，删除要分别做。</li><li><strong>导出包</strong>：为&quot;备份&quot;下载的文件常落在设备、云盘或邮件附件里，成为第二份无保护副本（#96 的十类残留物同类）。</li><li><strong>生成物的元数据与水印</strong>：把生成图像外发时，附带信息可能指向你的账户。</li><li><strong>相册与文件的间接复制</strong>：修图类 App 常把处理结果与中间件写回相册或自己的容器，随后进入 iCloud 备份（第 4 节第 8 项）。</li><li><strong>邮箱与日历里的第三方写入</strong>：账户通知、纪要、摘要把服务端内容反向落到你的邮件账户，进入 #105 的可披露面。</li><li><strong>剪贴板</strong>：粘贴动作在多个 App 里各自留痕，属于低成本但常被忽略的一层。</li></ul>
+<p><strong>清理顺序</strong>：先断连接与权限（阻断后续），再收端侧副本（相册、文件、导出包），最后逐项在服务端发起删除请求并记录时间与范围（不假设已完成）。</p>
+<hr>
+<h2>8. 团队场景：把&quot;员工用了什么模型&quot;当成配置问题处理</h2>
+<p>组织侧的风险形状与个人不同，主要是<strong>未申报出口</strong>：</p>
+<ol><li><strong>明确允许清单优于全面禁令</strong>。禁令的结果是使用私人账户与私人 App，事件不可见（与 #98 的&quot;报告渠道优先于技术限制&quot;同结论）。</li><li><strong>把出口档位写进数据分级</strong>：哪些级别的数据可以在 E1/E2 处理、哪些必须留在自有环境；判据要可判定，不要&quot;视情况而定&quot;（#104 的设计规则）。</li><li><strong>连接与授权属于配置面</strong>：组织账户里授予第三方应用的读写连接，是一次配置变更，应进台账与季度复核（#104 的 <code>[企]</code> 项同源）。</li><li><strong>未公开数据与第三方数据不是员工个人可让渡的</strong>：客户、患者、受访者的数据出口需单独授权，这一条要成文（涉及合同与法定义务的判断以法务意见为准，本文不构成法律意见）。</li><li><strong>事件口径</strong>：一次误发按数据外泄处理，不按违规处理。处罚导向的结果是下次没人申报，与第 6 节第 1 条同理。</li></ol>
+<hr>
+<h2>9. 七个常见误解</h2>
+<table><thead><tr><th>误解</th><th>事实</th></tr></thead><tbody><tr><td>&quot;内容加密传输，所以没有暴露&quot;</td><td>加密保护通道，不保护服务端的处理与留存（#103 的元数据诚实边界同构）</td></tr><tr><td>&quot;只是问一个问题，没给个人信息&quot;</td><td>上下文、文件名、剪贴板与已授权的数据范围都在替你回答</td></tr><tr><td>&quot;删掉对话就等于删掉了&quot;</td><td>删除是你这一侧的动作；服务端与下游不可自证（第 5 节）</td></tr><tr><td>&quot;关掉训练开关能追溯此前&quot;</td><td>开关只对之后的内容生效</td></tr><tr><td>&quot;官方承诺不留存，所以不用管&quot;</td><td>承诺是可变条款，且属于你无法验证的一层；把它当风险接受度而不是技术控制</td></tr><tr><td>&quot;AI 修图 App 只要了一张照片&quot;</td><td>权限档位决定它能取多少（第 2 节 E4，第 4 节第 2、3 项）</td></tr><tr><td>&quot;网页版比 App 干净&quot;</td><td>网页版把浏览器上下文与 Cookie 一起带上（#70 的取证侧同样适用）</td></tr></tbody></table>
+<hr>
+<h2>10. 一句话结论</h2>
+<p>第三方 AI 服务场景里，&quot;这句话能不能发&quot;是最常问也最没用的问题。真正决定结果的是三件事：</p>
+<ul><li><strong>出口档位</strong>：这次处理落在 E0–E4 的哪一层，谁能读、谁能撤（第 2 节）。</li><li><strong>权限与连接</strong>：那个 App 拿到了什么范围、还有多少个连接没断（第 4 节的第 2、3、6 项，收益最高）。</li><li><strong>内容准入</strong>：用四档分类替代逐次判断，把&quot;不可回收&quot;这件事固定在发送之前（第 5、6 节）。</li></ul>
+<p>一次 20 分钟的清点覆盖前两项，之后按 #104 的季度节奏维持；第三项靠规则而不是靠自觉。各能力与设置项名称随 iOS 版本、地区与服务方政策变化，以设备实际界面与服务方现行文档为准。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a106.html">← 第 106 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
