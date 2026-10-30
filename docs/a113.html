@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>同一份代码的另一半：watchOS、tvOS、visionOS、audioOS 与车机上的 iOS 同源缺陷 | iOS 安全研究文章库</title>
+<meta name="description" content="六个产品线定位表、五个差异维度（到达通道/输入面/运行时长/可核验性/账户关系）、三类同源组件的到达差、六类设备的当场核验动作、逐产品管控能力对照、配对关系造成的一处可达多点后果、企业三类看不见的设备">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a113.html">
+<meta property="og:title" content="同一份代码的另一半：watchOS、tvOS、visionOS、audioOS 与车机上的 iOS 同源缺陷">
+<meta property="og:description" content="六个产品线定位表、五个差异维度（到达通道/输入面/运行时长/可核验性/账户关系）、三类同源组件的到达差、六类设备的当场核验动作、逐产品管控能力对照、配对关系造成的一处可达多点后果、企业三类看不见的设备">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a113.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 113 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>同一份代码的另一半：watchOS、tvOS、visionOS、audioOS 与车机上，iOS 同源缺陷怎么到达、怎么看不见</h1>
+<blockquote><p>本文是防御视角的平台分布与可核验性分析，<strong>不提供可利用代码</strong>，不涉及任何配对绕过、投屏劫持或固件改写手法。本文回答两个可执行的问题：<strong>一条 iOS 系统缺陷在同源的其他 Apple 设备上是否也适用于我这些设备；以及我有没有办法当场核验它的修复状态。</strong> 各平台的支持范围、机型限制与功能可用性会变化，均以 Apple 安全发布说明与产品文档为准。</p></blockquote>
+<h2>1. 为什么这一篇必须存在</h2>
+<p>#111 在残余风险里留了一条没有展开的口子（R5）：<strong>&quot;已修复&quot;这句话的作用域从来不只等于 iPhone</strong>。Apple 的多个产品线共用同一套 Darwin/XNU 核心与同一批框架组件（媒体解析、图像与字体处理、WebKit、TLS 与传输栈、配对与投屏协议），但它们的<strong>更新通道、可审计性、管控能力和输入面各不相同</strong>。</p>
+<p>结果是三个不对称：</p>
+<ul><li><strong>同一份代码 ≠ 同一到达时间</strong>：一条修复在各平台的安全更新里分批出现，且各平台的更新节律由不同的用户习惯决定（手表跟手机、车机跟车企）。</li><li><strong>同一份代码 ≠ 同一输入面</strong>：没有浏览器和键盘的设备少了一批入口，但长期在线、常年不重启又增加了另一批入口（#64 的&quot;重启重置效力&quot;在这里几乎用不上）。</li><li><strong>同一份代码 ≠ 同一可核验性</strong>：iPhone 上三十秒能查清的版本与构建号，在某些产品上要绕两到三个应用，有些<strong>根本无法由使用者查验</strong>。</li></ul>
+<p>一句判读：<strong>把&quot;我手机更新了&quot;当成&quot;我家所有 Apple 设备都更新了&quot;，是这一整类风险的起点。</strong></p>
+<hr>
+<h2>2. 六个产品线的定位（iPadOS 不在此列）</h2>
+<p>iPadOS 与 iOS 在代码、更新、管控与可核验性上几乎重合，因此不构成独立轴；本文只处理<strong>结构上真的不同</strong>的几条线：</p>
+<table><thead><tr><th>产品线</th><th>与 iOS 的同源程度</th><th>更新由谁推动</th><th>使用者能否自查版本</th><th>主要独有暴露</th></tr></thead><tbody><tr><td><strong>watchOS</strong></td><td>高（共享内核与多数框架）</td><td>传统上经由配对的 iPhone 触发，也可在设备上更新</td><td>能（设备上或配对 App）</td><td>配对信任：它是 iPhone 的一个&quot;随身代理&quot;（解锁、通知、健康数据）</td></tr><tr><td><strong>tvOS</strong></td><td>高</td><td>设备自行更新，但设备常年通电、少被主动检查</td><td>能（设置内，需遥控器操作）</td><td>客厅共享账户、投屏协议栈、长期不重启</td></tr><tr><td><strong>visionOS</strong></td><td>高（含 WebKit 与图形栈）</td><td>设备自行更新</td><td>能</td><td>生物特征类本地数据、空间与外设输入面、有浏览器语义的内容面</td></tr><tr><td><strong>audioOS（HomePod）</strong></td><td>中高</td><td>设备自行更新，通常由家居自动化静默完成</td><td><strong>较弱</strong>：需通过家居相关应用查看，无屏幕</td><td>常驻监听类能力、家庭共享账户、无本地 UI 造成的审计困难</td></tr><tr><td><strong>车机（内置车载系统）</strong></td><td>中高（车载系统与手机侧共享部分协议栈）</td><td><strong>由车企决定</strong>，Apple 侧修复需经车企集成</td><td>通常不能由使用者核验具体安全级别</td><td>无法自主更新、共享联系人/账户信息、维修与二手流转环节</td></tr><tr><td><strong>Mac（macOS）</strong></td><td>高但差异大（另有桌面级输入面）</td><td>用户可控度最高</td><td>能</td><td>不在本文范围：桌面侧软件安装面与 iOS 结构差别太大，另见 #80/#95</td></tr></tbody></table>
+<p>车机这一行是全文最强的例子：<strong>它是同一份代码分布里唯一一环&quot;更新责任人不是 Apple 也不是你&quot;的产品</strong>。</p>
+<hr>
+<h2>3. 五个差异维度：判定一条缺陷在别的设备上的实际状态</h2>
+<table><thead><tr><th>维度</th><th>要问的问题</th><th>为什么决定结果</th></tr></thead><tbody><tr><td><strong>D1 到达通道</strong></td><td>这台设备的更新由谁触发、能否被强制、多久检查一次</td><td>决定 #111 里 V1/V2 载体的实际生效率；通道经另一台设备时，风险变成&quot;另一台设备的主人是否更新&quot;</td></tr><tr><td><strong>D2 输入面差异</strong></td><td>这台设备有没有会解析外部内容的组件（浏览器语义、图像/字体、媒体与投屏协议、通知渲染）</td><td>决定一条缺陷<strong>是否可达</strong>。同一份解析代码在不接收该类输入的设备上不构成暴露</td></tr><tr><td><strong>D3 运行时长与重启</strong></td><td>这台设备多久重启一次</td><td>常年不重启使&quot;重启即清除&quot;的内存态风险长期驻留（#64/#45 的反面），也让配置漂移无法自动纠正</td></tr><tr><td><strong>D4 可核验性</strong></td><td>使用者能否当场读到版本与构建号、能否看到&quot;最近一次更新成功&quot;</td><td>决定证据强度：#111 的 C1–C5 在这类设备上常常只剩&quot;我记得它自己更新过&quot;</td></tr><tr><td><strong>D5 账户与关系放置</strong></td><td>这台设备承载哪个账户、是否与家庭共享、是否持有配对信任</td><td>决定后果半径：一台低价值设备的失守可能通向高价值账户（#99/#102 同一条道理）</td></tr></tbody></table>
+<p>这五维里，<strong>D4 最容易被忽略，D1 最难被改变</strong>。多数组织的&quot;Apple 设备清单&quot;统计到 iPhone 与 iPad 就停了，而 D4 不达标的设备恰恰因为不可核验而不会自己上报。</p>
+<hr>
+<h2>4. 三类同源组件在各平台上的到达差</h2>
+<p>不写具体条目，只写结构结论（读法：一条缺陷属于哪一类组件，就决定它在哪些设备上真正可达）。</p>
+<table><thead><tr><th>组件族</th><th>iPhone 上的位置</th><th>其他平台上的差异</th><th>处置含义</th></tr></thead><tbody><tr><td><strong>媒体 / 图像 / 字体解析</strong></td><td>高频入口（消息、相册、网页）（#37/#60/#87）</td><td>电视与音响同样解析（海报、封面、语音提示、投屏元数据）；手表同样解析通知附图；车机的内容多由手机侧渲染后传入</td><td><strong>&quot;没有浏览器&quot;不等于&quot;没有解析暴露&quot;</strong>，这一族的可达性判断要看是否接收外部内容，而不是看有没有输入框</td></tr><tr><td><strong>Web 引擎与内容面</strong></td><td>主要攻击面（#3/#39/#57）</td><td>有屏幕可浏览的平台最接近 iPhone；仅用于登录/授权流程的内嵌内容面同样调用同一族代码；无屏幕平台该族基本不可达</td><td>判据是&quot;这台设备会不会渲染外部提供的网页内容&quot;，与它能不能输入网址无关</td></tr><tr><td><strong>配对、投屏与家居协议栈</strong></td><td>手机侧为被配对端</td><td>电视、音响、车机与手表都是协议栈的<strong>常驻服务端</strong>：长期在线、可被发现、由同源代码解析连接请求</td><td>这一族的风险方向与手机相反：手机的风险多是&quot;我访问了坏内容&quot;，这些设备的风险是&quot;坏内容可以访问我&quot;</td></tr></tbody></table>
+<p>第三行是本文最需要单独指出的一件事：<strong>在这类设备上，&quot;我不在上面做任何敏感操作&quot;并不能降低 D2 暴露</strong>，因为解析外部输入的不是用户，是设备本身。</p>
+<hr>
+<h2>5. 六类设备的核验动作（可当场执行）</h2>
+<table><thead><tr><th>设备类型</th><th>核验什么</th><th>频率与归属</th></tr></thead><tbody><tr><td>手表</td><td>系统版本 + 是否自动更新开启 + 配对 iPhone 的更新状态（D1 依赖）</td><td>月度；个人</td></tr><tr><td>电视 / 音响</td><td>固件版本 + 自动更新状态 + 家庭共享账户成员清单（D5）</td><td>季度；家庭管理员</td></tr><tr><td>头显</td><td>版本 + 浏览器与内容面相关开关 + 是否有外部可发现的连接服务</td><td>月度；个人</td></tr><tr><td>车机</td><td><strong>能否读到安全更新级别</strong>；若不能，记录&quot;依赖车企&quot;并纳入例外台账</td><td>每次车企公告后；车主</td></tr><tr><td>数字标牌 / 展示用设备（企业）</td><td>版本、账户归属、是否登录共享 Apple 账户、是否长期不重启</td><td>季度巡检；IT</td></tr><tr><td>二手/回收后进入家庭的设备</td><td>上一任账户是否已解除、配对关系是否残留（#96 同一条口径）</td><td>入家前一次性；管理员</td></tr></tbody></table>
+<p>判据统一按 #111 第 6 节三步：<strong>定载体 → 定生效条件 → 要本机证据</strong>。拿不到本机证据的，一律记为&quot;依赖上游&quot;，不记为&quot;已闭环&quot;。</p>
+<hr>
+<h2>6. 管控能力差异：为什么不能套用 iPhone 的管理口径</h2>
+<table><thead><tr><th>能力</th><th>iPhone/iPad</th><th>手表</th><th>电视</th><th>音响</th><th>头显</th><th>车机</th></tr></thead><tbody><tr><td>统一设备管理下发配置</td><td>完整</td><td>部分（依赖配对）</td><td>部分</td><td>基本不可</td><td>部分</td><td>不可</td></tr><tr><td>强制版本区间</td><td>可</td><td>间接</td><td>受限</td><td>不可</td><td>受限</td><td>不可</td></tr><tr><td>全局降权开关（锁定模式一类，#34）</td><td>可</td><td>视平台支持</td><td>视平台支持</td><td>视平台支持</td><td>可</td><td>不可</td></tr><tr><td>远程定位/擦除</td><td>可</td><td>可（经配对）</td><td>视机型</td><td>不可</td><td>可</td><td>不可</td></tr><tr><td>使用状况与日志可见性</td><td>中高（#76）</td><td>低</td><td>低</td><td>极低</td><td>中</td><td>无</td></tr></tbody></table>
+<p>这张表的实际用途只有一个：<strong>把&quot;我们企业有设备管理平台&quot;这句话拆成逐产品的能力清单</strong>。最后一行（日志可见性）通常是差异最大的一项——车机与音响几乎不提供任何可导出的安全状态证据。</p>
+<hr>
+<h2>7. 配对关系造成的&quot;一处可达，多点后果&quot;</h2>
+<p>三个必须由本文单独说明、且与已有篇目不重复的关系：</p>
+<ul><li><strong>手表作为 iPhone 的信任延伸</strong>：配对设备可以在特定条件下代持解锁与通知能力（#84 处理解锁边界，本文处理&quot;设备矩阵里的信任传递&quot;）。含义是：<strong>手表的停留版本会通过信任关系影响 iPhone 的暴露评估</strong>，即便缺陷本身在手表上不可利用。</li><li><strong>家庭共享账户把设备绑成一个授权单元</strong>：音响与电视常挂在家庭共享账户上，该账户的恢复要素与支付方式由多人触达（#99/#101/#102 的关系面）。含义是：<strong>这类设备的账户边界比它的设备边界更值得清点</strong>。</li><li><strong>车机是唯一&quot;更新责任人外部化&quot;的一环</strong>：Apple 侧修复必须经车企集成与推送。含义是：<strong>对车机，你唯一能做的处置是降低它承载的信息量</strong>（不把高价值账户、门禁凭证与常驻登录放进车内，#101 的处理口径）。</li></ul>
+<p>需要明确的边界：<strong>跨设备同步与内容接力本身由 #69 负责，网络出口与传输信任由 #103 负责</strong>；本文只处理&quot;同一份代码在不同硬件与不同更新通道上的分布差异&quot;。</p>
+<hr>
+<h2>8. 企业场景里的三类&quot;看不见的设备&quot;</h2>
+<table><thead><tr><th>场景</th><th>为什么被漏掉</th><th>最小处置</th></tr></thead><tbody><tr><td>门店/展厅的播放设备</td><td>被当成&quot;显示器&quot;而非&quot;设备&quot;：不进资产台账、不登记账户、无人负责更新</td><td>入台账、绑定专用账户（不共享个人账号）、季度核验版本与重启记录</td></tr><tr><td>会议室的语音设备</td><td>被认为&quot;不处理数据&quot;，但它承载会议内容入口与共享账户</td><td>明确归属人、关闭不必要的共享授权、记录固件核验日期</td></tr><tr><td>车队/租赁车辆内的车载系统</td><td>更新由车企决定，资产所有权与运维责任分离</td><td>把&quot;车内设备承载什么凭证&quot;写进用车规则；按 #109 的差旅口径处理跨境场景</td></tr></tbody></table>
+<p>三条共同点：<strong>没有一台设备有人负责它的版本状态</strong>。这是 #104 台账最容易补上的一块，也是这类设备风险的真正来源。</p>
+<hr>
+<h2>9. 常见误解</h2>
+<table><thead><tr><th>误解</th><th>更正</th></tr></thead><tbody><tr><td>&quot;那条 iOS 漏洞跟我家电视/音响无关&quot;</td><td>可达性由输入面决定（D2），不由设备名称决定；协议栈与解析组件是同源代码</td></tr><tr><td>&quot;它们都开了自动更新，不用管&quot;</td><td>自动更新不等于到达（#111 的 V2 分批），且不等于你能证明到达（D4）</td></tr><tr><td>&quot;车机会跟着手机一起修好&quot;</td><td>车机更新责任人外化于车企，Apple 侧修复不会自动到达</td></tr><tr><td>&quot;手表只是个屏幕，风险可忽略&quot;</td><td>它是 iPhone 的信任延伸，版本停留会通过关系影响主设备评估</td></tr><tr><td>&quot;客厅设备用家庭共享账号更方便&quot;</td><td>共享账户把多台设备与多种凭证绑成一个授权单元，边界更宽（D5 + #99）</td></tr><tr><td>&quot;有统一管理平台就覆盖所有 Apple 设备&quot;</td><td>逐产品能力差异大，音响与车机基本不可管（第 6 节）</td></tr><tr><td>&quot;设备常年插电、状态稳定就是安全&quot;</td><td>不重启同时意味着内存态残留与配置漂移长期不清（D3 + #64）</td></tr></tbody></table>
+<hr>
+<h2>10. 一句话结论</h2>
+<p>同一份 iOS 代码在其他 Apple 产品上的分布，可以压缩成四句话：</p>
+<ul><li><strong>可达性看输入面（D2），不看设备名字</strong>：不接收该类外部内容的组件不算暴露，常驻被发现、被连接的服务端面反而是新增加的那一半。</li><li><strong>到达性看更新通道（D1），不看是否开启自动更新</strong>：车机把责任人交给车企，手表把触发权交给配对手机，家庭设备把检查责任交给&quot;没人&quot;。</li><li><strong>可核验性（D4）决定它进不进风险台账</strong>：读不到版本与构建号的设备，只能记为&quot;依赖上游&quot;，并按 #104 登记例外。</li><li><strong>后果半径看账户与配对关系（D5 + 第 7 节）</strong>：这类设备最大的风险通常不是它自己被攻破后损失了什么，而是它信任了什么。</li></ul>
+<p>对个人最实际的动作：<strong>把家里每一台 Apple 设备列进一张表，逐台标注&quot;谁负责更新、能不能自查版本、承载哪个账户&quot;</strong>——这三列填不满之前，&quot;iOS 漏洞已修复&quot;对你家而言只是部分成立。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a112.html">← 第 112 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
