@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 文件与媒体解析器的攻击面：你没打开的东西，系统可能已经替你解析过一遍 | iOS 安全研究文章库</title>
+<meta name="description" content="组件族里最后一块系统侧竖条：六类&quot;到达即解析&quot;触发点（预览/缩略图/索引/邮件远程内容/AirDrop/备份恢复）、八族解析器×缺陷倾向×可关闭性测绘表、&quot;新格式即新面积&quot;规律（接 #93 L4 与 #114 变体）、三类被低估入口、投递通道矩阵、十二项按可关闭性排序的">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a118.html">
+<meta property="og:title" content="iOS 文件与媒体解析器的攻击面：你没打开的东西，系统可能已经替你解析过一遍">
+<meta property="og:description" content="组件族里最后一块系统侧竖条：六类&quot;到达即解析&quot;触发点（预览/缩略图/索引/邮件远程内容/AirDrop/备份恢复）、八族解析器×缺陷倾向×可关闭性测绘表、&quot;新格式即新面积&quot;规律（接 #93 L4 与 #114 变体）、三类被低估入口、投递通道矩阵、十二项按可关闭性排序的">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a118.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 118 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 文件与媒体解析器的攻击面：你没打开的东西，系统可能已经替你解析过一遍</h1>
+<blockquote><p>本文是防御视角的攻击面测绘与加固分析，<strong>不提供可利用代码，也不提供任何畸形样本、构造方法或触发步骤</strong>。它处理组件族（#82–#89）里唯一还没有被单独写过的一群东西：<strong>系统侧的格式解析器</strong>——图像、视频、字体、PDF、归档、通讯录与日历卡片这些&quot;文件读进来之后由谁拆解&quot;的代码。文中缺陷类别与触发形态均为公开披露的<strong>一般形态</strong>，具体 CVE 与版本对应关系<strong>以 Apple 官方安全公告为权威口径</strong>。</p></blockquote>
+<h2>1. 执行摘要</h2>
+<ul><li><strong>文件类缺陷与&quot;你点没点&quot;关系最弱</strong>。iOS 为了做预览、缩略图、索引、搜索和防病毒式扫描，会在你<strong>没有打开</strong>一个文件的情况下先解析它一次。这是&quot;零交互&quot;（0-click）之所以成立的一个独立来源，和消息通路（#87）、Web 引擎（#3）不是同一件事。</li><li><strong>解析器不是一个模块，是一族群</strong>：ImageIO、CoreMedia/VideoToolbox、CoreText 字体、PDF 与图形、归档与压缩、SQLite、XML/PLIST、vCard/vCalendar、音频与图像编解码。它们各自有自己的缺陷倾向，需要按族而不是按&quot;某个漏洞&quot;来看。</li><li><strong>一条稳定规律：新格式即新解析器</strong>。宽色域与 HDR、新容器与新编码、相机新增元数据、消息里的效果包，每一次&quot;体验升级&quot;都往系统里塞进新的解析代码；这条规律对应引入阶段轴的 L4 演进回归（#93）与修复形态学的变体生长（#114）。</li><li><strong>个人侧真正有效的动作是减少&quot;替你解析&quot;的次数</strong>，而不是提高&quot;打开前警觉&quot;的水平。可当场核验的开关集中在：信息（过滤未知发件人、链接预览）、AirDrop 接收范围、邮件远程内容载入、iCloud 照片与共享相册、低数据模式、锁定模式（#94/#90）。</li><li><strong>组织侧有个常被忽略的反作用</strong>：内容网关、邮件安全产品、预览生成服务会<strong>先替你解析一次</strong>，等于把攻击入口从&quot;你的设备&quot;搬到&quot;你自己的服务器&quot;。加固不能以制造新入口为代价。</li><li><strong>诚实边界</strong>：多数系统解析发生在特权守护进程内，用户侧几乎不留可见记录；&quot;我从来没打开过那个文件&quot;这句话，用设备侧工件通常<strong>证明不了</strong>（#70/#76/#62 的表述纪律）。</li></ul>
+<hr>
+<h2>2. 这根竖条补的是哪一块</h2>
+<p>系列在组件方向已经装了八根竖条：IOKit 驱动面（#82）、第三方 App 与配置（#83）、锁屏与生物识别（#84）、漏洞情报监测（#85）、恶意与滥用 App 分发（#86）、智能组件与输入通路（#87）、微架构侧信道（#88）、近场支付凭证（#89）。</p>
+<p><strong>&quot;格式解析器群&quot;没在里面</strong>，而它恰好是历史上被公开披露最多的 iOS 缺陷家族之一。它与几篇已有文章的分工必须说清楚，否则容易重复计数：</p>
+<table><thead><tr><th>已有篇目</th><th>它讲的方向</th><th>本文的不同</th></tr></thead><tbody><tr><td>#3 WebKit 远程代码执行</td><td>网页内容进入进程</td><td>本文不涉及浏览器引擎，只谈<strong>文件被交给系统解析器</strong></td></tr><tr><td>#29 Sandbox Escape</td><td>媒体服务作为<strong>逃逸路径</strong>（越出沙箱）</td><td>本文谈的是媒体/文件解析作为<strong>入口</strong>（拿到执行之前）</td></tr><tr><td>#87 智能组件与输入通路</td><td>视觉、语音、键盘、神经引擎</td><td>那些是模型与语义处理；本文是<strong>字节级格式拆解</strong></td></tr><tr><td>#103 网络出口与传输信任</td><td>数据<strong>出去</strong>的信任授予</td><td>本文是内容<strong>进来</strong>之后谁替你拆</td></tr><tr><td>#81 缺陷类别 / #82 驱动族</td><td>类别与族的统计口径</td><td>本文把口径<strong>落到解析器族</strong>上，给出触发条件与可关闭性</td></tr></tbody></table>
+<p>一句判读：<strong>#82 回答&quot;内核里哪些驱动可达&quot;，本文回答&quot;用户态里哪些格式代码会被自动喂数据&quot;。</strong>两者是同一张地图的两半。</p>
+<hr>
+<h2>3. &quot;谁替你解析&quot;：六类自动触发点</h2>
+<table><thead><tr><th>触发点</th><th>需要你打开吗</th><th>大概由谁执行</th><th>时机</th><th>设备侧留下什么</th></tr></thead><tbody><tr><td>会话与通知里的预览（图片/链接/附件卡片）</td><td><strong>不需要</strong></td><td>系统扩展与守护进程（渲染缩略图与富预览）</td><td>消息到达即发生</td><td>预览缓存、会话记录，多为系统内部（#70）</td></tr><tr><td>缩略图与相册导入</td><td>不需要</td><td>图像/视频解析器（为生成缩略图）</td><td>文件落盘或被共享到照片库时</td><td>缩略图缓存（容量有限、会被淘汰）</td></tr><tr><td>搜索与内容索引</td><td>不需要</td><td>索引子系统（读取文本与元数据）</td><td>后台周期执行</td><td>索引条目，属于&quot;未发现≠未发生&quot;的区段（#76）</td></tr><tr><td>邮件远程内容与附件预览</td><td>不需要（若允许远程载入）</td><td>邮件与图像解析栈</td><td>邮件展示时</td><td>远程内容拉取记录取决于版本与设置</td></tr><tr><td>AirDrop / 分享接收</td><td>需要你<strong>接收</strong>，但接收后系统会先解析用于展示</td><td>图像/视频/文档解析器</td><td>落盘瞬间</td><td>落盘时间、来源线索（#96 的残留清点）</td></tr><tr><td>备份、同步与恢复</td><td>不需要</td><td>归档/容器解析、数据库读取</td><td>同步周期或恢复过程</td><td>备份链中的对象存在性（#116 的冻结纪律）</td></tr></tbody></table>
+<p><strong>共同机制</strong>：为了&quot;让你不打开也能看见&quot;，系统必须先把文件拆开一遍。<strong>这条便利设计是本文全部风险的来源</strong>，也是最值得记住的一句话。</p>
+<hr>
+<h2>4. 解析器族 × 缺陷倾向测绘（对齐 #81 的类别口径）</h2>
+<table><thead><tr><th>族</th><th>常见入口格式</th><th>主导缺陷类别（#81 口径）</th><th>常见修复形态（#114 口径）</th><th>个人可关闭性</th></tr></thead><tbody><tr><td>图像与图像容器</td><td>JPEG/PNG/HEIF/TIFF/WebP/GIF 及容器内嵌块</td><td>越界读写、整数溢出、容器结构逻辑错误</td><td>F1 边界与结构校验（历史上有 ImageIO 相关的公开在野利用条目，Apple 以 iOS 14.8 等版本发布修复）</td><td><strong>低</strong>：多数预览无法逐项关闭，只能收紧来源</td></tr><tr><td>视频与媒体容器</td><td>MP4/MOV/QuickTime 轨道与样本表</td><td>解析边界错误、内存破坏</td><td>F1/F2 类型与结构校验</td><td>低</td></tr><tr><td>字体</td><td>TTF/OTF 与字体集合</td><td>表结构与轮廓数据处理错误</td><td>F1、部分 F5 组件更新</td><td>低（但可在来源侧收敛）</td></tr><tr><td>PDF 与图形内容</td><td>PDF 对象流、图像内嵌</td><td>对象模型逻辑错误、解析递归过深</td><td>F1/F6（限制与加固）</td><td>中（不自动打开外部 PDF）</td></tr><tr><td>归档与压缩</td><td>ZIP 及其变体、包结构</td><td>路径穿越类逻辑错误、元数据处理、解压资源放大</td><td>F2 命名与路径规范化（#92 的可用性代价在此族最直观）</td><td><strong>高</strong>：不解压也可能读元数据，所以来源控制为主</td></tr><tr><td>数据库与索引</td><td>SQLite 文件、注释型元数据</td><td>结构损坏时的处理错误</td><td>F1/F3</td><td>中</td></tr><tr><td>结构化文本</td><td>XML/PLIST/JSON、联系人 vCard、日历 vEvent</td><td>解析器资源放大、编码边界、实体处理</td><td>F1/F6 资源与深度限制</td><td>高（多数来自可拒绝的外部内容）</td></tr><tr><td>音频与编解码</td><td>AAC/ALAC/Opus 等</td><td>解码缓冲边界</td><td>F1/F5</td><td>低</td></tr></tbody></table>
+<p><strong>统计口径提醒</strong>：这张表描述的是&quot;哪一族历史上偏哪一类缺陷&quot;，<strong>不是</strong>&quot;某族更安全&quot;。跨族比较缺陷数量在本系列一贯避免（#75/#61），因为公告条目密度受格式流行度影响，而不是受代码质量单独影响。</p>
+<hr>
+<h2>5. 一条规律：新格式即新解析器</h2>
+<p>系统每次&quot;变好看&quot;，都往解析器群里加一块新面积：</p>
+<ul><li><strong>容器与新编码</strong>：更高的动态范围色彩、新的图像与视频容器、新的流媒体封装；</li><li><strong>相机与元数据</strong>：设备新增的拍摄模式与随文件携带的附加信息，都需要新的读取路径；</li><li><strong>会话里的富内容</strong>：链接预览、效果、贴纸、自定义表情，本质都是&quot;到达即渲染&quot;的外部结构化数据；</li><li><strong>索引与搜索增强</strong>：为了搜得更深，读取范围随之扩大。</li></ul>
+<p>三个推论：</p>
+<ol><li><strong>修复历史良好的族，会因新格式重新变陌生</strong>——旧代码审过不等于新容器审过（对应 #93 的 L4 演进回归）。</li><li><strong>一次补丁常只覆盖被报告的那个入口</strong>，同一族的相邻格式仍可能长出变体（对应 #114 的变体生长三条原因）。</li><li><strong>可核验性优先于信心</strong>：判断&quot;这块面积关掉了没有&quot;要看当期公告条目落在哪个组件，再对照 #111 的本机验证判据（构建号 &gt; 版本字符串）。</li></ol>
+<hr>
+<h2>6. 三类最容易被低估的入口</h2>
+<p><strong>只说明形态与判读方法，不涉及任何构造。</strong></p>
+<ol><li><strong>&quot;我预览过但没打开&quot;</strong>——预览就是解析。判读时应把&quot;渲染成功/失败&quot;当作事件，而不是把&quot;没有出现在最近使用里&quot;当作没发生。</li><li><strong>&quot;我只看了压缩包里的文件名&quot;</strong>——列目录同样要读容器结构；文件名与元数据本身携带编码、路径与长度信息。这一族在可用性上的代价最直观（#92）。</li><li><strong>&quot;这只是名片/日历邀请，不是程序&quot;</strong>——结构化文本有解析器、有资源上限，也有&quot;读进来之后被索引&quot;的下游通路。它的危害常表现为<strong>内容进入搜索与推荐</strong>，而不是崩溃。</li></ol>
+<hr>
+<h2>7. 投递通道与解析触发矩阵</h2>
+<table><thead><tr><th>通道</th><th>能否自动触发第 3 节的解析</th><th>个人侧的收口点</th></tr></thead><tbody><tr><td>信息 / 会话类应用</td><td><strong>能</strong>，且以预览为主</td><td>过滤未知发件人、关闭链接预览、不在未核实内容上操作</td></tr><tr><td>邮件</td><td>能（远程内容、附件预览）</td><td>关闭远程内容自动载入、外部附件先落到受控位置</td></tr><tr><td>浏览器下载</td><td>落盘后可能被索引与缩略图处理</td><td>少用自动打开；下载源白名单</td></tr><tr><td>AirDrop / 近场分享</td><td>接收即解析用于展示</td><td>接收范围收紧为&quot;仅联系人&quot;或关闭</td></tr><tr><td>相册与相机导入</td><td>导入即生成缩略图</td><td>关闭不必要共享、外部来源照片单独处理</td></tr><tr><td>云同步与备份恢复</td><td>恢复过程成批解析</td><td>加密备份、恢复前明确来源（#116/#96）</td></tr><tr><td>第三方文件管理/转换器</td><td>视其权限而定</td><td>少装&quot;什么格式都能开&quot;的工具（#83 的配置面）</td></tr><tr><td>企业网关与预览服务</td><td>不在设备上，但影响设备收到的内容</td><td>见第 9 节</td></tr></tbody></table>
+<hr>
+<h2>8. 加固清单（按可关闭性从高到低）</h2>
+<p><strong>先做能当场核验的。</strong>具体项名与位置随版本与地区变化，以设备当期设置为准。</p>
+<ol><li><strong>收紧&quot;到达即渲染&quot;</strong>：会话类应用开启<strong>过滤未知发件人</strong>；若系统提供<strong>链接预览</strong>开关，关闭它（iOS 17 及以后提供，位置以当期为准）。</li><li><strong>AirDrop 接收范围</strong>改为&quot;仅联系人&quot;或关闭；这是最容易当场完成的一项。</li><li><strong>邮件远程内容</strong>：关闭自动载入远程内容，避免外部图片在展示阶段被拉取与解析。</li><li><strong>共享相册与照片同步</strong>：非必要不加入；外部来源图片单独看待（#100 的健康影像同类问题）。</li><li><strong>低数据模式</strong>：在受限网络下会压低部分后台活动，可作为<strong>临时降面积</strong>手段，不作为长期策略。</li><li><strong>锁定模式</strong>：对少数高风险个体，它会进一步收紧消息富内容与附件的处理路径——是否开启按 #94 的暴露画像自评，并按 #90 先定档再决定。</li><li><strong>少装&quot;万能打开器&quot;</strong>：第三方解析工具把解析行为搬进<strong>你自愿授予权限</strong>的 App 里，属 #83 的配置缺陷族，不是系统加固。</li><li><strong>来源优先于警觉</strong>：把&quot;谁可以给我发文件&quot;当作可管理清单（通讯录、邮件白名单、团队空间），比训练&quot;打开前想一想&quot;更有效（#97 的判读同理）。</li><li><strong>备份链与恢复纪律</strong>：不确定的备份不恢复到在用设备（#116 的三条硬规则、#96 的&quot;先服务端后设备&quot;）。</li><li><strong>更新可核验</strong>：解析器族缺陷的修复绝大多数靠系统更新送达，按 #111 用构建号与重启后运行状态确认，而不是看版本号。</li><li><strong>崩溃与诊断记录</strong>：留意&quot;某类文件反复失败&quot;这一模式，它是本机少见的可见信号之一；诊断数据外送范围按 #103 收敛。</li><li><strong>季度化</strong>：把第 1–9 项做成 #104 的巡检行，配例外登记，别指望临场想起来。</li></ol>
+<hr>
+<h2>9. 组织侧：网关替你解析，等于新建一个入口</h2>
+<table><thead><tr><th>措施</th><th>收益</th><th>新增风险</th><th>取舍建议</th></tr></thead><tbody><tr><td>邮件/IM 内容网关（附件沙箱、解包预览）</td><td>拦掉大量恶意载荷</td><td><strong>服务器成为高价值解析面</strong>，且通常常驻、批量、无用户在场</td><td>隔离解析环境、最小权限、限制可解析格式白名单</td></tr><tr><td>预览生成服务（文档/图像转缩略图）</td><td>提升协作体验</td><td>同上，且入口对互联网可达</td><td>预览生成与业务系统分离，失败即降级不重试</td></tr><tr><td>MDM 强制策略（禁用共享、限制来源）</td><td>统一收口第 8 节多项</td><td>用户绕道个人设备处理工作文件（BYOD 老问题，#109）</td><td>策略覆盖工作账户与容器，不去动个人分区（#96）</td></tr><tr><td>浏览器隔离</td><td>设备不再接触部分富内容</td><td>依赖网络出口信任层（#103）</td><td>高危角色优先（#108）</td></tr><tr><td>关闭设备侧&quot;自动下载&quot;类策略</td><td>减少自动解析</td><td>体验下降与绕道</td><td>分层：普通用户宽松、关键人物收紧</td></tr></tbody></table>
+<p><strong>企业的一句话结论</strong>：把解析从端点搬到服务端<strong>不等于减少解析</strong>；除非服务端环境同样最小化，否则只是换了个更值得打的靶子。</p>
+<hr>
+<h2>10. 工件与可观测性：能看什么、看不到什么</h2>
+<table><thead><tr><th>想回答的问题</th><th>可用线索</th><th>局限</th></tr></thead><tbody><tr><td>这个文件到过我设备吗</td><td>会话记录、下载与落盘时间、来源应用（#70）</td><td>落盘不等于被解析；索引不留时间戳</td></tr><tr><td>系统解析过它吗</td><td><strong>通常无法直接观测</strong></td><td>解析发生在系统进程内，多数不留用户可见记录</td></tr><tr><td>解析失败过吗</td><td>崩溃与诊断条目、&quot;同一文件反复预览失败&quot;模式</td><td>保留期短、外送范围受设置控制（#103）</td></tr><tr><td>内容被索引走了吗</td><td>搜索结果出现、推荐异常</td><td>只能证明&quot;被读取过&quot;，不能证明被篡改</td></tr><tr><td>是否已被后续利用</td><td>需转向 #64/#55 的执行与驻留工件、#76 的硬门槛</td><td>单凭解析器族线索不足以定论</td></tr></tbody></table>
+<p><strong>表述纪律</strong>：写结论时用&quot;未发现…相关工件&quot;，不要用&quot;未发生&quot;；&quot;未发现被解析的证据&quot;与&quot;没有被解析&quot;不是一回事（#62/#116）。</p>
+<hr>
+<h2>11. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>实际</th></tr></thead><tbody><tr><td>&quot;我没点开那个文件就安全&quot;</td><td>预览、缩略图、索引都是解析；不点开≠不解析</td></tr><tr><td>&quot;只有可执行文件危险&quot;</td><td>iOS 上缺陷多发生在<strong>数据格式处理</strong>代码，不是&quot;文件能不能运行&quot;</td></tr><tr><td>&quot;图片能有什么漏洞&quot;</td><td>图像与容器族是历史上公开在野利用出现过的家族之一；问题在结构拆解，不在内容</td></tr><tr><td>&quot;装了杀毒/扫描 App 更保险&quot;</td><td>第三方扫描把解析搬进你授权的应用里，是新增配置面（#83），不是新增防御层</td></tr><tr><td>&quot;公司网关拦住了，设备就不用管&quot;</td><td>网关替你解析，服务端成了新靶子；端侧第 8 节仍要做</td></tr><tr><td>&quot;关掉预览太麻烦，忍忍就好&quot;</td><td>第 8 节前 4 项都可当场完成，成本以秒计；收益是持续降低自动解析次数</td></tr><tr><td>&quot;补丁发了就没事&quot;</td><td>要按 #111 验证构建号与重启后状态；相邻格式可能仍留有变体（#114）</td></tr><tr><td>&quot;崩溃日志里没有就是干净的&quot;</td><td>崩溃工件保留期短且可能不外送，缺失是常态而非证据（#76）</td></tr></tbody></table>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<table><thead><tr><th>本文位置</th><th>交给哪一篇</th></tr></thead><tbody><tr><td>缺陷类别命名与统计口径</td><td>#81（类别）、#82（驱动族的同类测绘方法）</td></tr><tr><td>触发条件与攻击者起点</td><td>#90（P0–P5 定档）、#116（W1–W4 窗口）</td></tr><tr><td>是否开启锁定模式</td><td>#94（暴露画像三步自评）</td></tr><tr><td>修复是否落到本机</td><td>#111（六个验证判据）、#115（更新链送达）</td></tr><tr><td>为什么新格式反复长出变体</td><td>#114（修复形态学）、#93（L4 演进回归）</td></tr><tr><td>归档/资源放大的可用性代价</td><td>#92（破坏类专篇）</td></tr><tr><td>工件目录与时间线重建</td><td>#70（浏览器工件）、#76（硬门槛）、#62（可采性）</td></tr><tr><td>第三方工具与配置面</td><td>#83、#86（滥用 App 分发）</td></tr><tr><td>巡检与例外登记</td><td>#104</td></tr><tr><td>高危个体与关键人物如何取舍</td><td>#108、#109</td></tr></tbody></table>
+<hr>
+<h2>13. 总结</h2>
+<p>装上这根竖条之后，四条可执行结论：</p>
+<ul><li><strong>风险的来源是&quot;便利&quot;</strong>：系统必须替你解析一次才能给你预览。加固的本质是<strong>减少自动解析次数</strong>，不是提高警觉水平。</li><li><strong>按族管理，不按漏洞管理</strong>：图像/视频/字体/PDF/归档/结构化文本六族各有缺陷倾向；一张族×可关闭性表比一份 CVE 清单更有用。</li><li><strong>新格式是新增面积</strong>：每次体验升级都会重开一块陌生代码；把&quot;公告里出现了哪一族&quot;作为本机是否需要重点核验的信号（#111/#114）。</li><li><strong>企业不要只做半件事</strong>：把解析搬到服务端只是搬家，服务端环境的最小化必须同时到位。</li></ul>
+<p>对个人最实际的一句话：<strong>把&quot;谁可以发文件给我&quot;当成一张可管理的清单</strong>，把会话预览、AirDrop 接收和邮件远程内容三处收口——这三项合起来不需要十分钟，却覆盖了你设备上绝大部分&quot;你没打开就已经被解析&quot;的机会。</p>
+<hr>
+<h3>说明</h3>
+<p>本文为防御视角的攻击面测绘与加固分析，<strong>不提供可利用代码，不提供任何畸形文件、构造方法、触发步骤或利用链组合示例</strong>；文中所有缺陷族描述均为公开披露的一般形态。具体组件、修复与版本对应关系请以 Apple 官方安全公告（Security Releases）当期口径为准，本文不逐条复现 CVE 清单。文中不针对任何产品、厂商或个案作事实断言。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases（组件与版本对应口径）</a></li><li><a href="https://developer.apple.com/documentation/" rel="nofollow noopener" target="_blank">Apple Developer Documentation — ImageIO / Image Preview / Core Media</a></li><li><a href="https://support.apple.com/guide/" rel="nofollow noopener" target="_blank">Apple Support — Messages、AirDrop 与锁定模式使用说明</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 媒体与图像解析链相关案例研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 定向监控与消息载荷研究</a></li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK Mobile Matrix — Exploit via Mobile Device Baseband / 相关战术</a></li><li>本系列 #3、#29、#62、#70、#76、#81、#82、#83、#86、#87、#90、#92、#93、#94、#96、#103、#104、#108、#109、#111、#114、#115、#116（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a117.html">← 第 117 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
