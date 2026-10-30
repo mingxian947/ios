@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 系统漏洞的修复载体分类学：Apple 用什么形式关掉一个缺陷，每种形式留下什么残余风险 | iOS 安全研究文章库</title>
+<meta name="description" content="十种修复载体 V1–V10 的覆盖面与残留、修复侧/生效条件/可拒绝性三条正交属性、个人与组织的责任归属矩阵、六个本机验证判据（构建号、重启后运行状态、入口消失、服务侧行为）、三步判定流程、五类残余风险与常见误解纠正">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a111.html">
+<meta property="og:title" content="iOS 系统漏洞的修复载体分类学：Apple 用什么形式关掉一个缺陷，每种形式留下什么残余风险">
+<meta property="og:description" content="十种修复载体 V1–V10 的覆盖面与残留、修复侧/生效条件/可拒绝性三条正交属性、个人与组织的责任归属矩阵、六个本机验证判据（构建号、重启后运行状态、入口消失、服务侧行为）、三步判定流程、五类残余风险与常见误解纠正">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a111.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 111 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 系统漏洞的修复载体分类学：Apple 用什么形式关掉一个缺陷，每种形式留下什么残余风险</h1>
+<blockquote><p>本文是防御视角的修复形态分析与落地验证方法，<strong>不提供可利用代码</strong>，不评价任何尚未修复缺陷的利用价值，也不提供任何绕过缓解机制的做法。文中的判据只回答一个问题：<strong>一个&quot;已修复&quot;，在你这台机器上到底生没生效。</strong></p></blockquote>
+<h2>1. &quot;修了没有&quot;从来不是二元问题</h2>
+<p>系列里已经三篇在处理补丁，但都没有停在&quot;修复以什么形式存在&quot;这一层：#61 算<strong>时间账</strong>（从收到报告到发布需要多少天），#75 算<strong>披露与暴露窗口</strong>（一条 CVE 何时变成可用情报），#85 把补丁周期变成<strong>流程</strong>（谁盯、多久看一次、留下什么）。三者都默认修复发布之后就自动等价于&quot;设备安全了&quot;。</p>
+<p>这个默认不成立。同一个&quot;已修复&quot;标签背后至少有十种载体，生效范围、可拒绝性、可见性完全不同：</p>
+<table><thead><tr><th>常见理解</th><th>实际可能的情况</th></tr></thead><tbody><tr><td>修复在下一个大版本里</td><td>修复已以增量安全响应形式先到，且<strong>只覆盖部分机型</strong></td></tr><tr><td>装了更新＝漏洞不可达</td><td>该组件需<strong>重启</strong>才生效；或该路径依赖的服务端开关尚未关闭</td></tr><tr><td>没进安全公告＝Apple 没动过</td><td>静默修补、默认值变更、协议弃用同样属于修复，且都不分配 CVE</td></tr><tr><td>缺陷已修＝能力已收回</td><td>代码仍在，只是入口被配置或权限限制住，可随条件变化重新打开</td></tr><tr><td>我的机型不受影响＝同代都不受影响</td><td>有一类载体由<strong>硬件代际</strong>决定，无法向旧机型回溯下发</td></tr></tbody></table>
+<p>一句判读：<strong>先问&quot;这个修复以什么形式存在&quot;，再问&quot;它在我这台机器上生效了吗&quot;</strong>。顺序颠倒，就会把&quot;公告里列了我的机型&quot;误当成&quot;我已经不在暴露名单里&quot;。</p>
+<hr>
+<h2>2. 三条正交属性：任何一个载体都能被这三问定位</h2>
+<table><thead><tr><th>属性</th><th>取值</th><th>为什么决定风险</th></tr></thead><tbody><tr><td><strong>A 修复侧</strong></td><td>设备侧代码 / 设备侧配置 / Apple 服务端 / 硬件与固件</td><td>服务端类载体对所有版本同时生效，是唯一能&quot;越过用户不更新&quot;的载体；设备侧代码类完全依赖用户装不装</td></tr><tr><td><strong>B 生效条件</strong></td><td>立即 / 需重启 / 需重装或迁移 / 需服务侧配合</td><td>&quot;装了但没重启&quot;是巡检里最常见的假安全（第 5 节 C2）</td></tr><tr><td><strong>C 可拒绝性</strong></td><td>强制 / 可选 / 用户不可见</td><td>可选意味着分布缓慢；不可见意味着你无法凭 UI 判断，只能凭构建号或行为验证</td></tr></tbody></table>
+<p>这三问的顺序也构成第 6 节的判定流程。<strong>同一类缺陷的不同修复可能落在不同的格子里</strong>——一个入口被代码修补（A=设备侧、B=需重启、C=可选），另一个入口被服务端下线（A=服务端、B=立即、C=不可见），于是&quot;这个 CVE 修了吗&quot;这个问题本身就没有单一答案。</p>
+<hr>
+<h2>3. 十种修复载体：覆盖面、代价与残留</h2>
+<table><thead><tr><th>#</th><th>载体</th><th>典型形态</th><th>覆盖谁</th><th>主要残留</th></tr></thead><tbody><tr><td>V1</td><td><strong>全量软件更新</strong></td><td>常规 iOS 版本更新</td><td>只有装了的人</td><td>版本停留（#94 的 V1/V2）、迁移/恢复可能带回旧构建</td></tr><tr><td>V2</td><td><strong>快速安全响应（增量）</strong></td><td>独立编号的小幅安全更新，不跟随主版本节奏</td><td>按机型与当前版本可用性分批</td><td>分批到达；并非所有机型/版本组合都能收到；需要重启才完整生效</td></tr><tr><td>V3</td><td><strong>静默修补</strong></td><td>修复进入某个版本但不单列条目</td><td>随所在版本到达</td><td>无法逐条核对，只能靠<strong>构建号</strong>与行为验证</td></tr><tr><td>V4</td><td><strong>组件级更新耦合</strong></td><td>SEP、基带、安全启动链等固件层随主版本一起更新，不能单独下发（#64）</td><td>只有能升到该版本的设备</td><td>旧机型上限即永久残留：修不到的那一层是硬件而非代码</td></tr><tr><td>V5</td><td><strong>服务端能力开关</strong></td><td>Apple 侧停止某项服务、收紧某类接口或证书（不依赖用户更新）</td><td>全部版本同时</td><td>只在连接时生效；离线路径与本地解析路径不受影响</td></tr><tr><td>V6</td><td><strong>协议与格式弃用</strong></td><td>下线旧传输版本、停用旧证书/旧附件格式</td><td>全部版本</td><td>兼容性窗口内的降级路径、第三方仍在使用旧格式（#103）</td></tr><tr><td>V7</td><td><strong>全局降权开关</strong></td><td>锁定模式一类的整体性关闭（#34）</td><td>主动开启的人</td><td>由用户决定开启率；开启者承担功能损失，未开启者完全不在保护内</td></tr><tr><td>V8</td><td><strong>编译期与运行期硬化</strong></td><td>新语言、检查加强、权限模型收紧，随版本发布而不针对单条缺陷（#79）</td><td>新机型优先，随版本推进</td><td>属&quot;降低可利用性&quot;而非&quot;移除缺陷&quot;；同代缺陷仍需逐个修</td></tr><tr><td>V9</td><td><strong>默认值与配置基线变更</strong></td><td>某功能默认关闭、推荐配置模板更新（#76）</td><td>新装与新配置；已有设备常被迁移保留旧值</td><td>老设备的历史值不变——这正是 #104 巡检要清点的东西</td></tr><tr><td>V10</td><td><strong>硬件代际切断</strong></td><td>只有某代之后芯片才具备的隔离层（#79/#88）</td><td>按购买时点分叉</td><td>无法回溯；是 #94 里&quot;机型世代&quot;作为暴露变量的根本原因</td></tr></tbody></table>
+<p>十种载体里只有 V5、V6、V10 不依赖用户动手，这也是为什么&quot;用户不更新&quot;这件事在 Apple 侧只能部分弥补：服务端能关掉一部分，硬件那一层完全关不掉。</p>
+<hr>
+<h2>4. 载体 → 归属：谁能推动它生效</h2>
+<table><thead><tr><th>载体</th><th>个人能做的</th><th>组织能做的</th><th>谁都无法做的</th></tr></thead><tbody><tr><td>V1/V2</td><td>保持自动更新、及时重启</td><td>MDM 版本区间强制（#76）</td><td>让已停留的旧机型获得新构建</td></tr><tr><td>V3</td><td>比对构建号</td><td>建立&quot;版本—构建号—已验证修复&quot;台账</td><td>逐条核对未公告的修补</td></tr><tr><td>V4</td><td>升级设备</td><td>采购口径按安全代际定（#79）</td><td>单独更新固件层</td></tr><tr><td>V5/V6</td><td>无需动作</td><td>验证依赖旧协议的自有服务是否仍可达</td><td>替 Apple 决定何时下线</td></tr><tr><td>V7</td><td>按 #94 自画像决定是否开启</td><td>对高危岗位批量建议开启</td><td>强制开启后不承担功能损失沟通</td></tr><tr><td>V8</td><td>升级到支持该平台版本</td><td>淘汰不支持该代际的设备</td><td>在旧硬件上获得新隔离层</td></tr><tr><td>V9</td><td>逐项检查历史值（不是检查默认值）</td><td>用配置描述文件把关键项写死</td><td>让历史配置自动跟进新默认值</td></tr></tbody></table>
+<p><strong>责任边界很关键</strong>：V1–V3 的生效率是用户与组织的责任，V5–V6 与 V10 是 Apple 的责任。把&quot;我在暴露名单上&quot;错误归因到自己不更新，会忽略那些根本不需要你动手的载体；反过来，把 V10 当成&quot;多等等就会修好&quot;，会让你对旧机型的暴露时长做出错误估计。</p>
+<hr>
+<h2>5. 落地验证：六个可当场执行的判据</h2>
+<p>&quot;验证修复生效&quot;和&quot;验证装了更新&quot;是两件事。以下六项按可信度从高到低排列：</p>
+<table><thead><tr><th>编号</th><th>判据</th><th>怎么查</th><th>强度</th></tr></thead><tbody><tr><td>C1</td><td><strong>构建号而非版本字符串</strong></td><td>设置 → 通用 → 关于本机 → 版本号旁的构建号；增量安全响应有独立编号</td><td>高：能区分同版本的不同修补批次</td></tr><tr><td>C2</td><td><strong>重启后的实际运行状态</strong></td><td>对比&quot;已安装构建号&quot;与&quot;运行中构建号&quot;；重启前后取值</td><td>高：捕捉&quot;装了未生效&quot;的假安全</td></tr><tr><td>C3</td><td><strong>能力入口是否消失</strong></td><td>弃用类载体应表现为入口/协议选项不再出现，而非仅提示</td><td>中高：V6/V9 的直接证据</td></tr><tr><td>C4</td><td><strong>服务侧行为验证</strong></td><td>用一次真实连接确认旧协议/旧证书被拒（企业自有服务亦可验证）</td><td>中高：V5/V6 唯一可见证据</td></tr><tr><td>C5</td><td><strong>企业版本与构建号报表</strong></td><td>MDM 上报字段（#76），按机型代际分组看分布</td><td>中：只能证明版本，不能证明单条修复</td></tr><tr><td>C6</td><td><strong>公告条目与本机的映射</strong></td><td>以 Apple 安全内容页列出的受影响范围 + 本机机型/版本为准做排除</td><td>中：范围判定，不是本机验证</td></tr></tbody></table>
+<p>三项常见误判：<strong>看版本号不看构建号</strong>（漏掉增量与静默批次）、<strong>把&quot;受影响机型包含我的机型&quot;当成&quot;我已暴露&quot;</strong>（同一机型可能因配置或功能不存在而不可达）、<strong>把&quot;已修&quot;当成&quot;这条链断了&quot;</strong>（同一原语往往有多个入口，#81 的变体逻辑）。</p>
+<hr>
+<h2>6. 三步判定流程</h2>
+<p>拿到一条&quot;已修复&quot;的系统缺陷情报时（个人与企业同一套流程）：</p>
+<ol><li><strong>定载体</strong>：这个修复属于 V1–V10 里的哪一种？（判据：是否出现在版本发布说明、是否有独立增量编号、是否根本不需要你动手）</li><li><strong>定生效条件</strong>：需要重启/重装/服务配合吗？可被拒吗？覆盖到我的机型与当前版本了吗？（第 2 节 A/B/C 三问）</li><li><strong>定本机证据</strong>：选第 5 节里强度足够的一项做当场验证，并把结果按 #104 的九字段登记；无法验证的记入例外台账，而不是假定已生效。</li></ol>
+<p>三步里最常被跳过的是第 3 步。<strong>没有本机证据的&quot;已修复&quot;，在台账上应当记成&quot;依赖上游&quot;而不是&quot;已闭环&quot;</strong>——这是 #85 的暴露窗口口径在修复侧的对应写法。</p>
+<hr>
+<h2>7. 五类残余风险：修复之后仍然存在的问题</h2>
+<table><thead><tr><th>类别</th><th>含义</th><th>处置归属</th><th>对应篇目</th></tr></thead><tbody><tr><td>R1 <strong>入口未全覆盖</strong></td><td>缺陷修在一处，同一原语的另一条可达路径未变</td><td>Apple，按族而非按条评估</td><td>#81/#68</td></tr><tr><td>R2 <strong>版本停留</strong></td><td>载体到达但用户/组织未装，或机型上限拦住</td><td>个人与组织</td><td>#94/V1–V4</td></tr><tr><td>R3 <strong>能力仍在、入口被关</strong></td><td>配置或权限限制可被重新打开（含描述文件、企业策略变更）</td><td>组织配置面</td><td>#76/#83</td></tr><tr><td>R4 <strong>Apple 修不到的那一层</strong></td><td>第三方 App、Web 服务、配置类缺陷不在系统更新射程内</td><td>开发者与采购方</td><td>#83/#86</td></tr><tr><td>R5 <strong>同一份代码的其他产品</strong></td><td>同一 Darwin/框架代码在手表、电视、头显、车机、HomePod 上的分布与更新节律不同</td><td>各产品线用户</td><td>另篇讨论</td></tr></tbody></table>
+<p>R5 值得单列：<strong>系统漏洞的&quot;影响范围&quot;从来不只等于 iPhone</strong>。同一份代码在别的 Apple 设备上以不同速度到达、以不同方式可见、有些甚至无法主动升级，这会让&quot;已修复&quot;这句话在设备矩阵里含义不一致。</p>
+<hr>
+<h2>8. 常见误解</h2>
+<table><thead><tr><th>误解</th><th>更正</th></tr></thead><tbody><tr><td>&quot;公告里有这条 CVE，说明我之前一直暴露&quot;</td><td>暴露与否取决于载体、路径可达性与本机配置，不取决于 CVE 是否发布（#75/#94）</td></tr><tr><td>&quot;自动更新开着就不用管&quot;</td><td>增量安全响应分批到达、部分修复需重启、默认值变更不回填历史配置（V2/V9 + C2）</td></tr><tr><td>&quot;大版本才修东西，小版本无所谓&quot;</td><td>独立安全增量与静默修补都不在大版本节奏上（V2/V3）</td></tr><tr><td>&quot;旧协议停用对我没影响&quot;</td><td>服务端类载体同时改变所有版本的可达性，也同时打断依赖旧协议的自有集成（V5/V6 + C4）</td></tr><tr><td>&quot;开启锁定模式＝所有漏洞修好了&quot;</td><td>它是降权开关，不是修补；关掉的是入口，缺陷本身仍在代码里（V7 + R3，#34）</td></tr><tr><td>&quot;老机型多等等就一起修了&quot;</td><td>由硬件决定的隔离层无法回溯下发，等待不改变暴露（V10 + R2，#79）</td></tr><tr><td>&quot;验证过版本号＝验证过修复&quot;</td><td>需要的是构建号、运行状态与行为证据，版本字符串不够（C1/C2/C3）</td></tr></tbody></table>
+<hr>
+<h2>9. 一句话结论</h2>
+<p>&quot;有没有修&quot;是一个由<strong>载体</strong>决定的问题，不是一个二元状态：</p>
+<ul><li><strong>先分载体</strong>：V1–V4 依赖设备侧到达（你的责任为主），V5–V6 由服务端同时改变所有人（Apple 的责任），V7–V10 分别由开启率、版本支持、配置回填和硬件代际决定，四种&quot;生效条件&quot;完全不同。</li><li><strong>再要证据</strong>：构建号、重启后运行状态、入口是否消失、服务侧行为——四项里至少一项落地，才算本机闭环（第 5 节）。</li><li><strong>最后管残余</strong>：入口未全覆盖、版本停留、能力仍在、第三方修不到、其他产品同源，五类残余各有归属，全部写进 #104 的台账而不是留在记忆里。</li></ul>
+<p>对个人的实际含义很朴素：<strong>保持更新、更新后重启、按 #94 决定是否开启锁定模式</strong>，其余交给服务端载体；对组织的实际含义是：<strong>把&quot;版本 + 构建号 + 已验证修复&quot;做成三列台账</strong>，否则报表里的&quot;已更新&quot;只是 C5 级别的弱证据。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a110.html">← 第 110 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
