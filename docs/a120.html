@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 组织侧离职与账户交接：人走了，权限、数据和可见性为什么都还在 | iOS 安全研究文章库</title>
+<meta name="description" content="#96 管&quot;物的退出&quot;，这篇管&quot;人与组织解绑&quot;：三种离职形态（友好/中性变动/争议离场，形态 B 最易漏）、六层×双方向残留清点表（组织侧带不走的账户/许可证/设备配置/App 授权/关系/数据，组织侧仍看得见的 BYOD 剖面/邮箱/位置/备份/账单可见性/自动化）、">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a120.html">
+<meta property="og:title" content="iOS 组织侧离职与账户交接：人走了，权限、数据和可见性为什么都还在">
+<meta property="og:description" content="#96 管&quot;物的退出&quot;，这篇管&quot;人与组织解绑&quot;：三种离职形态（友好/中性变动/争议离场，形态 B 最易漏）、六层×双方向残留清点表（组织侧带不走的账户/许可证/设备配置/App 授权/关系/数据，组织侧仍看得见的 BYOD 剖面/邮箱/位置/备份/账单可见性/自动化）、">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a120.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 120 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 组织侧离职与账户交接：人走了，权限、数据和可见性为什么都还在</h1>
+<h2>1. 执行摘要</h2>
+<p>设备流转那一篇（#96）处理的是&quot;一部手机离开&quot;。这一篇处理的是&quot;一个人离开&quot;——设备可能一台都没动，但组织和个人之间的六层绑定一条都没断。</p>
+<p>核心结论有四条：</p>
+<p>第一，<strong>离职的技术风险几乎全部来自&quot;关系型授权&quot;</strong>。这类授权的特征是：建立时只需一次同意，撤销时必须由<strong>建立它的那一侧</strong>发起，而离职流程通常只发起另一侧的动作。典型表现是员工被移出企业通讯录、MDM 里被除名，但他此前加入的共享相册、家庭组、Find My 关系、屏幕使用时间组织者、快捷指令自动化、App 内的第三方登录态仍然有效。</p>
+<p>第二，<strong>残留方向是双向的</strong>。员工侧带走的是访问能力（能继续读到公司数据），组织侧留下的是可见性（能继续看到个人数据）。第二个方向在讨论里出现得少，但在纠纷场景里更敏感：BYOD 剖面、公司邮箱账户、公司 Apple ID 下创建的备份与购买记录。</p>
+<p>第三，<strong>&quot;归属&quot;必须先判定，才能谈撤销</strong>。iOS 上大量对象没有所有权字段，只能靠三条替代规则判定：这个对象挂在谁的 Apple ID 下、谁为它付费、数据物理上落在哪一侧。三条规则经常给出不同答案，这种对象是争议的主要来源。</p>
+<p>第四，<strong>存在四个不可逆点</strong>。跨过去之后再恢复原状的成本远高于事前处理，且其中两个（备份链与购买记录）在离职当天通常没人想到。</p>
+<p>本系列延续一贯口径：只做风险测绘与防御性处置，不提供规避监管、越界取证或绕过他人认证的方法。涉及劳动争议、竞业限制与证据效力的部分，只标注&quot;应转律师&quot;的信号，不代替法律意见。</p>
+<h2>2. 这根竖条补的是哪一块</h2>
+<table><thead><tr><th>已有一篇</th><th>它管什么</th><th>本篇切走的部分</th></tr></thead><tbody><tr><td>#96 设备流转与退出</td><td>一部设备换持有人：抹机、eSIM、注册记录、Pass 残留</td><td>设备可以完全不流转，人也已经离开；本篇全部对象在账户与关系层</td></tr><tr><td>#101 车钥匙与门禁凭证</td><td>&quot;关系结束了但凭证还有效&quot;这一条规律</td><td>本篇是这条规律在雇佣关系上的完整展开，覆盖账户、订阅、许可证与可见性</td></tr><tr><td>#102 数字遗产与失能接管</td><td>持有人不在场时的授权</td><td>持有人在场且主动离开，动机与对抗性完全不同</td></tr><tr><td>#105 合法调取与云端披露</td><td>请求方是外部机构</td><td>本篇的另一侧是原雇主，属于合同与账户关系，不是司法程序</td></tr><tr><td>#110 多身份与备用设备架构</td><td>事前设计：几个账户几台设备</td><td>本篇是事后清理：已经混用多年之后如何拆开</td></tr><tr><td>#99 被持续控制场景</td><td>攻击者是与同住的人</td><td>对手是机构，行动受流程与审计约束，能力更强但可预测</td></tr><tr><td>#104 季度巡检台账</td><td>周期性检查</td><td>本篇是<strong>事件触发</strong>的一次性高浓度检查</td></tr><tr><td>#98/#106 托管与照护</td><td>监护关系建立与撤销</td><td>托管方是机构，但撤销权在家长/本人，节奏由家庭决定</td></tr></tbody></table>
+<p>一句话定位：<strong>#96 是&quot;物&quot;的退出，#101 是&quot;凭证&quot;的退出，#110 是&quot;事前不要混&quot;，本篇是&quot;人与组织解绑&quot;这一步本身。</strong></p>
+<h2>3. 三种离职形态，风险结构不一样</h2>
+<table><thead><tr><th>形态</th><th>常见触发</th><th>主导风险</th><th>处置节奏</th></tr></thead><tbody><tr><td>A 友好离职</td><td>主动辞职、正常合同到期</td><td>遗忘型残留：没人记得那些一次性同意的授权</td><td>按清单执行即可，30 天内完成</td></tr><tr><td>B 中性变动</td><td>内部转岗、外包结束、子公司剥离、并购换主体</td><td>边界重划型：数据合法留存但访问者集合变了；旧组织侧凭证继续有效</td><td>需要一次全量重算，不能只删人</td></tr><tr><td>C 争议离场</td><td>被辞退、纠纷、竞业、涉嫌违规调查</td><td>双向对抗：任一方都可能自行取证，越界风险最高</td><td>先冻结再清点；任何动作留痕；见第 7 节</td></tr></tbody></table>
+<p><strong>形态 B 最容易被漏掉</strong>。A 和 C 都有明确的时间点和负责人，B 往往以&quot;组织自己变了&quot;的形式发生，员工设备与账户什么都没发生，但可读集合已经完全换了一批人。企业侧尤其常见：主体变更、部门合并、外包供应商更换。</p>
+<h2>4. 双向残留清点：六层 × 两个方向</h2>
+<p>判定口径沿用 #94 的&quot;关得掉 / 只能收窄 / 关不掉&quot;三档，这里换成&quot;谁有权关&quot;。</p>
+<h3>4.1 组织侧带不走的（离职后仍能访问公司资源）</h3>
+<table><thead><tr><th>层</th><th>典型对象</th><th>建立方式</th><th>谁能关</th><th>失效条件</th></tr></thead><tbody><tr><td>账户</td><td>个人 Apple ID 登录的公司资源、共享的&quot;工作&quot;Apple ID</td><td>一次登录</td><td>组织侧改密 / 员工侧退出</td><td>双方都没做就一直有效</td></tr><tr><td>订阅与许可证</td><td>公司买的 App 席位、订阅、Apple 商务账户下的许可</td><td>分配即生效</td><td>管理员</td><td>需管理员在分配页显式撤销</td></tr><tr><td>设备配置</td><td>MDM 注册、描述文件、代理与 VPN 配置</td><td>一次 enrollment</td><td>MDM 侧除名 + 设备侧删除</td><td>除名不会自动删除已装配置</td></tr><tr><td>应用授权</td><td>OAuth 授权过的第三方 SaaS、App 内记住的会话</td><td>一次&quot;允许&quot;</td><td>用户在 App 内撤销，或服务端吊销</td><td>用户侧看不到全部授权列表</td></tr><tr><td>关系</td><td>共享相册、家庭组、协作、Find My 共享、屏幕使用时间组织者</td><td>一次邀请/接受</td><td><strong>只有建立方或对象所有者</strong></td><td>组织除名完全不影响</td></tr><tr><td>数据</td><td>iCloud 共享云盘、导出的本地副本、邮件附件、截图</td><td>一次访问</td><td>除&quot;服务端删除&quot;外基本无解</td><td>落到个人设备后不可远程回收</td></tr></tbody></table>
+<h3>4.2 组织侧仍看得见的（离职后仍能观察前员工个人）</h3>
+<table><thead><tr><th>层</th><th>典型对象</th><th>为什么还在</th><th>关闭位置</th></tr></thead><tbody><tr><td>设备管理</td><td>BYOD 上的 MDM 剖面、企业 App、远程抹除能力</td><td>剖面未到期或被重装</td><td>设备&quot;设置 → 通用 → VPN 与设备管理&quot;删除；组织侧同时吊销</td></tr><tr><td>通信</td><td>仍配置在公司邮箱服务器上的设备、推送、邮件转发规则</td><td>账号未停用或转发规则未清</td><td>服务端停用 + 设备侧删除账户</td></tr><tr><td>位置</td><td>曾被加入的位置共享、Find My 设备列表、家人共享</td><td>关系不由 HR 流程管理</td><td>双方各自的共享页退出</td></tr><tr><td>备份</td><td>用公司 Apple ID 建立的备份、照片图库同步、钥匙串共享</td><td>备份归属跟随账户，不跟随雇佣关系</td><td>判定归属后由账户持有人处置</td></tr><tr><td>消费记录</td><td>公司 Apple ID 下的购买、订阅、家庭组内的账单可见性</td><td>家庭组内组织者可见成员账单</td><td>退出家庭组；记录本身不可删</td></tr><tr><td>自动化</td><td>快捷指令自动化、专注模式共享、Siri 设备授权</td><td>建立时不看雇佣状态</td><td>设备侧逐条检查，无服务端列表</td></tr></tbody></table>
+<p><strong>这张表里最反常识的一行是&quot;备份归属&quot;</strong>：很多人以为备份里装的是公司数据就归公司。iOS 上备份是挂在账户下的，账户挂在哪一侧决定了谁能读、谁能恢复、谁能删除，与数据内容无关。这也是第 5 节三条判定规则最容易给出矛盾答案的地方。</p>
+<h2>5. 归属判定：三条规则，经常互相矛盾</h2>
+<table><thead><tr><th>规则</th><th>提问</th><th>强项</th><th>弱点</th></tr></thead><tbody><tr><td>R1 账户归属</td><td>这个对象挂在哪个 Apple ID 下？</td><td>客观、可截图取证、服务端可查</td><td>覆盖不到组织侧独立系统里的记录</td></tr><tr><td>R2 付费归属</td><td>谁的钱？合同主体是谁？</td><td>决定许可证、订阅、商务账户下的分配</td><td>与个人使用产生的数据无关</td></tr><tr><td>R3 落点归属</td><td>数据当前物理在哪一侧（个人设备/组织租户/第三方 SaaS）？</td><td>决定谁能真正执行删除</td><td>落点会随同步变化；副本可能有多处</td></tr></tbody></table>
+<p>用法：<strong>先按 R1 判定&quot;谁能操作&quot;，再按 R2 判定&quot;谁有权要求&quot;，最后按 R3 判定&quot;操作在哪生效&quot;</strong>。三个答案一致时，处理就是一次常规撤销；不一致时，不要单方面动手，先写清楚争议归属。</p>
+<p>高危组合是 R1 与 R2 分家：公司付费、个人账户承载。这时&quot;员工退出&quot;和&quot;公司要求删除&quot;都不是一个技术动作能解决的，任何一侧强行操作都可能同时造成数据丢失与主张受损。</p>
+<h2>6. 时间窗口</h2>
+<table><thead><tr><th>窗口</th><th>长度</th><th>里面必须完成的动作</th><th>错过之后</th></tr></thead><tbody><tr><td>W1 最后工作日</td><td>单日内</td><td>服务端停用（邮箱、租户、许可证）、凭据吊销、设备侧删除管理剖面</td><td>组织侧仍可写入设备；个人侧仍可读取租户</td></tr><tr><td>W2 交接期</td><td>通常 ≤30 天</td><td>关系类逐项退出、共享内容处置、自动与手动备份的归属确认</td><td>关系不会自然过期，需再次联系对方才能关闭</td></tr><tr><td>W3 订阅周期</td><td>至下一个账单周期</td><td>订阅与许可撤销、账单可见性检查</td><td>继续计费，或家庭组内继续可见消费记录</td></tr><tr><td>W4 留存期</td><td>依所在地法规与合同，通常数月至数年</td><td>明确哪些数据必须保留、由谁保留、保留在哪</td><td>事后清理会撞上&quot;应保留却被删&quot;的责任问题</td></tr></tbody></table>
+<p><strong>W1 与 W4 相互拉扯</strong>：W1 要求尽快断开，W4 要求某些内容不许删。正确顺序是先确定保留义务，再执行断开会顺带删除内容的动作（例如停用邮箱、删除账户）。</p>
+<h2>7. 四个不可逆点</h2>
+<table><thead><tr><th>点</th><th>动作</th><th>为什么不可逆</th><th>替代动作</th></tr></thead><tbody><tr><td>N1</td><td>恢复备份到新设备/新账户</td><td>把在职期间的旧授权与旧关系一起复活，且看起来像&quot;离职后又拿到了访问&quot;</td><td>只选择性恢复照片、通讯录等明确属于个人的类别</td></tr><tr><td>N2</td><td>抹掉设备或退出账户</td><td>未导出的个人证据、聊天记录与授权截图一并消失</td><td>先固定必要的个人记录，再抹；记录本身注意不要包含他人隐私</td></tr><tr><td>N3</td><td>单方面删除共享内容</td><td>共享相册、共享云盘里的删除对全部成员生效，可能触发争议</td><td>由所有者导出副本后再处理，把删除权留给对象所有者</td></tr><tr><td>N4</td><td>把公司数据导出到个人存储</td><td>导出即产生新副本，回收不再受控</td><td>用组织提供的迁移通道，或在设备侧删除前完成交接</td></tr></tbody></table>
+<p>四个点共同特征：<strong>做了就变成&quot;事实主张&quot;</strong>——后续任何解释都要围绕这个已发生的技术动作展开，成本远高于事前处理。</p>
+<h2>8. 交接执行表</h2>
+<p>按&quot;先服务端、后设备、最后关系&quot;的顺序执行。每步留一张带系统时间的截图。</p>
+<h3>组织侧八项</h3>
+<table><thead><tr><th>#</th><th>动作</th><th>位置</th><th>验收信号</th></tr></thead><tbody><tr><td>1</td><td>停用目录账号与邮箱</td><td>管理控制台</td><td>前员工无法再登录任何租户服务</td></tr><tr><td>2</td><td>吊销设备令牌与会话</td><td>身份提供方</td><td>强制重新登录，历史会话消失</td></tr><tr><td>3</td><td>撤销订阅席位与 App 许可</td><td>Apple 商务 / MDM</td><td>席位回到未分配池</td></tr><tr><td>4</td><td>MDM 除名</td><td>MDM</td><td>设备侧剖面提示不再受管理</td></tr><tr><td>5</td><td>移除共享资源成员资格</td><td>各云盘/协作文档</td><td>个人设备上的同步项消失</td></tr><tr><td>6</td><td>重算可读集合</td><td>权限矩阵</td><td>与形态 B 一致，逐群组检查</td></tr><tr><td>7</td><td>明确保留义务清单</td><td>法务/合规</td><td>写明保留内容、负责人、期限</td></tr><tr><td>8</td><td>记录本次处置</td><td>台账（沿用 #104 九字段）</td><td>异常项进入台账而不是留在邮件里</td></tr></tbody></table>
+<h3>个人侧十项</h3>
+<table><thead><tr><th>#</th><th>动作</th><th>位置</th><th>验收信号</th></tr></thead><tbody><tr><td>1</td><td>确认设备上的管理剖面</td><td>设置 → 通用 → VPN 与设备管理</td><td>列表为空，或仅剩自己安装的项</td></tr><tr><td>2</td><td>删除公司邮箱与账户</td><td>设置 → 邮件 / 通用 → 账户</td><td>通知与同步停止</td></tr><tr><td>3</td><td>删除公司 VPN/代理配置</td><td>设置 → 通用 → VPN 与设备管理</td><td>无遗留描述文件</td></tr><tr><td>4</td><td>退出公司参与的共享相册/云盘</td><td>照片 / 文件 App</td><td>内容不再出现在本机</td></tr><tr><td>5</td><td>检查位置共享与 Find My 设备列表</td><td>查找</td><td>无组织成员</td></tr><tr><td>6</td><td>检查家庭组与家人共享</td><td>设置 → 通用 → 家庭</td><td>组织者账单不再可见</td></tr><tr><td>7</td><td>检查屏幕使用时间与组织者关系</td><td>设置 → 屏幕使用时间</td><td>无他人管理本机</td></tr><tr><td>8</td><td>撤销 App 内的第三方登录授权</td><td>各 App 账户页 / 提供方&quot;已授权应用&quot;页</td><td>两侧都撤销</td></tr><tr><td>9</td><td>核对备份归属与恢复来源</td><td>设置 → iCloud → 备份</td><td>备份挂在正确一侧</td></tr><tr><td>10</td><td>清理快捷指令自动化与专注模式共享</td><td>快捷指令 / 专注模式</td><td>无指向旧组织的自动化</td></tr></tbody></table>
+<p>个人侧第 8、10 两项是<strong>离职场景里最容易漏的</strong>：第 8 项在 iOS 上没有统一视图，需要 App 内与服务端各查一次（对应 #107 的&quot;关得掉但召不回&quot;）；第 10 项完全没有服务端清单，只能逐条看。</p>
+<h2>9. 争议形态（C）的特殊纪律</h2>
+<p>争议离场时，双方都倾向于自行收集证据。三条纪律：</p>
+<p><strong>只固定自己一侧可见的内容。</strong> 自己设备上、自己账户里、自己参与过的会话，属于自己一侧；通过他人账户、他人设备或恢复他人备份获得的内容不属于，且这类获取方式在后续程序里通常对自身不利。</p>
+<p><strong>不要用技术方式验证猜测。</strong> 出于&quot;想确认对方还能不能看&quot;而实际执行一次登录、一次恢复，本身是一次真实访问行为，会留下与动机无关的记录。检查归属按第 5 节三条规则做静态判定即可。</p>
+<p><strong>争议越具体，越应该先转律师。</strong> 出现以下任一信号时，停止自助处置：涉及竞业限制或保密义务、涉及客户数据与个人信息出境、双方对某对象归属主张不一致、任何一方主张对方存在越权访问。此时技术上最该做的只有两件：保留现状、做一份带时间的现状快照。</p>
+<p>本篇不提供任何针对他人账户或设备的取证、绕过认证或恢复手段的说明。</p>
+<h2>10. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>纠正</th></tr></thead><tbody><tr><td>&quot;离职流程走完就干净了&quot;</td><td>离职流程只管服务端与许可证；关系层（共享、位置、家庭、屏幕时间）不在任何 HR 系统清单里</td></tr><tr><td>&quot;MDM 除名 = 设备上的东西都没了&quot;</td><td>除名不自动删除已安装的描述文件、配置、企业 App 与缓存数据</td></tr><tr><td>&quot;个人设备上的公司数据，公司管不到&quot;</td><td>反过来也成立：公司账户下的备份、购买与订阅，个人也无法单方面收回</td></tr><tr><td>&quot;退出 App 就行&quot;</td><td>退出只结束会话，不撤销授权；授权撤销要 App 内和提供方两侧都做</td></tr><tr><td>&quot;数据是谁的就归谁删&quot;</td><td>判定靠 R1/R2/R3 三条规则；删除动作只有对象所有者能安全执行</td></tr><tr><td>&quot;抹机就断干净了&quot;</td><td>#96 已列过：eSIM、注册记录、关系与服务端副本都不随抹机消失；本篇再加一条：关系类残留压根不在设备上</td></tr><tr><td>&quot;备份里都是公司内容，就该交给公司&quot;</td><td>备份挂在账户下，账户归属决定谁能读、谁能恢复；先判归属再谈交付</td></tr><tr><td>&quot;以后不会再有交集，风险已经过去&quot;</td><td>订阅与家庭组的账单可见性、位置共享都长期有效，直到有人专门去关</td></tr></tbody></table>
+<h2>11. 与既有各篇的接口</h2>
+<p>本篇给已有各篇补一个<strong>触发条件</strong>：#96/#101/#102 的处置流程在这里获得&quot;人事件&quot;这个最频繁的真实触发场景；#104 台账在此从周期巡检变成事件驱动的临时台账；#105 在&quot;外部请求方&quot;之外补上&quot;原雇主&quot;这一侧，它强制力来自合同与账户，不来自程序。</p>
+<p>反向依赖：判定归属时沿用 #94 的&quot;关得掉 / 只能收窄 / 关不掉&quot;；撤销不对称沿用 #107 的结论（关掉入口不等于召回内容）；多设备与多账户的理想状态沿用 #110 的架构约束——本篇大量动作之所以要做两遍（设备侧 + 服务端），根因就是当初没有按角色拆分账户域。</p>
+<h2>12. 总结</h2>
+<p>人与组织解绑这一步，技术上没有开关。它是一组分别位于服务端、设备、账户、关系四处的独立撤销动作，其中只有前两类进了任何流程清单，后两类靠个人主动执行。</p>
+<p>三条可执行结论：<strong>第一，把&quot;关系层&quot;当作离职清单的必查项而不是可选提醒</strong>，因为它不会随任何服务端动作自动关闭；<strong>第二，任何归属主张不清的对象，在争议形态下保持现状并转律师</strong>，不要通过实际访问来验证猜测；<strong>第三，最好的处置仍然是事前不混</strong>——按 #110 拆好账户域与设备角色之后，本篇十项个人侧动作里有六项会变成&quot;删除一个账户&quot;而不是&quot;排查八处关系&quot;。</p>
+<h2>说明</h2>
+<p>本篇是风险测绘与防御性处置清单，不涉及任何针对第三方账户或设备的访问、取证、绕过认证或数据恢复手段。涉及劳动关系、竞业限制、保密义务、证据效力或个人信息保护义务的主张，应以所在地法律与合同文本为准，本篇的判定规则只用于安排技术动作顺序，不构成法律意见。</p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a119.html">← 第 119 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
