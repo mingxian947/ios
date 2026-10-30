@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 用户态系统服务的攻击面：沙箱里的那个进程，能通过哪些接口对守护进程说话 | iOS 安全研究文章库</title>
+<meta name="description" content="#82 的用户态对应半张地图：四道门模型（G1 可达/G2 认人/G3 验内容/G4 越权）与各门失效时的缺陷形态、八类服务族×缺陷倾向×可关闭性测绘、六种&quot;接口契约被违反&quot;的反复模式（身份≠权限、TOCTOU、路径与链接信任、失败即信息）、可达性审计五步法、&quot;谁能修&quot;">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a119.html">
+<meta property="og:title" content="iOS 用户态系统服务的攻击面：沙箱里的那个进程，能通过哪些接口对守护进程说话">
+<meta property="og:description" content="#82 的用户态对应半张地图：四道门模型（G1 可达/G2 认人/G3 验内容/G4 越权）与各门失效时的缺陷形态、八类服务族×缺陷倾向×可关闭性测绘、六种&quot;接口契约被违反&quot;的反复模式（身份≠权限、TOCTOU、路径与链接信任、失败即信息）、可达性审计五步法、&quot;谁能修&quot;">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a119.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 119 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 用户态系统服务的攻击面：沙箱里的那个进程，能通过哪些接口对守护进程说话</h1>
+<blockquote><p>本文是防御视角的攻击面测绘与可达性审计方法，<strong>不提供可利用代码，不提供任何接口调用构造、样本或触发步骤</strong>。它写的是 #82（内核 IOKit 驱动面）一直没被配上的另一半：<strong>用户态守护进程与其对外接口</strong>。文中缺陷类别与组件归属为公开披露的<strong>一般形态</strong>，具体 CVE 与版本对应关系<strong>以 Apple 官方安全公告（Security Releases）为权威口径</strong>，本文不逐条复现清单。</p></blockquote>
+<h2>1. 执行摘要</h2>
+<ul><li><strong>iOS 上大量跨特权边界的数据流动不经过网络，也不经过文件系统，而经过&quot;接口&quot;</strong>：一个受限进程向某个系统守护进程发起请求，把一段结构化参数交给它，由后者在更高特权下代为完成工作。</li><li>这类接口要过<strong>四道门</strong>：能不能找到它（名称解析允许表）→ 它认不认你（连接侧的对端凭证与能力校验）→ 它信不信你给的内容（参数与边界校验）→ 它做不做超出你身份的事（能力与所有权检查）。<strong>四道门中任意一道的实现缺陷，都是&quot;系统漏洞&quot;，而不是某个 App 的漏洞。</strong></li><li>最常见的失效模式不是内存破坏，而是<strong>信任假设错误</strong>：服务假设调用方诚实、假设路径已规范化、假设&quot;调用者身份&quot;等于&quot;调用者权限&quot;、假设错误分支不泄露信息。这一族缺陷在修复形态学里属于 <strong>F1/F3</strong>，常常修一个入口长出一族变体（#114）。</li><li><strong>个人用户在这根竖条上的可动作范围有限，而且应当诚实承认</strong>：不能关服务、不能改允许表。真正可做的是三件事——减少有能力发起调用的第三方组件（输入法、转换器、快捷指令、描述文件）、按 #111 验证更新是否落到本机、以及把设备侧的<strong>崩溃与诊断记录</strong>当作可见信号来读。</li><li><strong>端侧有一个常被忽略的观察点</strong>：系统守护进程异常退出会留在分析数据里（&quot;Service exited due to signal&quot;）。反复出现同一服务名，是本系列里少见的、个人可当场核对的&quot;某个接口正在被错误数据打到&quot;的信号。</li><li><strong>企业侧的杠杆大得多</strong>：托管配置、MDM 权限收敛、锁定模式（#94/#90）与事件响应联动，决定了攻击者能不能拿到&quot;一个可以在沙箱内跑代码的起点&quot;。</li></ul>
+<hr>
+<h2>2. 这根竖条补的是哪一块</h2>
+<p>组件族（#82–#89，#118 补齐解析器群）里，#82 讲的是<strong>内核态 IOKit 驱动的外部方法与两道授权门</strong>。但真实事件里更多的一步发生在<strong>用户态</strong>：攻击者或恶意 App 先在沙箱内取得执行，然后通过系统服务接口请求特权侧代为操作。</p>
+<table><thead><tr><th>已有篇目</th><th>它讲的边界</th><th>本文的不同</th></tr></thead><tbody><tr><td>#82 IOKit 驱动面</td><td>内核驱动的 userclient / external method</td><td>用户态守护进程与其请求接口；调用不需要驱动实例</td></tr><tr><td>#29 沙箱逃逸</td><td>逃逸<strong>路径</strong>（Mach IPC/XPC/IOKit 六类）</td><td>不讲如何逃，讲<strong>接口本身</strong>在被合法调用时会发生什么</td></tr><tr><td>#118 解析器群</td><td>字节级格式拆解</td><td>拆的是<strong>语义参数</strong>（标识符、路径、域、能力），不是容器字节</td></tr><tr><td>#40/#41 提权案例</td><td>具体提权链的公开报道</td><td>一般化的接口契约与审计方法</td></tr><tr><td>#111 修复载体 / #114 修复形态</td><td>修复以何形式落地、改在哪一层</td><td>本文给出该层缺陷的<strong>族×门</strong>测绘作为输入</td></tr><tr><td>#91 后果 / #92 破坏类</td><td>缺陷后果分档</td><td>本文把&quot;接口侧缺陷&quot;落到 #91 的具体格子</td></tr></tbody></table>
+<p>一句判读：<strong>#82 回答&quot;内核愿意听谁说话&quot;，本文回答&quot;用户态服务愿意替你做什么&quot;。</strong></p>
+<hr>
+<h2>3. 四道门：从受限进程到特权服务</h2>
+<table><thead><tr><th>门</th><th>机制（公开描述）</th><th>该门失效时长出的缺陷形态</th><th>沙箱配置文件名（供理解，不提供改法）</th></tr></thead><tbody><tr><td><strong>G1 可达</strong>：能不能找到服务</td><td>名称解析允许表；沙箱 profile 对 mach-lookup 的 allow/deny；用户域与系统域分离</td><td>本不该对普通 App 开放的服务被解析到；仅调试/内部服务残留在生产构建</td><td><code>deny mach-lookup</code> / <code>global-name</code> 白名单</td></tr><tr><td><strong>G2 认人</strong>：服务是否校验对端</td><td>XPC 连接携带的对端凭证、审核信息、调用方能力</td><td><strong>把&quot;能连上&quot;当成&quot;有权用&quot;</strong>；只检查签名标识而不检查能力</td><td>无（属服务端实现）</td></tr><tr><td><strong>G3 验内容</strong>：参数处理</td><td>反序列化、类型检查、长度与边界、标识符规范化</td><td>缺字段被当默认值、类型混淆、越界读写、路径未规范化</td><td>无</td></tr><tr><td><strong>G4 越权</strong>：代你做不该做的事</td><td>所有权/标识归属检查、按调用者身份限定作用域</td><td><strong>TOCTOU（检查与使用分离）</strong>、符号链接与重定向信任、把请求里的标识当作可信输入去访问他人对象</td><td>无</td></tr></tbody></table>
+<p><strong>关键结构观察</strong>：G1/G2 是<strong>授权</strong>问题，G3/G4 是<strong>信任假设</strong>问题。历史上 iOS 安全公告里反复出现的组件条目（例如 XPC、CoreServices、Sandbox、各类系统守护进程所属组件）大多落在 G3/G4，而不是 G1——因为 G1 是集中策略，G3/G4 是<strong>每个接口各自的一次实现决定</strong>，数量大、审查难、修一个不等于修一族。</p>
+<hr>
+<h2>4. 服务族 × 缺陷倾向测绘（对齐 #81 类别口径）</h2>
+<table><thead><tr><th>服务族</th><th>谁可能被调到（示意能力方向）</th><th>主导缺陷类别（#81）</th><th>需要用户交互吗</th><th>修复常见形态（#114）</th><th>个人可关闭性</th></tr></thead><tbody><tr><td>媒体与图像服务</td><td>处理外部媒体时被拉起的守护进程</td><td>内存破坏、容器边界</td><td>常不需要（到达即处理，见 #118）</td><td>F1/F2</td><td><strong>无</strong></td></tr><tr><td>键串与凭证服务</td><td>请求读写凭证、设备绑定材料</td><td>授权检查缺失、标识归属错误</td><td>不需要</td><td>F3 所有权重构</td><td>无</td></tr><tr><td>网络与会话服务</td><td>后台下载、连接、代理与扩展</td><td>元数据授权旁路、缓存信任</td><td>少</td><td>F1/F4</td><td>低（限制后台活动）</td></tr><tr><td>文件与同步服务</td><td>跨容器访问、提供方与共享目录</td><td>路径与符号链接信任、TOCTOU</td><td>通常需要你授权一次范围</td><td>F2/F3</td><td>中（少授权文件级权限）</td></tr><tr><td>位置/健康/联系人类服务</td><td>汇总敏感数据供多 App 消费</td><td>能力越权、聚合可反推</td><td>依赖你的授权</td><td>F3/F6</td><td>中（#100 的授权清点）</td></tr><tr><td>图形与渲染服务</td><td>窗口、合成、显示栈</td><td>内存破坏、共享对象生命周期</td><td>不需要</td><td>F1/F5</td><td>无</td></tr><tr><td>安全与信任服务</td><td>证书链评估、代码签名与安装、配置描述文件处理</td><td><strong>逻辑缺陷</strong>（校验分支、降级路径）</td><td>需要你安装描述文件/证书（#103 的最高信号红旗）</td><td>F1/F4</td><td>高（不装描述文件与根证书）</td></tr><tr><td>推送与会话中继服务</td><td>设备与云端通道，接收外部触发</td><td>解析边界、鉴权假设</td><td>不需要</td><td>F1/F5</td><td>低</td></tr></tbody></table>
+<p><strong>读法提醒</strong>：这张表的价值不在&quot;哪族最危险&quot;，而在<strong>同一格子里&quot;个人可关闭性&quot;与&quot;缺陷倾向&quot;的组合</strong>——左上角（不可关闭 + 内存破坏）只能靠更新送达（#115）；右下角（可关闭 + 逻辑缺陷）才是策略与行为能改的。</p>
+<hr>
+<h2>5. 六种反复出现的&quot;契约被违反&quot;模式</h2>
+<p>以下均为 CWE 级的一般形态描述，<strong>不涉及任何构造方法</strong>。</p>
+<ol><li><strong>缺省信任</strong>：可选字段缺失时走&quot;最宽松分支&quot;。判读信号：修复条目里出现&quot;缺少校验&quot;。</li><li><strong>类型混淆与反序列化假设</strong>：调用方给出与接口文档不符的类型，服务端按结构解析。对应 #81 的类型/内存类。</li><li><strong>检查与使用分离（TOCTOU）</strong>：先检查属性、再按同一标识访问；两步之间对象可被替换。文件与同步族最常见。</li><li><strong>路径与链接信任</strong>：标识未规范化、或信任已解析过的路径段。后果常跨容器，属 #91 里的越界访问格。</li><li><strong>身份 ≠ 权限</strong>：把&quot;请求里带谁的标识&quot;当成&quot;谁有权操作它&quot;。这是键串/凭证族最典型的一类，也是修复常要动所有权模型（F3）的原因。</li><li><strong>失败即信息</strong>：错误分支把内部状态、路径或大小返回给调用方；单独看无害，组合起来是信息泄漏原语（对应 #2 层次轴的&quot;信息泄漏→后续利用&quot;链条）。</li></ol>
+<hr>
+<h2>6. 可达性审计五步法（#82 方法的用户态版本）</h2>
+<ol><li><strong>列接口</strong>：某服务对哪些调用方开放（沙箱内可达 / 仅特权域可达 / 仅系统内部）。</li><li><strong>定可达集</strong>：以&quot;我能装上的最低权限 App 能不能走到这一步&quot;为判据；这是 #90 的 P 档在接口层的投影。</li><li><strong>定鉴权</strong>：G2 有没有、按什么判（能力、标识、还是仅&quot;能连上&quot;）。</li><li><strong>定信任假设</strong>：G3/G4 里服务假设调用方提供了什么（规范路径？已校验标识？自己的对象？）。</li><li><strong>定后果落点</strong>：把该接口被误用后的后果放进 #91 的格子（保密/完整/可用 × 作用域 × 可逆性），据此排优先级；不要以&quot;能不能拿到 root&quot;作唯一指标。</li></ol>
+<p><strong>审计者的诚实边界</strong>：G1 与鉴权逻辑可从公开行为推断，<strong>参数校验与所有权检查通常只能靠事后修复公告倒推</strong>。因此本文建议的优先级依据是&quot;公告里出现了哪一族组件&quot;，而不是自评结论。</p>
+<hr>
+<h2>7. 谁能修、修在哪一层</h2>
+<table><thead><tr><th>缺陷位置</th><th>引入阶段（#93）</th><th>责任侧</th><th>修复载体（#111）</th></tr></thead><tbody><tr><td>单个服务的 G3 校验缺失</td><td>L2 实现</td><td>Apple 系统组件</td><td>系统更新（V1/V2 类，需重启验证）</td></tr><tr><td>G4 所有权模型错误</td><td>L1 设计 / L2 实现</td><td>Apple，代价大、周期长</td><td>组件级重构，回归风险高</td></tr><tr><td>沙箱允许表放得过宽（G1）</td><td>L3 配置构建</td><td>Apple 策略；MDM 无法逐项覆写</td><td>系统更新 + 锁定模式收紧（#94）</td></tr><tr><td>第三方组件把接口暴露给更低权限</td><td>L3/L5（集成与依赖）</td><td><strong>企业或个人自愿安装</strong></td><td>卸载/权限收敛，立即可做</td></tr><tr><td>描述文件与根证书改变信任前提</td><td>L3 配置</td><td>用户与员工行为</td><td>删除配置（#103 的&quot;必须先装证书&quot;红旗）</td></tr></tbody></table>
+<p>一句判读：这根竖条上<strong>大部分缺陷只能由 Apple 修</strong>，因此&quot;更新是否真的落到本机&quot;（#111 的构建号与重启后运行状态）比任何行为建议都重要；个人与组织能立刻动手的，集中在最后两行。</p>
+<hr>
+<h2>8. 端侧可观测性：能看什么</h2>
+<table><thead><tr><th>想回答的问题</th><th>可用线索</th><th>局限</th></tr></thead><tbody><tr><td>某个系统服务异常退出过吗</td><td>&quot;设置 → 隐私与安全 → 分析与改进 → 分析数据&quot;里按服务名搜索崩溃记录；诊断包里的&quot;Service exited due to signal&quot;类条目</td><td>保留期短、需开启共享分析、条目对普通用户不可解释</td></tr><tr><td>有 App 在频繁触发特权服务吗</td><td>设备发热/卡顿、异常重启、后台活动统计（屏幕使用时间）</td><td>只能给出间接信号（与 #64/#116 的 W2 可见性一致）</td></tr><tr><td>我的信任前提被动过吗</td><td>描述文件与证书清单、配置概要、MDM 注册状态</td><td>需要按 #103/#96 逐项清点，不能只删设备侧记录</td></tr><tr><td>是否已被后续利用</td><td>转向执行与驻留工件（#55/#64）、网络侧记录（#103）、服务端留存（#105）</td><td>单凭接口异常不能定性（#62 表述纪律）</td></tr><tr><td>补丁到了吗</td><td>构建号比对 + 重启后状态（#111 C1/C2）</td><td>版本号本身不足以说明组件已更新（#111 的构建号优先原则）</td></tr></tbody></table>
+<p><strong>&quot;未发现相关崩溃记录&quot;不等于&quot;接口未被调用过&quot;</strong>——绝大多数合法调用不产生记录。写结论时按 #62/#116 的纪律表述。</p>
+<hr>
+<h2>9. 加固清单</h2>
+<h3>9.1 个人（六项，按可执行性排序）</h3>
+<ol><li><strong>更新验证优先</strong>：按 #111 用构建号确认修复落到本机，重启后再核一次运行状态；这是唯一能覆盖本族多数缺陷的动作。</li><li><strong>不装描述文件、不装根证书</strong>：任何&quot;先安装一个配置才能用&quot;的要求都按 #103 的红旗处理。</li><li><strong>少装会替你调用系统服务的中转组件</strong>：第三方输入法、格式转换器、&quot;清理/加速&quot;类、需文件级权限的管理器（#83/#118）。</li><li><strong>收紧敏感授权</strong>：位置、健康、通讯录、照片的&quot;完全访问&quot;逐项降级；每季按 #100/#104 清点一次。</li><li><strong>开启分析数据的可观测性</strong>（或至少知道它在哪）：事件发生时才有东西可查；同时按 #103 控制外送范围。</li><li><strong>高风险个体按需评估锁定模式</strong>：它会进一步收紧部分入口（是否开启按 #94 画像、#90 定档决定，不要凭感觉）。</li></ol>
+<h3>9.2 组织（五项）</h3>
+<ol><li><strong>MDM 权限收敛与例外登记</strong>：把&quot;哪些 App 能拿到文件级/全库权限&quot;变成受控清单（#104 九字段）。</li><li><strong>托管配置覆盖信任前提的项要审计</strong>：证书、代理、VPN 配置的描述文件发放留痕（#103）。</li><li><strong>离职与设备回收对称</strong>：注册退出、配置清除、账户侧优先（#96&quot;先服务端后设备&quot;）。</li><li><strong>关键人物分层</strong>：差旅与代理链上的设备处置（#109）、高危个体的独立约束（#108）。</li><li><strong>事件响应接线</strong>：接口异常/崩溃模式要能进事件流程，而不是停在个人&quot;手机好像变卡了&quot;（#85 的监测与 #116 的窗口时限）。</li></ol>
+<hr>
+<h2>10. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>实际</th></tr></thead><tbody><tr><td>&quot;App 都在沙箱里，碰不到系统&quot;</td><td>沙箱就是靠<strong>接口调用</strong>完成绝大部分实际工作的；受限≠不可达</td></tr><tr><td>&quot;只有越狱设备才需要担心这类漏洞&quot;</td><td>接口调用发生在完全未越狱的设备上，且是 #29/#40 一类链的常规中间步</td></tr><tr><td>&quot;我可以自己关掉有漏洞的系统服务&quot;</td><td>普通用户与 MDM 都不能逐项停系统服务；只能减少触发者与提高更新确定性</td></tr><tr><td>&quot;装了安全类 App 能监控到这些调用&quot;</td><td>第三方 App 看不到其它进程的接口调用；能观测到的仍是你自己的授权与配置面</td></tr><tr><td>&quot;崩溃日志里有服务退出就是被攻击了&quot;</td><td>常见原因是数据异常与兼容问题，缺省判读应为&quot;未发现&quot;而非&quot;已确认&quot;（#62）</td></tr><tr><td>&quot;公告里没写这个组件就说明没有缺陷&quot;</td><td>公告只列被报告并被修复的条目；未列不等于未存在（#85 的监测口径）</td></tr><tr><td>&quot;版本一样就代表修好了&quot;</td><td>要按 #111 用构建号与重启后状态验证，同一版本号可能未含该组件修复</td></tr><tr><td>&quot;锁定模式一开就与此无关&quot;</td><td>它收紧部分入口与富内容处理，但不改变接口是否存在，也不替代更新验证（#94）</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>本文位置</th><th>交给哪一篇</th></tr></thead><tbody><tr><td>内核侧对应的可达面</td><td>#82（IOKit 外部方法与授权门）</td></tr><tr><td>类别命名与统计口径</td><td>#81</td></tr><tr><td>层次坐标（哪一层失守）</td><td>#2</td></tr><tr><td>逃逸路径分类</td><td>#29</td></tr><tr><td>攻击者起点档位</td><td>#90</td></tr><tr><td>后果分档与破坏类</td><td>#91、#92</td></tr><tr><td>缺陷由谁引入、谁能修</td><td>#93</td></tr><tr><td>是否开锁定模式</td><td>#94</td></tr><tr><td>修复载体与本机验证</td><td>#111、#115</td></tr><tr><td>修在哪一层与变体生长</td><td>#114</td></tr><tr><td>文件/同步族的具体字节解析面</td><td>#118</td></tr><tr><td>配置与信任前提（描述文件、证书）</td><td>#103、#83</td></tr><tr><td>授权与账户侧处置优先</td><td>#96、#100</td></tr><tr><td>监测、巡检与方案书接线</td><td>#85、#104、#108、#109</td></tr><tr><td>工件与时间线</td><td>#55、#62、#64、#116</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<ul><li><strong>接口是特权边界上唯一的合法通道，因此也是最常见的失守点</strong>：#82 讲内核愿听谁说话，本文讲用户态服务愿替你做什么，两张地图合起来才是完整的系统侧攻击面。</li><li><strong>四道门是本文最有用的工具</strong>：G1 可达、G2 认人、G3 验内容、G4 越权。<strong>大多数真实缺陷落在 G3/G4</strong>，因为它们是逐接口的一次性实现决定，而不是集中策略。</li><li><strong>这一族的绝大多数只能由厂商修</strong>，所以&quot;更新可核验&quot;（#111）在本竖条上的权重要高于一切行为建议；个人与组织的可动杠杆集中在<strong>减少触发者</strong>（第三方中转组件、描述文件、过度授权）与<strong>留可观测性</strong>（分析数据、权限清单）。</li><li><strong>诚实对待不可观测性</strong>：看不到接口调用记录是常态，不是安全证明；任何结论按 #62/#116 的&quot;未发现≠未发生&quot;纪律表述。</li></ul>
+<p>对个人最实际的一句话：<strong>不装来路不明的配置描述文件、不装替你操作系统的第三方工具、并确认更新真的落到本机</strong>——这三条覆盖了这根竖条上你唯一能控制的那部分。</p>
+<hr>
+<h3>说明</h3>
+<p>本文为防御视角的攻击面测绘与审计方法分析，<strong>不提供可利用代码，不提供接口枚举脚本、调用构造、参数样本或利用链组合示例</strong>。文中关于沙箱允许表、连接鉴权、参数校验与所有权检查的描述均为公开机制的一般性说明；具体组件、缺陷类别与版本对应关系请以 Apple 官方安全公告当期口径为准。本文不针对任何产品、厂商、服务或个案作事实断言。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/" rel="nofollow noopener" target="_blank">Apple Platform Security Guide — 沙箱、权限与系统服务</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases（组件与版本对应口径）</a></li><li><a href="https://developer.apple.com/documentation/" rel="nofollow noopener" target="_blank">Apple Developer Documentation — XPC / os_xpc 与沙箱相关说明</a></li><li><a href="https://opensource.apple.com/" rel="nofollow noopener" target="_blank">Apple Open Source (OSS) — xnu、launchd、shell_version 等用户态组件源码索引</a></li><li><a href="https://cwe.mitre.org/" rel="nofollow noopener" target="_blank">MITRE CWE — 授权、TOCTOU、路径信任与未校验输入相关缺陷条目</a></li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK Mobile Matrix — 移动端相关战术</a></li><li><a href="https://projectzero.google/" rel="nofollow noopener" target="_blank">Google Project Zero — 系统服务与内核接口相关案例研究</a></li><li><a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab — 定向监控与利用链公开研究</a></li><li><a href="https://github.com/mvt-project/mvt" rel="nofollow noopener" target="_blank">MVT — Mobile Verification Toolkit</a></li><li>本系列 #2、#29、#40、#41、#55、#62、#64、#81、#82、#83、#85、#90、#91、#92、#93、#94、#96、#100、#103、#104、#108、#109、#111、#114、#115、#116、#118（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a118.html">← 第 118 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
