@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 与 Android 系统漏洞结构对照：同一类缺陷为什么在两个平台上代价不同 | iOS 安全研究文章库</title>
+<meta name="description" content="五个结构性差异（供应链形态/送达环节/更新粒度/安装来源策略/硬件代际耦合）、十二项逐环节对照表、按缺陷类别比较修复路径长度、攻击者选择规律的防御推论、企业与个人各自的第一动作、三个不能误用的地方">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a112.html">
+<meta property="og:title" content="iOS 与 Android 系统漏洞结构对照：同一类缺陷为什么在两个平台上代价不同">
+<meta property="og:description" content="五个结构性差异（供应链形态/送达环节/更新粒度/安装来源策略/硬件代际耦合）、十二项逐环节对照表、按缺陷类别比较修复路径长度、攻击者选择规律的防御推论、企业与个人各自的第一动作、三个不能误用的地方">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a112.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 112 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 与 Android 系统漏洞结构对照：同一类缺陷为什么在两个平台上代价不同</h1>
+<blockquote><p>本文是防御视角的架构对照分析，<strong>不提供可利用代码</strong>，不做厂商优劣评价，也不比较两平台的漏洞数量统计（这类比较缺乏可比口径）。本文只做一件事：把&quot;同一类系统缺陷&quot;放进两套<strong>分发与信任结构</strong>里，看它的修复路径、可达人群和处置责任为什么不同。所有具体版本与组件差异以两家官方安全公告为准。</p></blockquote>
+<h2>1. 为什么需要这篇对照</h2>
+<p>系列里的 #2 按系统层次分类、#81 按缺陷类别分类、#90 按攻击者起始位置分类、#91 按后果分类、#93 按引入阶段分类、#94 按实际暴露人群分类、#111 按修复载体分类。这些轴都隐含一个前提：<strong>平台结构不变</strong>。</p>
+<p>一旦跨平台比较，这个前提就没了。同一条&quot;图像解析里的越界写&quot;（#81 的 OOB 类）在两个平台上的处理流程完全不同：谁收到报告、谁写补丁、谁把它带进设备、多久到达、能不能强制——这四问的答案由<strong>分发结构</strong>决定，而不是由缺陷类别决定。</p>
+<p>因此本文的对照口径是固定五个问题：</p>
+<ol><li>修复<strong>由谁产出</strong>（单一供应商还是分层供应链）；</li><li>修复<strong>由谁送达</strong>（厂商直接推还是经第三方环节）；</li><li>修复<strong>能强制吗</strong>（个人延后、企业锁定的自由度）；</li><li>缺陷<strong>可达面由什么决定</strong>（默认安装来源策略、默认开启的解析能力）；</li><li>缓解机制<strong>是否随硬件代际分叉</strong>。</li></ol>
+<p>一句判读：<strong>比较平台不是比较安全性，而是比较&quot;一条缺陷从被发现到不可利用，中间要经过几个不由你控制的环节&quot;。</strong></p>
+<hr>
+<h2>2. 五个结构性差异</h2>
+<table><thead><tr><th>结构差异</th><th>iOS</th><th>Android</th><th>对缺陷处置的实际影响</th></tr></thead><tbody><tr><td><strong>S1 供应链形态</strong></td><td>单一供应商：内核、框架、驱动、固件同一家产出</td><td>分层：AOSP 核心 + 芯片组厂商驱动 + OEM 定制 + 运营商配置</td><td>Android 上一条 CVE 的&quot;受影响范围&quot;必须问到机型与 SoC；iOS 的范围以版本+机型列表表达（#75 的公告读法）</td></tr><tr><td><strong>S2 修复送达环节</strong></td><td>厂商 → 设备（OTA），环节少</td><td>AOSP 补丁 → OEM 集成 →（运营商认证）→ 设备，环节多</td><td>送达延迟差异远大于缺陷本身差异；#85 的&quot;暴露窗口&quot;在 Android 上更难预测</td></tr><tr><td><strong>S3 更新粒度</strong></td><td>整机镜像为主，辅以增量安全响应与服务端载体（#111 的 V1/V2/V5）</td><td>分层更新：内核与核心框架（GKI）、模块化组件（Mainline 之类经服务通道更新）、OEM 层各自节奏</td><td>Android 的部分组件可以不等整机就修复；代价是&quot;已修复&quot;需要按层核对，验证判据更复杂（#111 第 5 节）</td></tr><tr><td><strong>S4 安装来源策略</strong></td><td>默认封闭：App Store 之外仅测试分发、企业分发与描述文件通道（#67），侧载受系统级限制</td><td>默认开放但受策略约束：可允许第三方来源，工作场景可由 MDM 关闭；同时有应用级完整性校验机制</td><td>iOS 的滥用集中在&quot;合法签名链被借用&quot;（企业证书、配置描述文件）；Android 的滥用集中在&quot;来源与安装时刻&quot;（#86/#97）</td></tr><tr><td><strong>S5 硬件代际耦合</strong></td><td>缓解机制高度绑定芯片代际，旧机型无法回溯（#79/#94）</td><td>高端与中低端、不同 SoC 之间能力差异更大，且部分安全特性依赖 OEM 是否实现</td><td>两平台都有&quot;设备代际即安全决策&quot;的问题，Android 的方差更大，iOS 的分界线更清晰可判定</td></tr></tbody></table>
+<p>S2 与 S3 是一对反向权衡：<strong>iOS 的更新链路短，所以&quot;一条更新修全部&quot;，代价是链路短不等于送达快，装不装仍由人决定；Android 允许组件分层更新，所以一部分修复能绕过 OEM 节奏，代价是&quot;这台设备现在是什么状态&quot;变成三层问题。</strong></p>
+<hr>
+<h2>3. 十二项对照：同一缺陷类在各环节上的差别</h2>
+<table><thead><tr><th>环节</th><th>iOS</th><th>Android</th><th>谁的处置动作因此不同</th></tr></thead><tbody><tr><td>内核</td><td>XNU（Mach + BSD + IOKit 驱动模型）</td><td>Linux 内核 + OEM 变体</td><td>驱动类缺陷的归属：iOS 找 Apple，Android 要先判定驱动来自谁（#82）</td></tr><tr><td>强制访问控制</td><td>沙箱（Seatbelt 策略）+ 代码签名强制</td><td>SELinux 域 + 应用沙箱</td><td>逃逸后的&quot;第二层&quot;不同：一次逃逸在两平台上换来的能力不等价（#68）</td></tr><tr><td>完整性防护</td><td>代码签名与库验证贯穿加载链（#73）</td><td>签名 + 验证启动 + 应用级校验，OEM 实现有差异</td><td>加载链类缺陷的影响范围：Android 需按 OEM 判定</td></tr><tr><td>安全协处理器</td><td>独立安全子系统承担密钥与敏感状态（#9/#53）</td><td>各方案实现（可隔离硬件密钥取决于机型是否支持）</td><td>&quot;设备被拿走时密钥是否可提取&quot;在两平台上是机型问题而非平台问题（#84）</td></tr><tr><td>信息通路</td><td>消息解析在隔离网关后处理（#65/#71）</td><td>通知与应用级解析分层</td><td>0-click 面的位置不同，但都不等于&quot;没有解析暴露&quot;（#60）</td></tr><tr><td>Web 引擎</td><td>系统级单引擎，JIT 与 WebAssembly 受严格约束（#57）</td><td>引擎作为可更新组件，可经服务通道更新</td><td>修复到达速度：Android 的引擎层常先于系统补丁</td></tr><tr><td>图形栈</td><td>图形/WebGPU 相关栈作为历史高价值攻击面（#58/#40/#43）</td><td>GPU 驱动来自芯片组厂商</td><td>同一缺陷类别，但补丁责任人不同</td></tr><tr><td>无线与基带</td><td>基带栈由厂商统一更新（#26/#72）</td><td>基带与固件由芯片组/OEM 分别交付</td><td>基带类修复的可见性：Android 更难自查</td></tr><tr><td>侧信道</td><td>硬件级侧信道随芯片代际变化（#88）</td><td>同样存在，且缓解实现依赖内核配置与 OEM</td><td>这类问题都不能靠&quot;更新一下&quot;解决，需按 #88 的能力口径判断</td></tr><tr><td>漏洞赏金与披露</td><td>单一赏金计划 + 集中公告（#75）</td><td>平台层 + 组件层 + 多家厂商各自公告</td><td>情报源数量与口径不统一，监测成本不同（#85）</td></tr><tr><td>补丁状态可读性</td><td>版本号 + 构建号 + 增量编号（#111 的 C1）</td><td>安全补丁级别（SPL）+ 组件层状态</td><td>审计时&quot;证明已修复&quot;的证据形式不同</td></tr><tr><td>企业强制能力</td><td>版本区间约束、配置描述文件、受限功能开关</td><td>设备/工作资料分层、策略下发、合规检查</td><td>强制更新可行度：取决于设备所有权模型（#76）</td></tr></tbody></table>
+<hr>
+<h2>4. 用 #81 的缺陷类做行：修复路径长度差多少</h2>
+<table><thead><tr><th>缺陷类（#81）</th><th>iOS 修复要经过</th><th>Android 修复要经过</th><th>结构性结论</th></tr></thead><tbody><tr><td>内存越界 / 整数溢出（系统解析器）</td><td>Apple 单点</td><td>视解析代码归属：平台层或 OEM 或第三方库</td><td>越靠近&quot;谁都能改的层&quot;，验证越难</td></tr><tr><td>类型混淆（脚本引擎）</td><td>Apple 单点，且常叠加语言层硬化（#79/#81）</td><td>引擎层与系统层可分离，可较快到达</td><td>模块化让单点缺陷到达更快</td></tr><tr><td>驱动/UAF（IOKit 类）</td><td>Apple 单点</td><td>常落在供应商驱动，链路更长</td><td><strong>两平台差异最大的一类</strong>：责任归属而非技术难度</td></tr><tr><td>逻辑误用 / 授权模型缺陷</td><td>Apple 单点</td><td>平台 + OEM 定制策略两层</td><td>授权类缺陷在两平台都&quot;修得慢&quot;，但原因不同</td></tr><tr><td>信息泄露（KASLR / 侧信道）</td><td>需版本或代际配合</td><td>依赖内核配置与 SoC</td><td>都不适合用&quot;等更新&quot;当主要处置（#88）</td></tr><tr><td>TOCTOU / 文件与备份路径</td><td>Apple 单点</td><td>依赖存储实现与 FBE 细节</td><td>处置动作相同（#74 的备份边界），差别在证据形式</td></tr></tbody></table>
+<p>这张表的价值不在于&quot;哪边更好&quot;，而在于给出一个可操作的推论：<strong>在 Android 上处置一条系统漏洞，第一步是确认它属于哪一层；在 iOS 上处置一条系统漏洞，第一步是确认它属于哪一种载体（#111）。</strong></p>
+<hr>
+<h2>5. 攻击者视角的选择规律（只作为防御推论）</h2>
+<p>不写任何手法，只写结构结论：商业攻击能力的采购方向（#77）长期同时覆盖两个平台，说明<strong>攻击侧按目标人群与暴露窗口选型，而不按平台品牌选型</strong>。由此推出三条防御含义：</p>
+<ol><li><strong>暴露窗口 &gt; 缺陷质量</strong>：一条中等缺陷 + 一条长送达链，往往比一条严重缺陷 + 一条短链路更危险——这正是 #75/#85 把优先级从&quot;分数&quot;改成&quot;窗口&quot;的理由，跨平台时更成立。</li><li><strong>规模决定投递方式</strong>：目标人群的分发结构决定了攻击者需要不需要用户动手（#90 的 P0–P5），两平台在&quot;默认安装来源策略&quot;上的差异（S4）直接改变这一段的成本。</li><li><strong>同一批人两平台都暴露</strong>：跨平台通信的两端不构成隔离（#71 同一条道理）——为某个人换平台，不改变他所在的通信关系带来的暴露（#99/#108）。</li></ol>
+<hr>
+<h2>6. 对企业与个人的实际含义</h2>
+<table><thead><tr><th>对象</th><th>应该拿走什么</th></tr></thead><tbody><tr><td><strong>个人</strong></td><td>平台选择不解决加固问题：#80 的通用清单在两平台内容一致；真正决定结果的是<strong>更新节律</strong>与<strong>默认开启的解析能力</strong>（#94 的 V2/V4）。把&quot;换平台&quot;当处置动作，等于把风险换成另一套不由你控制的链路。</td></tr><tr><td><strong>混合平台企业</strong></td><td>两套强制机制的<strong>可达范围不同</strong>，不要用同一套指标报告&quot;合规率&quot;；风险报表应区分&quot;厂商已发布修复&quot;与&quot;设备真的在跑修复后的代码&quot;（#111 的 C1–C5），Android 侧还要区分修复落在哪一层。</td></tr><tr><td><strong>采购与安全基线</strong></td><td>决定暴露长尾的是<strong>支持年限、更新送达记录、是否可被 MDM 强制</strong>这三项，而不是品牌；旧机型停留（#94 的 V1）在两平台都是最稳定的长期风险来源。</td></tr><tr><td><strong>高价值个体</strong></td><td>判断依据是&quot;这台设备的缓解层是否已到期&quot;（#79/#94）与&quot;我能不能强制自己立刻更新&quot;，两者都比平台名称更有决定性。</td></tr></tbody></table>
+<hr>
+<h2>7. 三个不能误用的地方</h2>
+<ol><li><strong>不要把对方平台的事件当自己平台的证据</strong>：同一缺陷类在一个平台上的可利用性，不能推断另一个平台的可利用性，因为可达面、缓解层与责任人都不同。</li><li><strong>不要做漏洞数量的横向统计比较</strong>：两边的披露口径、公告粒度、赏金规则与安全补丁级别的定义不可比（#75 已经说明披露本身有结构性偏差）。</li><li><strong>不要把&quot;分层更新&quot;读成&quot;更安全&quot;</strong>：它提高部分组件的到达速度，同时降低状态可读性——它把风险从&quot;晚到&quot;换成了&quot;难验证&quot;，这是 #111 第 5 节判据要变复杂的原因。</li></ol>
+<hr>
+<h2>8. 常见误解</h2>
+<table><thead><tr><th>误解</th><th>更正</th></tr></thead><tbody><tr><td>&quot;两个平台的漏洞谁更多&quot;</td><td>没有可比口径；可比的只有&quot;一条缺陷到不可利用要经过几个环节&quot;（第 1 节五问）</td></tr><tr><td>&quot;iOS 单一供应商所以修复一定更快&quot;</td><td>环节少不等于送达快：装不装、重启不重启仍由人决定（S2/S3）</td></tr><tr><td>&quot;Android 能模块化更新所以不用管系统版本&quot;</td><td>组件层修复不覆盖内核与 OEM 层，仍要按层核对（第 4 节）</td></tr><tr><td>&quot;驱动类缺陷两边难度差不多&quot;</td><td>差异最大的一类：Android 的难点常在责任归属而非技术（第 4 节）</td></tr><tr><td>&quot;侧载政策差异等于漏洞差异&quot;</td><td>它改变的是<strong>攻击者需不需要用户动手</strong>，不改变系统缺陷本身（S4 + #97）</td></tr><tr><td>&quot;旧 iPhone 比旧 Android 更安全&quot;</td><td>两平台的长尾都由机型上限与代际决定，分界线清晰度不同但都存在（S5 + #94）</td></tr><tr><td>&quot;给高危的人换平台就降低风险&quot;</td><td>跨平台通信端不构成隔离，暴露主要由关系与账户结构决定（#99/#108）</td></tr></tbody></table>
+<hr>
+<h2>9. 一句话结论</h2>
+<p>同一类系统缺陷在两平台上的代价差，几乎不来自缺陷本身，而来自五个结构：<strong>供应链是否单一（S1）、送达是否经第三方环节（S2）、更新粒度是否分层（S3）、安装来源策略（S4）、缓解机制与硬件代际的耦合方式（S5）。</strong></p>
+<p>由此得到两平台各自的第一动作：<strong>iOS 先看载体类型（#111），Android 先定缺陷所在层</strong>；两平台共同的长期风险都是设备代际与更新停留（#94），而它不由平台名称决定。跨平台比较的产出只有这一个：<strong>把处置责任落到正确的那一层，从而知道该向谁要证据。</strong></p>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a111.html">← 第 111 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
