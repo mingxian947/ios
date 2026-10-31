@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS 配件与有线连接的攻击面：插上去之后，系统在你看见之前已经做完的那些事 | iOS 安全研究文章库</title>
+<meta name="description" content="#118 的链路层姊妹篇（字节到达即解析 vs 设备到达即握手）：三层结构 L1 电气协商/L2 协议枚举/L3 信任能力（缺陷密度在 L2、风险持续性在 L3）、六个&quot;插入即触发&quot;解析点 T1–T6（T5 配对命中不再询问是本篇唯一由系统替你决定的地方）、配对与信任留存测绘表（双侧存储+">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a121.html">
+<meta property="og:title" content="iOS 配件与有线连接的攻击面：插上去之后，系统在你看见之前已经做完的那些事">
+<meta property="og:description" content="#118 的链路层姊妹篇（字节到达即解析 vs 设备到达即握手）：三层结构 L1 电气协商/L2 协议枚举/L3 信任能力（缺陷密度在 L2、风险持续性在 L3）、六个&quot;插入即触发&quot;解析点 T1–T6（T5 配对命中不再询问是本篇唯一由系统替你决定的地方）、配对与信任留存测绘表（双侧存储+">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a121.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 121 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>iOS 配件与有线连接的攻击面：插上去之后，系统在你看见之前已经做完的那些事</h1>
+<h2>1. 执行摘要</h2>
+<p>这一篇把&quot;物理接口&quot;这一族入口单独测绘。它和 #118（文件与媒体解析器）是姊妹关系：#118 讲的是<strong>字节到达即解析</strong>，本篇讲的是<strong>设备到达即握手</strong>——一条链路上还没有任何文件内容，系统侧的特权进程已经在描述配件、匹配配对记录、决定给什么能力。</p>
+<p>四条核心结论：</p>
+<p><strong>第一，有线/配件入口的稀缺组合是&quot;物理可达 + 不需要你的解锁&quot;。</strong> 在 #90 的六档起始位置里，P4（短时间接触设备）与 P5（长时间控制设备）的多数攻击动作要过锁屏（#84）；但配件通道的<strong>枚举与描述解析</strong>这一段通常不需要。锁只挡&quot;数据访问&quot;，不挡&quot;我是谁、我有什么能力&quot;这类协议判断。</p>
+<p><strong>第二，最大的风险不是接口本身，而是&quot;配对记录&quot;把一次性同意变成了长期授权。</strong> &quot;信任此电脑&quot;点下去之后，那台主机的密钥被记住，之后同一主机可以在设备锁屏状态下继续会话。这类记录<strong>不会随注销账号、恢复出厂以外的日常动作消失，而且 iOS 端没有一个统一的&quot;我已信任过哪些主机&quot;视图</strong>。</p>
+<p><strong>第三，能力授予依据的是&quot;认证结果&quot;而不是&quot;用途范围&quot;。</strong> 配件认证（MFi 一类）成功之后拿到的是接口级能力，不区分这个配件是音响还是采集器。凡是把&quot;你是谁&quot;当成&quot;你能做什么&quot;的实现，都会在协议版本更新时长出越权（对应 #119 的 G2/G4 分界）。</p>
+<p><strong>第四，&quot;给电即建立数据通道&quot;是最容易被忽略的默认行为。</strong> 供电协商、显示输出协商、基座握手这些看起来纯电气的动作，实际会在系统里触发一次设备枚举。这也是机场充电站、会议桌基座、车载接口这类场景的真实风险来源——本篇只做识别与处置说明，不提供任何针对第三方设备或配件的攻击方法。</p>
+<p>对普通用户，本篇最重要的一条动作只有一句：<strong>在需要长时间离开设备、且设备可能被人物理接触的场合，把配件通道的免解锁能力关掉</strong>（第 9 节给出具体位置和代价）。</p>
+<h2>2. 这根竖条补的是哪一块</h2>
+<table><thead><tr><th>已有一篇</th><th>它管什么</th><th>本篇切走的部分</th></tr></thead><tbody><tr><td>#118 文件与媒体解析器</td><td>内容字节到了以后被谁解析、解析器族的风险</td><td>本篇发生在内容解析<strong>之前</strong>：链路建立、枚举、能力授予</td></tr><tr><td>#84 锁屏与生物识别</td><td>物理接触下&quot;能否进入设备&quot;的边界</td><td>本篇处理进不去锁屏也照样发生的那一半：协议层</td></tr><tr><td>#90 攻击者起始位置</td><td>P0–P5 分级与前置成本</td><td>本篇给 P4/P5 补一个具体可达通道族</td></tr><tr><td>#69 设备间同步与中继</td><td>Handoff、AirDrop、iCloud 同步链路</td><td>本篇是全<strong>有线</strong>链路，不经云端</td></tr><tr><td>#72 基带与无线固件</td><td>蜂窝、Wi-Fi、蓝牙链上的远程边界</td><td>本篇是有线侧对应物；无线配件（蓝牙音频）只在跨层处提及</td></tr><tr><td>#64 安全启动链与固件完整性</td><td>设备上电到内核的信任链</td><td>本篇是设备<strong>外部</strong>接入点的信任链</td></tr><tr><td>#119 用户态系统服务与 XPC</td><td>沙箱内进程能对守护进程说什么</td><td>本篇的解析动作就在这些特权守护进程里，接口是硬件而非 XPC</td></tr><tr><td>#34 Lockdown Mode</td><td>锁定模式整体效果</td><td>本篇精确到其中一条开关：有线配件连接</td></tr></tbody></table>
+<p>一句话定位：<strong>#118 是&quot;数据面到达&quot;，#119 是&quot;接口面调用&quot;，本篇是&quot;链路面接入 + 信任面留存&quot;。</strong></p>
+<h2>3. 一次插入触发的三层，各层归属不同</h2>
+<table><thead><tr><th>层</th><th>做什么</th><th>运行在哪</th><th>是否需解锁</th><th>缺陷一旦出现的后果</th></tr></thead><tbody><tr><td>L1 电气/协商层</td><td>供电与电压协商、角色判定（谁是主机）、显示输出协商</td><td>电源管理/接口控制器固件与驱动</td><td>不需要</td><td>供电与外设异常、后续会话被提前建立</td></tr><tr><td>L2 协议/枚举层</td><td>描述符读取、类别判定、配件身份握手、驱动实例化</td><td>内核驱动与特权守护进程</td><td>大多不需要</td><td>内存破坏类缺陷的入口，可造成任意代码执行的前置</td></tr><tr><td>L3 信任/能力层</td><td>配对记录查找、密钥校验、会话延续、能力与权限授予</td><td>守护进程 + 存储的配对材料</td><td><strong>明确不需要</strong>（这是设计）</td><td>锁屏状态下的持续会话、越权数据通路</td></tr></tbody></table>
+<p><strong>缺陷密度最高的是 L2，风险最持续的是 L3。</strong> 绝大多数&quot;配件风险&quot;讨论把两者混成一句&quot;别乱插&quot;，本篇把它们分开处置：L2 只能靠厂商修和更新（个人关不掉），L3 是可以由用户当场关闭和回收的。</p>
+<h2>4. 六个&quot;插入即触发&quot;的解析点</h2>
+<table><thead><tr><th>触发点</th><th>何时发生</th><th>解析什么</th><th>用户可见度</th></tr></thead><tbody><tr><td>T1 接口状态机</td><td>一插上（含只供电的线缆）</td><td>角色与供电协商</td><td>只见充电图标</td></tr><tr><td>T2 设备枚举</td><td>链路建立后立刻</td><td>描述符、类别、序列号字符串</td><td>通常无提示</td></tr><tr><td>T3 配件身份握手</td><td>需要认证的配件类型</td><td>认证挑战与响应</td><td>偶见&quot;不支持的配件&quot;</td></tr><tr><td>T4 驱动实例化</td><td>判定为已知类别后</td><td>该类别的协议细节（音频、显示、存储、输入）</td><td>有功能即代表已实例化</td></tr><tr><td>T5 配对匹配</td><td>判定为&quot;可同步的主机&quot;</td><td>在已存记录里查找主机密钥</td><td>记录命中则<strong>不再询问</strong></td></tr><tr><td>T6 恢复/诊断通道</td><td>设备处于恢复模式或开启诊断服务</td><td>底层引导与会话参数</td><td>屏幕有状态提示</td></tr></tbody></table>
+<p><strong>T5 是本篇唯一一处&quot;系统替你做决定&quot;的地方</strong>：命中记录就不再弹提示，因此它的风险不是&quot;被攻击&quot;而是&quot;被遗忘&quot;。T2 与 T4 才是解析类缺陷的入口，且它们发生在任何提示之前——这也是 #118 的&quot;到达即解析&quot;结论在链路层的复现。</p>
+<h2>5. 配对与信任留存测绘</h2>
+<p>判定口径：&quot;关得掉 / 只能收窄 / 关不掉&quot;（沿用 #94）。</p>
+<table><thead><tr><th>通道</th><th>建立方式</th><th>留存什么</th><th>撤销位置</th><th>可关闭性</th></tr></thead><tbody><tr><td>本机 ↔ 电脑（同步/开发/诊断）</td><td>首次连接时&quot;信任此电脑&quot;</td><td>设备侧记住主机密钥；主机侧保存设备配对记录</td><td>设备侧：重置全部信任；主机侧：删除配对记录</td><td>关得掉，但需<strong>两侧都清</strong>才算收回</td></tr><tr><td>本机 ↔ 配件（认证型）</td><td>配件认证通过</td><td>无长期记录，按会话授予能力</td><td>拔除即结束</td><td>只能收窄（能力按类别给，不区分用途）</td></tr><tr><td>本机 ↔ 车载/基座</td><td>首次接入时的确认</td><td>车机侧保存本机身份，本机保存该载体</td><td>车机侧删除设备 / 本机侧删除设置</td><td>关得掉，但撤销权常在对端</td></tr><tr><td>本机 ↔ 显示与扩展坞</td><td>接入即协商</td><td>少量会话状态</td><td>拔除；个别坞站有缓存</td><td>只能收窄</td></tr><tr><td>恢复/诊断通道</td><td>进入对应模式</td><td>会话级</td><td>退出该模式</td><td>关不掉（引导阶段必需能力）</td></tr><tr><td>无线配件（音频、输入）</td><td>配对成功</td><td>长期配对条目</td><td>设置内逐条忽略</td><td>关得掉，条目常被遗忘</td></tr></tbody></table>
+<p>三条要点：<strong>跨端撤销的不对称</strong>（车机、坞站、耳机这类&quot;对端记得你&quot;的记录，本机删不掉——与 #101 同一规律）；<strong>双侧存储</strong>（主机侧一份、设备侧一份，只清一侧等于没收回）；<strong>免解锁延续是设计而非缺陷</strong>，所以它的处置手段只有&quot;关掉通道&quot;和&quot;清掉记录&quot;，没有&quot;每次询问&quot;这个选项。</p>
+<h2>6. 服务族 × 缺陷倾向 × 可关闭性</h2>
+<p>对齐 #81 的缺陷类别口径，与 #114 的修复形态。</p>
+<table><thead><tr><th>组件族</th><th>主要输入</th><th>高发缺陷倾向</th><th>典型修复形态（#114）</th><th>个人可关闭性</th></tr></thead><tbody><tr><td>接口控制器与电源管理</td><td>协商状态机、时序消息</td><td>状态机不一致、计数越界</td><td>固件更新 + 边界校验</td><td>关不掉</td></tr><tr><td>USB/配件枚举驱动</td><td>描述符、字符串、配置描述</td><td>长度/计数校验缺失、类型混淆</td><td>边界校验、拒绝畸形描述符</td><td>关不掉；锁定模式可整族禁用</td></tr><tr><td>配件认证实现</td><td>认证挑战/响应</td><td>认证与授权混同、缺省允许</td><td>把&quot;你是谁&quot;与&quot;你能做什么&quot;拆开</td><td>只能收窄</td></tr><tr><td>音频/显示类驱动</td><td>类别专有协议</td><td>缓冲区生命周期、跨进程共享对象</td><td>对象生命周期收紧</td><td>关不掉</td></tr><tr><td>配对与会话守护进程</td><td>主机身份、会话参数</td><td>记录过期与轮换缺失、路径与链接信任</td><td>引入过期/轮换策略</td><td>关得掉（清记录 + 关掉通道）</td></tr><tr><td>存储类配件挂载</td><td>卷与文件系统元数据</td><td>元数据越界</td><td>交给文件系统层</td><td>关得掉（禁用配件挂载）</td></tr></tbody></table>
+<p>最后一行的解析缺陷属于 <strong>#122 文件系统与磁盘映像层</strong>，本篇不重复测绘，只标出交接点：<strong>驱动把卷交给文件系统层之前完成的全部动作，都在本篇范围内。</strong></p>
+<h2>7. 五种反复出现的&quot;契约被违反&quot;模式</h2>
+<table><thead><tr><th>模式</th><th>一句话</th><th>出现在哪一层</th><th>为什么反复出现</th></tr></thead><tbody><tr><td>M1 描述符可信</td><td>枚举阶段把对端给出的长度、计数、字符串当作已验证值</td><td>L2</td><td>枚举必须尽早完成，验证代码容易写成&quot;先信再用&quot;</td></tr><tr><td>M2 认证 ≠ 授权</td><td>身份校验成功后授予的是接口级能力，不区分用途</td><td>L3</td><td>协议文档按&quot;支持哪些功能&quot;写，实现按&quot;认证通过即全给&quot;写</td></tr><tr><td>M3 电气协商即身份</td><td>把&quot;完成了供电/显示协商&quot;当成&quot;可以建立数据会话&quot;</td><td>L1→L2</td><td>协商状态与授权状态在实现里常共用一组标志</td></tr><tr><td>M4 配对记录即所有权</td><td>记录存在就一直有效，不轮换、不过期、不复述同意</td><td>L3</td><td>用户体验要求&quot;别每次都问&quot;，与安全要求&quot;每次重新判定&quot;直接冲突</td></tr><tr><td>M5 免认证枚举</td><td>未解锁也执行枚举与解析，因为&quot;这只是识别硬件&quot;</td><td>L2</td><td>识别与访问的分界线由实现决定，没有统一强制</td></tr></tbody></table>
+<p>M4 是本篇的结构性主角：它不是写错的代码，而是一个被明确接受的设计选择，其代价由&quot;用户不知道自己留过哪些记录&quot;承担。这也是第 10 节误解表里最该纠正的一条。</p>
+<h2>8. 可达性审计四步法（本篇版）</h2>
+<p>沿 #82 / #119 的方法，把对象换成硬件通道。</p>
+<p><strong>第一步，列出本机所有物理与近场接入点，标注每种在锁屏状态下是否仍会执行枚举。</strong> 不要只列接口形状：同一接口在不同类别下走不同代码路径。</p>
+<p><strong>第二步，对每一处&quot;锁屏也会枚举&quot;，确定解析发生在哪一层。</strong> 内核驱动与特权守护进程里的解析属于&quot;必须 Apple 修&quot;的一类（对应 #91 的修复归属矩阵）；应用层参与的属于可按 #83 处理。</p>
+<p><strong>第三步，判定触发前置条件：需要插入物理形态正确的设备？需要主机持有配对材料？需要用户点一次确认？</strong> 三个问题分别对应 P5、P4、P3 的成本门槛（#90）。</p>
+<p><strong>第四步，判定可关闭性并把结果写进台账。</strong> 关不掉的项，可执行的补偿只有两个：更新（#111 的可核验标准）与整族禁用（锁定模式）。这两项都要有验收证据，不能只写&quot;已开启&quot;。</p>
+<p>审计产出不该是一篇风险描述，而是一张<strong>&quot;哪些通道在锁屏下仍然活着、我关得掉哪几个&quot;</strong>的清单——这张清单在 iOS 上没有现成的界面能直接读到，这是本篇承认的观测缺口。</p>
+<h2>9. 加固清单</h2>
+<h3>个人七项</h3>
+<table><thead><tr><th>#</th><th>动作</th><th>位置</th><th>代价</th></tr></thead><tbody><tr><td>1</td><td>重置全部已信任主机与配件记录</td><td>设置 → 通用 → 传输或还原 → 还原 → 还原位置与隐私/还原全部设置（按版本措辞不同）</td><td>之后每台电脑首次连接都要重新点信任</td></tr><tr><td>2</td><td>在高风险场合启用锁定模式，并确认&quot;USB 配件&quot;限制生效</td><td>设置 → 锁定模式</td><td>部分配件在设备锁屏时不可用</td></tr><tr><td>3</td><td>不在无人值守时用公共充电基座/桌面接口</td><td>行为习惯</td><td>充电便利性</td></tr><tr><td>4</td><td>只用自己携带的线缆与电源</td><td>行为习惯</td><td>成本</td></tr><tr><td>5</td><td>删除不再使用的车载、耳机、坞站配对条目</td><td>设置 → 蓝牙 / 车载端设备列表</td><td>下次接入需重新配对</td></tr><tr><td>6</td><td>保持系统为当前可核验版本</td><td>设置 → 通用 → 关于本机（按 #111 用构建号核验）</td><td>无</td></tr><tr><td>7</td><td>设备丢失或被盗后立即改 Apple ID 口令并检查设备列表</td><td>Apple 账户设备管理</td><td>一次全设备重登</td></tr></tbody></table>
+<h3>组织五项</h3>
+<table><thead><tr><th>#</th><th>动作</th><th>说明</th></tr></thead><tbody><tr><td>1</td><td>用配置描述文件统一固定配件与恢复通道策略</td><td>与企业 MDM 基线合并，避免逐台确认</td></tr><tr><td>2</td><td>把高风险岗位默认纳入锁定模式适用范围</td><td>沿 #108/#109 的分档做法</td></tr><tr><td>3</td><td>会议空间、访客工位与共享基座的接口视为公共电源</td><td>桌面坞站、车载共享钥匙是同一条规律的两次出现</td></tr><tr><td>4</td><td>主机侧配对记录纳入资产处置清单</td><td>员工离职交接时，设备侧清了、主机侧没清是常见漏项（接 #120）</td></tr><tr><td>5</td><td>保留一份&quot;哪些通道关不掉&quot;的说明并写进巡检台账</td><td>让残余风险可追踪，而不是每次都重新讨论</td></tr></tbody></table>
+<h2>10. 常见误解纠正表</h2>
+<table><thead><tr><th>误解</th><th>纠正</th></tr></thead><tbody><tr><td>&quot;不解锁就什么都做不了&quot;</td><td>锁屏挡的是数据访问；枚举、协商与能力判定大多不需要解锁</td></tr><tr><td>&quot;只插电源不会有任何风险&quot;</td><td>供电协商本身会触发接口状态机与一次枚举；风险小但不是零</td></tr><tr><td>&quot;没点过信任就没关系&quot;</td><td>车载、坞站与显示载体的配对常常在第一次使用时被顺带确认</td></tr><tr><td>&quot;恢复出厂就清干净了&quot;</td><td>设备侧记录会被清；<strong>主机侧与对端设备记得你的部分不会</strong>（#96 同结论）</td></tr><tr><td>&quot;认证过的配件就安全&quot;</td><td>认证说明它通过了身份检查，不说明它的固件没有解析缺陷</td></tr><tr><td>&quot;锁定模式关掉 USB，就再没有配件入口&quot;</td><td>该限制针对锁屏状态下的配件通道；解锁后接入仍走正常流程</td></tr><tr><td>&quot;配对记录只是元数据&quot;</td><td>配对材料的作用是在锁屏下延续会话，这是访问能力不是元数据</td></tr><tr><td>&quot;这是小众风险，不值得单独处置&quot;</td><td>它是 P4/P5 档最常用的入口，且唯一能长期存活的是那一条被遗忘的记录</td></tr></tbody></table>
+<h2>11. 与既有各篇的接口</h2>
+<p>本篇向 #84/#90 交付一个此前被合并讨论的事实：<strong>物理接触档的攻击不需要先取得解锁</strong>，因为链路层的能力判定发生在认证之前。向 #118/#119 交付边界：<strong>内容解析属于 #118，服务接口属于 #119，本篇只管链路建立与信任留存</strong>。向 #101 交付一个同规律的新实例：配对材料的跨端撤销不对称。向 #111/#115 交付一条权重判断：本篇 L2 层缺陷个人完全无法关闭，因此<strong>更新的可核验性在配件风险上的权重要高于它在数据类风险上的权重</strong>。反向依赖：起始位置判定用 #90，修复归属用 #91/#114，残余风险追踪用 #104 台账。</p>
+<h2>12. 总结</h2>
+<p>配件与有线连接的攻击面可以压成两句：<strong>在链路建立阶段，系统会先信任再验证；在会话延续阶段，一次同意会一直有效。</strong></p>
+<p>第一句造成的问题只能由厂商修，个人唯一的对冲是保持可核验的最新版本；第二句造成的问题恰好相反，个人当场就能处置，只是没有人提醒要去查。把这两类分开的实际收益是：不必为了&quot;关掉通道&quot;去承担配件不可用的代价——除非你处在 P4/P5 档反复暴露的岗位上，而那类场合应该直接用锁定模式把整族通道禁掉。</p>
+<h2>说明</h2>
+<p>本篇是防御视角的攻击面测绘与处置清单，<strong>不提供任何针对配件、线缆、基座或他人设备的利用、伪造认证或绕过手段</strong>。文中涉及公共充电设施与配件认证机制的段落只用于识别与规避。具体法律程序与劳动争议判断以律师意见为准。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a></li><li><a href="https://support.apple.com/en-us/100100" rel="nofollow noopener" target="_blank">Apple Security Releases</a></li><li>[Apple — 关于锁定模式（含 USB 配件限制）](https://support.apple.com/guide/security lockdown-mode)</li><li><a href="https://developer.apple.com/documentation/externalaccessory" rel="nofollow noopener" target="_blank">Apple Developer — USB 与配件框架文档（ExternalAccessory / DriverKit）</a></li><li><a href="https://mfi.apple.com/" rel="nofollow noopener" target="_blank">Apple — Made for iPhone 认证计划说明</a></li><li><a href="https://opensource.apple.com/" rel="nofollow noopener" target="_blank">Apple Open Source — AppleDeviceManagement / USB 相关仓库</a></li><li><a href="https://cwe.mitre.org/" rel="nofollow noopener" target="_blank">MITRE CWE</a> 与 <a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">ATT&amp;CK for Mobile</a></li><li><a href="https://googleprojectzero.blogspot.com/" rel="nofollow noopener" target="_blank">Google Project Zero</a> 与 <a href="https://citizenlab.ca/research/" rel="nofollow noopener" target="_blank">Citizen Lab</a> 的公开物理接触与配件风险研究</li><li>本系列 #26、#34、#64、#72、#81、#84、#90、#91、#94、#101、#111、#114、#118、#119、#122（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a120.html">← 第 120 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
