@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下一次感染调查的成本结构与结论上限 | iOS 安全研究文章库</title>
+<meta name="description" content="按结论上限而不是按完成度定价（合同的标的是一句有上限的陈述）、C0 无结论／C1 可能性／C2 时间锚定／C3 群体级／C4 个体活动级／C5 机制级／C6 归因级阶梯与上下级不可互替、WP1 分诊…WP8 结论装配八个包各自的上限、成本驱动与「什么时候不值得做」、成本曲线上凸故 C5 比 C4 贵一个数量级">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a156.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下一次感染调查的成本结构与结论上限">
+<meta property="og:description" content="按结论上限而不是按完成度定价（合同的标的是一句有上限的陈述）、C0 无结论／C1 可能性／C2 时间锚定／C3 群体级／C4 个体活动级／C5 机制级／C6 归因级阶梯与上下级不可互替、WP1 分诊…WP8 结论装配八个包各自的上限、成本驱动与「什么时候不值得做」、成本曲线上凸故 C5 比 C4 贵一个数量级">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a156.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 156 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword：一次感染调查的成本结构与结论上限</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这是本批次（#147–#156）的收尾篇，也是前面九篇反复承诺却没有交付的那个东西：<strong>一次调查到底由哪些工作组成、每一部分花多少钱和时间、以及每一部分</strong>最多<strong>能让你说出什么话。</strong> 前者是采购问题，后者是法律与声誉问题，而市场上绝大多数纠纷都出在把这两件事混在一起报价。</li><li>本篇的核心是一条<strong>定价原则</strong>：调查项目不应该按&quot;完成度&quot;定价（&quot;我们做完了全部检查&quot;），而应该按<strong>结论上限</strong>定价（&quot;这一阶段最多支撑到'某时间窗内存在异常访问'，不支撑'这台设备曾被入侵'&quot;）。理由在 #154 第 10 节已经给出：<strong>如果成功场景下你也看不到东西，那么&quot;没看到&quot;这件事不值钱</strong>，按检查项数付钱就是按错觉付钱。</li><li>由此给出一把<strong>结论上限阶梯 C0–C6</strong>（第 4 节）：从&quot;无法回答&quot;到&quot;归因级&quot;。它的用途非常具体——<strong>在合同里写清楚这一单要买到第几级</strong>。C5（个体机制级）与 C6（归因级）之间的成本差通常是一个数量级，而多数真实需求只需要 C3（群体级时间窗）或 C4（个体级活动异常）。<strong>把 C6 写进目标，是这类项目最常见的预算浪费。</strong></li><li>成本曲线是<strong>凸的</strong>：从&quot;有没有发生&quot;到&quot;什么时候发生&quot;相对便宜（服务端日志、账户活动、时间锚定），从&quot;发生了什么&quot;到&quot;谁做的&quot;极其昂贵且经常不可达（第 6 节）。这条曲线的形状决定了合理目标应该是<strong>可行动</strong>（我该做什么），而不是<strong>可解释</strong>（是谁在什么时候用什么打的）。这个转变能省下的预算通常是整个项目的大半。</li><li>第 5 节把工作拆成 <strong>WP1–WP8</strong> 八个包，每个包给：输入、方法类别、产出物、结论上限、成本驱动因素、以及一句最重要的&quot;<strong>什么时候不值得做</strong>&quot;。最后那一栏是这一节存在的理由——系列里其他篇都在讲&quot;该做什么&quot;，这一节讲&quot;该停在哪&quot;。</li><li><strong>时间本身是成本项，而且是不可回收的那种。</strong> 多数调查的失败不是因为分析方法错，而是因为启动太晚：保留期已经过了（第 8 节）。因此本篇把&quot;决定不查&quot;和&quot;决定查&quot;放在同一个决策里评估，并且给出<strong>分诊树</strong>（第 9 节）：有些情形下正确的动作是记录 + 重置 + 结束，而不是开始调查。</li><li>范围蔓延有四种固定形态（第 10 节）：归因诱惑、样本扩大、时间回溯、旁证堆叠。四种都有同一个心理来源——&quot;既然已经走到这里&quot;。本篇给每一种一条<strong>止损判据</strong>，写成可以在项目会上直接念的句子。</li><li>第 11 节把 #147 的三条禁令（别重启、别抹机、别还原备份）翻译成<strong>价格标签</strong>：重置是最便宜的技术方案，也是唯一会<strong>永久取消 C4/C5 资格</strong>的动作。所以&quot;要不要重置&quot;不是一个安全等级问题，而是一个&quot;你是否需要这条证据链&quot;的问题——两者都有正当场景，但必须一次决定，不能既要又要。</li><li>第 12 节给八个报价时必须问出口的问题（全部可由 #148、#153、#154 的结论推导），第 13 节给一份<strong>结论上限的书面表达模板</strong>，可以直接进 #151 的已知/推断/未知三栏。</li><li>最后的立场：对个人读者，本篇最有价值的一句话可能是——<strong>大多数个人读者真正需要的不是调查，而是决策</strong>。你花两周证明&quot;没有证据表明被入侵&quot;，得到的行动和花二十分钟做完记录 + 改凭据 + 隔离设备之后得到的行动<strong>完全一样</strong>。区别只在于前者更贵、更焦虑、且更容易在过程中把证据灭失掉。</li></ul>
+<h2>2. 这一格在系列里的位置</h2>
+<table><thead><tr><th>已有篇目</th><th>它交付了</th><th>它把什么问题留给本篇</th></tr></thead><tbody><tr><td>#148 检测产品与第三方检查服务的效力甄别</td><td>供给者分类（A1–A5）、八个采购判据、九项合格交付物</td><td><strong>&quot;这些判据值多少钱、买到哪一级就该停&quot;</strong> 没讲</td></tr><tr><td>#151 确认感染后的对外沟通与通报义务</td><td>三栏模板、四句禁止用语、通报字段</td><td>第 2 节明确承诺&quot;调查成本结构与证据上限在后一篇给出&quot;</td></tr><tr><td>#152 水坑站点被用作投递面后的运营方自查与协作</td><td>O1–O8 观测项、九步完整性重建</td><td>九步各要花多少、哪几步可以砍</td></tr><tr><td>#153 网页第三方脚本依赖被篡改后的投递放大</td><td>第 12 节&quot;访客设备侧不存在某个数据源&quot;</td><td>该结论落到预算分配上的含义</td></tr><tr><td>#154 利用链失败与不匹配时的行为面</td><td>第 10 节&quot;未发现异常的信息量 = 成功场景下能看到东西的概率&quot;</td><td>&quot;因此断点在 S0–S2 的项目要在报价时写死上限&quot;</td></tr><tr><td>#147 设备可感知异常与误判代价</td><td>十项记录表、三条不可逆动作禁令、四类代价账本</td><td>把三条禁令变成成本比较</td></tr><tr><td>Coruna 与 DarkSword：商业间谍软件归因方法论</td><td>归因在技术上怎么做、需要什么条件</td><td><strong>归因要多少钱、以及该不该把它写成目标</strong></td></tr></tbody></table>
+<p>一句话定位：<strong>#148 教你怎么选服务，本篇教你怎么定义这单生意的终点。</strong></p>
+<h2>3. 一条反常识的定价原则</h2>
+<p>行业惯例是把调查按&quot;做了多少项检查&quot;来描述和计价。这个惯例有两个致命问题：</p>
+<ol><li><strong>它奖励覆盖面，不奖励结论。</strong> 一份包含 40 项检查、每项都写&quot;未发现&quot;的报告，在按项目计价的模式下比一份只包含 4 项但给出明确时间窗的报告&quot;看起来更值&quot;。而按 #154 第 10 节的判据，前者的信息量可能更低。</li><li><strong>它让委托方无法验收。</strong> 因为&quot;完成&quot;由服务方定义。你在合同里写&quot;完成全面取证&quot;，等于把验收标准交给对方。</li></ol>
+<p>替代原则一句话：</p>
+<blockquote><p><strong>合同的标的不是&quot;检查&quot;，是&quot;一个有明确上限的结论&quot;。买之前先写下你要说的那句话，再倒推哪一级上限支撑得起它。</strong></p></blockquote>
+<p>落成三步操作：</p>
+<table><thead><tr><th>步</th><th>做什么</th><th>反例</th></tr></thead><tbody><tr><td><strong>①</strong> 先写目标句</td><td>&quot;我们要能说：某时段内该账户存在异常访问&quot;（这是 C4）；或&quot;我们要能说：这台设备上有过某个持久化部件&quot;（C5）</td><td>&quot;我们要确认设备是否安全&quot;——这句话没有任何上限能支撑</td></tr><tr><td><strong>②</strong> 找出支撑它的数据源</td><td>按 #153 第 12 节、#154 第 12 节的分层可得性表定位</td><td>用文件层检查去支撑一个 C4 结论——该层在成功场景下可能压根没内容</td></tr><tr><td><strong>③</strong> 检查该源是否还活着</td><td>保留期（第 8 节）；不在 → 这一级不可买，退到 C3 或 C2</td><td>先付钱，两个月后被告知&quot;日志已经被清了&quot;</td></tr></tbody></table>
+<p>第 ③ 步是这一节里最容易省、也最省钱的一步：<strong>很多项目应该在付款之前就被判定为不可行</strong>，而它被发现了出来。</p>
+<h2>4. 结论上限阶梯 C0–C6</h2>
+<p>这是本篇的主坐标尺。<strong>每一级只描述&quot;最多能说什么&quot;，不描述&quot;做了多少工作&quot;。</strong></p>
+<table><thead><tr><th>级</th><th>名称</th><th>能支撑的最大陈述</th><th>需要的主数据源</th><th>典型可达性</th><th>常见误用</th></tr></thead><tbody><tr><td><strong>C0</strong></td><td>无结论</td><td>&quot;无法判断&quot;</td><td>—</td><td>永远可达（但没人愿意买）</td><td>被包装成&quot;未发现风险&quot;</td></tr><tr><td><strong>C1</strong></td><td>可能性</td><td>&quot;存在这种可能性&quot;</td><td>公开信息、类比</td><td>极易，接近免费</td><td><strong>被当成发现写进报告</strong>；这是绝大多数自媒体式分析的实际上限</td></tr><tr><td><strong>C2</strong></td><td>时间锚定</td><td>&quot;某时刻该设备/账户发生过异常活动&quot;</td><td>设备诊断记录、账户通知、用户记录（#147 十项表、#153 V7）</td><td>中，取决于是否提前记录</td><td>被误读为因果（&quot;卡顿 = 被攻击&quot;，见 #154 第 6 节基数列）</td></tr><tr><td><strong>C3</strong></td><td>群体级</td><td>&quot;该时段访问该站点/该路径的访客中存在差异内容&quot;</td><td>站点访问日志、外部视角快照时间序列（#152 O 系列、#153 P5/P6）</td><td>组织可得，个人不可得</td><td>被外推到个体（&quot;你在里面，所以你中招了&quot;）</td></tr><tr><td><strong>C4</strong></td><td>个体级活动</td><td>&quot;该账户在该时段有异常访问/异常授权&quot;</td><td><strong>服务端账户活动日志</strong>（不依赖设备）</td><td>相对最好，且与 #154 S5 一致</td><td>被误写为设备结论（&quot;所以他的手机被控制了&quot;）</td></tr><tr><td><strong>C5</strong></td><td>机制级</td><td>&quot;该设备上存在/曾存在某个部件，其行为是 X&quot;</td><td>设备侧产物、内存/文件系统证据、镜像</td><td><strong>低</strong>：要求断点在 S3+、未重置、有可复核采集</td><td>被过度延伸成&quot;因此攻陷了&quot;</td></tr><tr><td><strong>C6</strong></td><td>归因级</td><td>&quot;由某方实施&quot;</td><td>基础设施、交付链、时间相关性、（常需）非技术情报</td><td>极低，且<strong>通常不在服务方控制内</strong></td><td>被当作客户真正想要的东西写进目标（第 6 节）</td></tr></tbody></table>
+<p>四条使用规则：</p>
+<ol><li><strong>上下级之间不可互相替代。</strong> C4 不能推出 C5（服务端异常访问不等于设备被控）；C5 不能推出 C6（有部件不等于知道是谁放的）。<strong>这条规则是本篇对报告措辞最硬的一条建议</strong>，它直接对应 #151 的 W2/W3 分离。</li><li><strong>买之前先确认哪一级还&quot;在售&quot;。</strong> 数据源死亡会让某一级永久不可达（第 8 节）。</li><li><strong>多数决策只需要 C3/C4。</strong> 你需要的是&quot;要不要换设备、要不要通报、要不要撤凭据&quot;，这些动作对 C4 就够，<strong>不需要 C5，更不需要 C6</strong>。</li><li><strong>上限要写进交付物正文，不是写在附注。</strong> 一份没有自述上限的报告，会被下游（法务、媒体、董事会）按最高可能解读。</li></ol>
+<h2>5. 工作包分解：WP1–WP8</h2>
+<p>每个包给六栏。<strong>&quot;何时不值得做&quot;这一栏请当作本节的主要输出。</strong></p>
+<h3>WP1 分诊与决策记录</h3>
+<table><thead><tr><th>项</th><th>内容</th></tr></thead><tbody><tr><td>输入</td><td>触发原因（通知、体感、举报）、#147 十项记录表</td></tr><tr><td>方法</td><td>排除噪声五步（#147）、判定触发级别（#151 B1/B2/B3）</td></tr><tr><td>产出</td><td>一页纸：为什么继续或停止；当前状态快照</td></tr><tr><td>结论上限</td><td><strong>C2</strong>（它不产生证据，只保住证据）</td></tr><tr><td>成本驱动</td><td>极低（小时级）。<strong>投入产出比在整个清单里最高</strong></td></tr><tr><td>何时不值得做</td><td><strong>几乎没有。</strong> 唯一可跳过的情形是已决定立即重置且不需要任何证据</td></tr></tbody></table>
+<blockquote><p>WP1 的真正作用是<strong>在证据还活着的时候决定要不要它</strong>。跳过 WP1 直接找人&quot;查一下&quot;，是后面所有超支的起点。</p></blockquote>
+<h3>WP2 零授权数据采集</h3>
+<table><thead><tr><th>输入</th><th>设备当前状态、导出文件、账户活动页</th></tr></thead><tbody><tr><td>方法</td><td>#148 的 A1（导出文件）+ 平台自带账户活动，<strong>不给任何新信任</strong></td></tr><tr><td>产出</td><td>原始数据留存副本 + 采集时间/方式记录</td></tr><tr><td>结论上限</td><td>C2 → C4（取决于服务端源）</td></tr><tr><td>成本驱动</td><td>低；主要是操作规范，不是分析</td></tr><tr><td>何时不值得做</td><td>已确认要立即重置且不需要证据。否则<strong>永远先做这一步</strong>，因为它不可回补</td></tr></tbody></table>
+<h3>WP3 基础设施与服务端侧</h3>
+<table><thead><tr><th>输入</th><th>账户日志、MDM/管理台、网关与邮件/协作平台日志、站点访问日志</th></tr></thead><tbody><tr><td>方法</td><td>时间窗内的认证事件、异常授权、规则/转发变更、API 使用</td></tr><tr><td>产出</td><td>事件时间线（群体级 + 个体级）</td></tr><tr><td>结论上限</td><td><strong>C4</strong>（组织条件下可到 C3+C4）</td></tr><tr><td>成本驱动</td><td>中。<strong>主要成本是拿到访问权限的协调，不是分析</strong></td></tr><tr><td>何时不值得做</td><td>保留期已过（先查这一条再立项）；或目标只需要 C1/C2</td></tr></tbody></table>
+<blockquote><p>这一包是全清单里<strong>性价比最高</strong>的一包，因为它的证据源不依赖设备、不受 #154 的干净失败问题影响，也不会被&quot;用户自己重启了&quot;毁掉。<strong>如果预算只够一包，就是这一包。</strong></p></blockquote>
+<h3>WP4 网络与投递面重建</h3>
+<table><thead><tr><th>输入</th><th>#152 的 O1–O8、#153 的 P1 清单与 P6 快照、外部视角拉取</th></tr></thead><tbody><tr><td>方法</td><td>依赖清单比对、产物哈希比对、快照时间序列</td></tr><tr><td>产出</td><td>&quot;某时段内某路径的分发内容存在差异&quot;的判断</td></tr><tr><td>结论上限</td><td><strong>C3</strong>（群体级），不支撑个体</td></tr><tr><td>成本驱动</td><td>中—高；缺 P6 时<strong>不可回补</strong>，只能等待新的时间窗</td></tr><tr><td>何时不值得做</td><td>没有连续快照时：这一包退化成猜测，直接改买 WP3</td></tr></tbody></table>
+<h3>WP5 设备侧检查</h3>
+<table><thead><tr><th>输入</th><th>设备（未重置）、描述文件与证书清单（#155 C3）、持久化位置</th></tr></thead><tbody><tr><td>方法</td><td>#148 的 A2（受监督可复核脚本）优先；A3 需按三条红线评估</td></tr><tr><td>产出</td><td>存在/不存在某类部件的陈述</td></tr><tr><td>结论上限</td><td><strong>C5，但仅在断点落在 S3+ 时</strong>；#154 第 9 节的不落地型/纯服务端型场景下实际只有 C0</td></tr><tr><td>成本驱动</td><td>高：采集纪律、复核、可辩护性都要钱</td></tr><tr><td>何时不值得做</td><td><strong>① 已重置；② 目标结论是 C4 或更低；③ 场景主要是纯服务端型（#153 第 9/12 节）。</strong> 这三种情形下这一包是纯亏损</td></tr></tbody></table>
+<blockquote><p>WP5 是本清单里最容易被要求、也最常被高估的一包。它被高估的原因是它是唯一&quot;看起来在查手机&quot;的一包，而客户直觉认为调查就该查手机。<strong>#154 第 10 节的判据在这里给出直接价格后果。</strong></p></blockquote>
+<h3>WP6 载荷/部件分析（条件触发）</h3>
+<table><thead><tr><th>输入</th><th>WP5 的真实产物</th></tr></thead><tbody><tr><td>方法</td><td>行为与能力刻画，公开分类词汇（如 ATT&amp;CK Mobile 矩阵）</td></tr><tr><td>产出</td><td>&quot;该部件做了什么&quot;</td></tr><tr><td>结论上限</td><td><strong>C5</strong>；对 C6 的贡献通常只是相关性</td></tr><tr><td>成本驱动</td><td>很高，且强依赖前包质量</td></tr><tr><td>何时不值得做</td><td><strong>WP5 没有产出时它不能立项</strong>（这条看似废话，实际是最常见的一类合同事故）</td></tr></tbody></table>
+<h3>WP7 归因（可选，默认不做）</h3>
+<table><thead><tr><th>输入</th><th>基础设施观测、公开报道时间线、投递形态、外部情报</th></tr></thead><tbody><tr><td>方法</td><td>见 Coruna 与 DarkSword：商业间谍软件归因方法论</td></tr><tr><td>产出</td><td>&quot;由某方实施&quot;或&quot;符合某类做法&quot;</td></tr><tr><td>结论上限</td><td><strong>C6，且通常是 C1/C2 级别的归因陈述</strong></td></tr><tr><td>成本驱动</td><td><strong>最高，且失败率最高</strong>；结论经常不可公开使用</td></tr><tr><td>何时不值得做</td><td><strong>默认不值得。</strong> 只有当决策真的依赖&quot;是谁&quot;（法律、外交、保险、供应链关系）时才立项，且必须在合同里写明&quot;可能得出无法使用的结论&quot;</td></tr></tbody></table>
+<h3>WP8 结论装配与决策交付</h3>
+<table><thead><tr><th>输入</th><th>前面各包产出</th></tr></thead><tbody><tr><td>方法</td><td>#151 三栏模板 + 第 13 节上限自述模板 + #148 九项交付物</td></tr><tr><td>产出</td><td>可对外、可归档、有自述上限的结论；以及<strong>行动清单</strong></td></tr><tr><td>结论上限</td><td>不提高上限，只<strong>防止上限被夸大</strong></td></tr><tr><td>成本驱动</td><td>低（但需要懂法律沟通与技术人员共同读一遍）</td></tr><tr><td>何时不值得做</td><td>几乎不可省。省掉它的后果由 #151 的四句禁止用语来偿还</td></tr></tbody></table>
+<h3>5.1 包之间的依赖与&quot;可砍线&quot;</h3>
+<pre><code>WP1 ─→ WP2 ─→ WP3 ─┬─→ WP8（多数真实需求到这就够）
+                    │
+                    ├─→ WP4 ─→（有产物才继续）
+                    │
+                    └─→ WP5 ─→（有发现才继续）WP6 ─→ WP7</code></pre>
+<p>三条读图要点：</p>
+<ol><li><strong>WP1→WP2→WP3 是主干</strong>，其余三个都是条件分支。<strong>主干的成本通常低于单独 WP5。</strong></li><li><strong>每个分支都有&quot;不满足则不立项&quot;的门槛</strong>（WP6 要 WP5 有产出，WP7 要决策真的依赖&quot;是谁&quot;）。门槛写不出来，说明分支只是好奇。</li><li><strong>WP8 不在分支上</strong>——它必须在你决定停下的那一层执行。停在 WP3 也要装配结论，否则 WP3 的产出会被下游自行补全。</li></ol>
+<h2>6. 成本曲线：为什么归因最贵，也最不该写进目标</h2>
+<p>把第 4 节的阶梯按成本重排，得到的不是一条直线，而是一条上凸曲线：</p>
+<table><thead><tr><th>从 → 到</th><th>相对成本</th><th>主要成本来源</th><th>失败原因</th></tr></thead><tbody><tr><td>C0 → C2</td><td>很低</td><td>记录纪律</td><td>没提前记录（不可回补）</td></tr><tr><td>C2 → C3</td><td>低—中</td><td>组织权限协调</td><td>缺连续快照</td></tr><tr><td>C3 → C4</td><td><strong>低</strong></td><td>拿到日志即可，分析量小</td><td>保留期已过</td></tr><tr><td>C4 → C5</td><td>高（约一个数量级）</td><td>采集纪律、可辩护性、未灭失</td><td>设备已被重置/重启；或断点在 S3 之前，<strong>根本没有对象</strong></td></tr><tr><td>C5 → C6</td><td><strong>很高</strong></td><td>跨域数据、外部情报、长期跟踪</td><td>证据不可公开使用；相关性不等于归属</td></tr></tbody></table>
+<p>三个实用推论：</p>
+<ul><li><strong>预算应该按&quot;要到哪一级&quot;分配，不按&quot;要查多细&quot;分配。</strong> 一句&quot;我们只买 C4&quot;能砍掉大半工作量，而且通常不影响决策。</li><li><strong>C5 是一个陷阱级别。</strong> 它比 C4 贵一个数量级，却能给出的额外行动往往为零——因为<strong>&quot;设备上有过东西&quot;和&quot;账户有过异常访问&quot;引出的动作是一样的</strong>（换设备、撤凭据、通报）。<strong>只有当你要走法律程序或需要公开指控时，C5 才有独立价值。</strong> 这一条值得在立项会上直接念出来。</li><li><strong>C6 的成本不可预算。</strong> 它随外部信息可得性波动，且<strong>没有&quot;尽力就能到&quot;的保证</strong>——不像分析工作，归因很大程度上取决于别人是否留下过东西。所以正确做法是把 C6 写成<strong>&quot;如果顺路得到的额外收获&quot;</strong>，而不是里程碑。写成里程碑的项目，要么超支，要么在报告里造出一个撑不住的归因句（然后由 #151 的 W3 归因陈述规则来承担后果）。</li></ul>
+<h2>7. 三档预算买到什么</h2>
+<table><thead><tr><th>档</th><th>适用</th><th>包含的工作包</th><th>能到达的上限</th><th>明确买不到的</th></tr></thead><tbody><tr><td><strong>T1 个人自助</strong>（¥0，几小时）</td><td>绝大多数个人读者</td><td>WP1 + WP2 + WP3 的&quot;自己账户那一部分&quot; + WP8 的记录归档</td><td><strong>C2/C4</strong>（自己账户的活动异常）</td><td>C3（没有站点日志）、C5、C6</td></tr><tr><td><strong>T2 小额专业服务</strong>（数千元级）</td><td>个人但有明确触发事件；小额组织</td><td>上述 + 规范的 A2 类设备检查 + 报告</td><td><strong>C4，条件好时摸到 C5</strong></td><td>C6；不可靠的 C5（无采集纪律时）</td></tr><tr><td><strong>T3 组织级调查</strong>（数万至数十万，数周）</td><td>有法务/通报/合规需求</td><td>WP1–WP6，按分支门槛执行</td><td><strong>C5</strong>，个别情况 C3+C4+C5 齐全</td><td>C6 仍不可保证；且<strong>时间窗一过 C5 就永久不可达</strong></td></tr></tbody></table>
+<p>三条使用说明：</p>
+<ol><li><strong>T1 不是&quot;缩水版调查&quot;，而是完整决策。</strong> #1 摘要里那句话在这一档成立：如果你要的是行动而不是证据，T1 就够。<strong>先诚实回答&quot;我需不需要这条证据链&quot;，再决定要不要跳到 T2。</strong></li><li><strong>T2 的最大风险是买到一份 C0 报告却按 C5 收费。</strong> 防范方法就是第 12 节八个问题里的第一问：<strong>&quot;如果攻击成功了、且不落地，你这个方法看得到吗？&quot;</strong>（#154 第 9/10 节）</li><li><strong>T3 的钱主要花在&quot;可辩护性&quot;上，不是花在&quot;更聪明的分析&quot;上。</strong> 同一份发现，采集过程不合规、链条不完整，就不能用于法律或对外场景——这是 T3 相对 T2 唯一真正的增量。<strong>如果你不需要可辩护性，就不该付 T3 的钱。</strong></li></ol>
+<h2>8. 时间维度：贵的是等待，不是分析</h2>
+<p>本篇里最可操作的一节。三张表：</p>
+<h3>8.1 各数据源的&quot;存活期&quot;性质</h3>
+<table><thead><tr><th>数据源</th><th>自然衰减</th><th>谁掌控</th><th>提前动作</th></tr></thead><tbody><tr><td>设备上的临时产物</td><td><strong>极快</strong>（重启、清理、系统回收）</td><td>用户自己一个动作就能销毁</td><td>不重启（#147 禁令）、立即 WP2</td></tr><tr><td>已安装描述文件/证书</td><td>慢，但被主动移除即消失</td><td>用户、管理员、组织策略</td><td>现在就截图（#155 C3）</td></tr><tr><td>构建号</td><td>更新即变，<strong>不可回补</strong></td><td>用户</td><td>现在就记（#155 C2）</td></tr><tr><td>诊断/崩溃记录</td><td>滚动覆盖，周期短且不稳定</td><td>平台</td><td>早导出</td></tr><tr><td>账户活动日志</td><td>平台侧，通常保留一段时间</td><td>平台</td><td><strong>尽早导出，不要等</strong></td></tr><tr><td>站点访问日志</td><td>由站点策略决定（数天到数年）</td><td>站点运营方</td><td>请求保留（#152 定向保留）</td></tr><tr><td>第三方返回内容</td><td><strong>几乎瞬时消失</strong>，且按上下文变</td><td>第三方</td><td>只能靠<strong>事前</strong>外部快照（#153 P6）</td></tr><tr><td>网络侧会话元数据</td><td>由运营商/平台决定，不可控</td><td>他人</td><td>放弃，不作为计划依据</td></tr></tbody></table>
+<p><strong>这张表的正确读法</strong>：越靠上，&quot;决定要不要查&quot;这件事的成本越低、价值越高。<strong>在决定之前先花十分钟把上面四行固定下来，是全系列反复出现的那句话——&quot;先做零授权记录&quot;——的经济学理由。</strong></p>
+<h3>8.2 启动时机的三档代价</h3>
+<table><thead><tr><th>启动点</th><th>可保住的上限</th><th>相对成本</th></tr></thead><tbody><tr><td>触发当天（通知/异常出现后数小时内）</td><td>C4/C5 都还在议价范围内</td><td>基准</td></tr><tr><td>一周内</td><td>C4 通常仍在，C5 视设备是否被动过</td><td>略升（更多协调、更少确定性）</td></tr><tr><td>一个月后</td><td>多数情况下只剩 C3/C4 中依赖长保留日志的部分</td><td><strong>显著升高，且经常直接判定不可行</strong></td></tr></tbody></table>
+<h3>8.3 一条容易忽略的推论</h3>
+<p><strong>保留期不等你确认它是否相关。</strong> 因此&quot;先取证、后判断值不值&quot;在结构上优于&quot;先判断、再取证&quot;——前提是取证动作本身零授权、零成本（WP2）。<strong>把 WP2 当成 WP1 的一部分来做</strong>，是本篇对流程的唯一硬性建议。</p>
+<h2>9. 分诊决策树：什么时候根本不该开始调查</h2>
+<pre><code>触发
+ ├─ 是否只是通用体感（卡顿/耗电/慢）？
+ │    ├─ 是 → 走 #147 五项噪声排除。排除失败（症状持续且不可解释）才继续；
+ │    │        否则 → 结束（成本：分钟；结论上限：不需要的）
+ │    └─ 否 → ↓
+ ├─ 是否存在服务端侧信号（平台通知、账户异常访问、他人回报）？
+ │    ├─ 是 → ↓（这是最高信息量、最低成本的入口）
+ │    └─ 否，但收到&quot;群体级&quot;通报（你是某时段访客之一）→
+ │             只做 T1：撤凭据、隔离会话、记录；不启动 C5
+ ├─ 我需不需要这条证据链？（法律程序 / 对外通报 / 保险 / 雇佣争议）
+ │    ├─ 需要 → WP1→WP2→WP3，按门槛决定分支；全程不重置
+ │    └─ 不需要 → ↓
+ └─ 直接决策：
+      记录（十项表）→ 撤凭据与授权 → 换设备或重装 → 结束
+      （此时重置是合理动作，因为你已经放弃了 C5）</code></pre>
+<p>三条使用说明：</p>
+<ol><li><strong>&quot;不需要证据链&quot;是一个合法且常见的答案。</strong> 对个人读者通常是。写进决策树是为了消除那种&quot;不查一查心里不踏实&quot;带来的沉没成本——<strong>踏实感不是交付物</strong>，而撤凭据和换设备是。</li><li><strong>一旦决定要证据链，就同时决定了这段时间不能重置。</strong> 这两个决定必须一起做，否则一定有一个被违反（第 11 节）。</li><li><strong>群体级通报（&quot;你是那时段的访客&quot;）不应触发设备调查。</strong> 这是 #151 的 W1 可行动通知与 W3 归因陈述分离的实际收益场景：通知告诉你做什么，不告诉你查什么。按 #153 第 12 节，设备侧在这个问题上根本没有源。</li></ol>
+<h2>10. 范围蔓延的四种形态与止损判据</h2>
+<table><thead><tr><th>形态</th><th>表现</th><th>心理来源</th><th>可以在会上直接念的止损句</th></tr></thead><tbody><tr><td><strong>S-a 归因诱惑</strong></td><td>&quot;再挖一下就能知道是谁&quot;</td><td>C5 已经花了钱，C6 看起来只差一步</td><td><strong>&quot;归因不是本次决策的输入项。如果它顺路出现我们记录，但不为它追加预算。&quot;</strong></td></tr><tr><td><strong>S-b 样本扩大</strong></td><td>&quot;顺便也查一下同事/家人/其他设备&quot;</td><td>低成本错觉 + 焦虑外溢</td><td><strong>&quot;每台新设备重新走一次分诊树，不搭现有工单的车。&quot;</strong></td></tr><tr><td><strong>S-c 时间回溯</strong></td><td>&quot;再往前看看，说不定更早&quot;</td><td>想知道&quot;第一次&quot;的冲动</td><td><strong>&quot;回溯窗口的长度由日志保留期决定，不由好奇心决定；已到保留期边界的直接标注为不可达。&quot;</strong></td></tr><tr><td><strong>S-d 旁证堆叠</strong></td><td>不断补充不改变上限的材料，让报告变厚</td><td>把篇幅当进度</td><td><strong>&quot;这份新材料把结论从 C 几抬到 C 几？抬不动就不进正文，进附录。&quot;</strong></td></tr></tbody></table>
+<p>四条止损句的共同结构是：<strong>每次追加范围都必须回答&quot;它买到哪一级上限&quot;</strong>。回答不出就退回。这条纪律同时约束服务方和委托方——<strong>委托方是范围蔓延的主要来源</strong>，因为服务方通常乐意接单。</p>
+<p>一个反向提醒：止损不等于不查。如果 WP3 出现真实异常，<strong>上限会自己上升</strong>，那时追加预算是有依据的。<strong>判断标准始终是&quot;新数据源出现了&quot;，而不是&quot;再多看看可能有&quot;。</strong></p>
+<h2>11. &quot;查&quot;还是&quot;重置&quot;：把 #147 的三条禁令变成价格</h2>
+<table><thead><tr><th>方案</th><th>现金成本</th><th>时间</th><th>证据后果</th><th>适用</th></tr></thead><tbody><tr><td><strong>A 调查优先</strong>（WP1→WP3，必要时分支；期间不重置）</td><td>T2/T3</td><td>数天到数周</td><td>保住 C4/C5 资格</td><td>需要证据链；有组织/法律需求</td></tr><tr><td><strong>B 记录 + 立即重置</strong></td><td>≈0</td><td>数小时</td><td><strong>永久放弃 C5</strong>，保留 C2/C4（若已导出）</td><td>不需要证据链；风险持续暴露中</td></tr><tr><td><strong>C 什么都不做，继续观察</strong></td><td>0</td><td>无限</td><td>全部衰减，最后只剩 C0/C1</td><td><strong>唯一应当避免的选项</strong>：付出焦虑，换不到任何东西</td></tr><tr><td><strong>D 先重置，出问题时再查</strong></td><td>0</td><td>—</td><td>需要时已不可回补，白付一次焦虑</td><td>常见但错误</td></tr></tbody></table>
+<p>三个要点：</p>
+<ol><li><strong>A 和 B 都是正当终局，D 不是。</strong> 区别只在于 B 是<strong>先决定放弃证据</strong>再重置，D 是<strong>在没意识到的情况下</strong>把证据重置掉了。#147 的三条禁令本质上不是安全建议，是<strong>决策时序建议</strong>：先把 A/B 定下来。</li><li><strong>C 是最贵的选项，尽管现金为零。</strong> 它同时支付焦虑和证据衰减，两项都不可回收。任何一份&quot;再等等看&quot;的建议都应该被追问一句：<strong>等什么信号，等多久，到期做什么决定。</strong></li><li><strong>重置的成本被系统性低估，因为它包含隐性代价</strong>：重装期间的业务中断、备份恢复可能带回原配置、以及最难算的那一项——<strong>如果你错了，你无法知道</strong>（这正是 #154 第 10 节的干净失败问题，落到决策上就是&quot;重置之后风平浪静&quot;不能证明重置前没有问题）。</li></ol>
+<h2>12. 报价时必问的八个问题</h2>
+<p>全部可由前文推出，按&quot;最省钱&quot;顺序排：</p>
+<table><thead><tr><th>#</th><th>问题</th><th>它在筛什么</th><th>差答案的特征</th></tr></thead><tbody><tr><td>Q1</td><td><strong>如果攻击成功但不落地，你的方法看得到吗？</strong></td><td>#154 第 9/10 节的核心判据</td><td>答&quot;我们能查出来&quot;而不区分层次</td></tr><tr><td>Q2</td><td>你主要读哪一层（文件/进程/网络/日志/服务端）？</td><td>数据源错配</td><td>只有一个答案：设备文件系统</td></tr><tr><td>Q3</td><td>这一单交付的结论上限是 C 几？</td><td>定价原则本身</td><td>用&quot;全面排查&quot;&quot;深度分析&quot;代替</td></tr><tr><td>Q4</td><td>会不会出现&quot;未观测到&quot;与&quot;未发生&quot;混写？</td><td>#151/#153 措辞纪律</td><td>&quot;我们保证查出问题&quot;</td></tr><tr><td>Q5</td><td>需要我在过程中不重启、不更新、不重置吗？</td><td>采集前提是否被尊重</td><td>从不提这个要求（说明它不预期拿到 C5）</td></tr><tr><td>Q6</td><td>你是否要在我的设备上装常驻组件？依据哪条红线评估？</td><td>#148 三条红线 / A3</td><td>视需要而定、不给书面说明</td></tr><tr><td>Q7</td><td>拿到设备之外数据（账户/服务端）由谁负责？</td><td>WP3 归属，通常是最大漏项</td><td>默认包含但没有获取路径</td></tr><tr><td>Q8</td><td>如果中途发现新问题需要追加，触发条件是什么？</td><td>第 10 节的止损纪律</td><td>&quot;到时候再看&quot;</td></tr></tbody></table>
+<p><strong>Q1、Q3、Q7 三问答不清楚的，基本不必继续谈。</strong> 它们分别筛掉：零信息方法、无法验收的合同、缺少最高性价比工作包的项目。</p>
+<h2>13. 结论上限的书面表达模板</h2>
+<p>给 WP8 用，也适用于内部报告。<strong>关键是把方法和上限写进正文句子，不是写免责声明。</strong></p>
+<p>模板骨架（配合 #151 的已知/推断/未知三栏）：</p>
+<pre><code>【观测方法】本次使用了：&lt;WP 编号&gt;，数据源为：&lt;层&gt;；采集时间：&lt;UTC 起止&gt;；
+            未采集：&lt;列出已知缺失的源与原因（含保留期）&gt;。
+【已知 ≤ C_】可以陈述：&lt;具体事实 + 时间窗&gt;。仅在该方法能看到该层内容的前提下成立。
+【推断 ≤ C_】可以合理推断：&lt;结论&gt; + 依赖的前提：&lt;…&gt;。此句不支撑&quot;&lt;更高级别的说法&gt;&quot;。
+【未知 / 不可达】无法回答：&lt;问题&gt;；原因：&lt;数据源不存在 / 保留期已过 / 断点在 S 段之前&gt;。
+        这一栏不视为&quot;未发现&quot;。
+【禁止陈述】本报告不支持：&lt;把最容易被下游补出来的那两句明确写出&gt;。
+【行动】基于 C_ 即可执行：&lt;清单&gt;；需要 C_ 才能执行：&lt;清单&gt;。</code></pre>
+<p>四条写法要求：</p>
+<ol><li><strong>&quot;不可达&quot; ≠ &quot;未发现&quot;。</strong> 两栏必须分开写，否则读者会合并理解（这是 #147 误判代价与 #151 三栏共同针对的问题）。</li><li><strong>每个&quot;推断&quot;后面挂一个上限标记。</strong> 这让下游改写时看得见自己在越级。</li><li><strong>【禁止陈述】一栏是整份模板里最有用的部分。</strong> 它预防的不是服务方夸大，而是<strong>读者自行补全</strong>——法务会把&quot;账户异常访问&quot;读成&quot;设备被控&quot;，媒体会把&quot;该时段访客&quot;读成&quot;这些人都中招了&quot;（第 4 节规则 1）。</li><li><strong>【行动】要按上限分档。</strong> &quot;换设备&quot;只需要 C4，&quot;提起程序&quot;可能需要 C5。把两档动作混在一起，就会为了做前者去追加后者的预算——这是 S-a 归因诱惑的组织版本。</li></ol>
+<h2>14. 加固清单</h2>
+<h3>14.1 个人七项</h3>
+<ol><li><strong>先做 WP1 的十分钟版</strong>：记满 #147 十项表，特别是<strong>构建号、描述文件/证书、锁定模式状态</strong>这三项不可事后补的。</li><li><strong>再做 WP2</strong>：只用自己的账户页面与自带导出，<strong>不给任何新信任</strong>（#148 三条红线）。</li><li><strong>诚实回答&quot;我需不需要证据链&quot;</strong>：不需要就走第 9 节的记录 → 撤凭据 → 隔离/重装，然后<strong>结束</strong>。</li><li><strong>不要花时间在崩溃日志上</strong>（#154 第 12 节：零信息）。</li><li><strong>拒绝选项 C</strong>：如果暂时什么都不打算做，写下等什么信号、多久、到期做什么决定。</li><li><strong>把 T1 当完整决策，不当缩水方案</strong>：撤凭据 + 隔离设备能拿到的保护，比 T3 报告里的一句结论更实在。</li><li><strong>拿到任何报告先查【未知/不可达】和【禁止陈述】两栏</strong>：它们比&quot;发现&quot;部分更决定这份材料能不能被安全引用。</li></ol>
+<h3>14.2 组织五项</h3>
+<ol><li><strong>合同标的写成结论上限（C 几），不写成检查项清单</strong>（第 3 节、Q3）。</li><li><strong>把 WP3 定为默认起点</strong>：服务端侧是性价比最高、最不依赖设备状态的一包；先查保留期，再立项（第 8.1 节）。</li><li><strong>C6 不进里程碑</strong>：归因写成&quot;顺路收获&quot;，且合同里保留&quot;可能得出无法使用的结论&quot;（第 6 节）。</li><li><strong>四条止损句写进项目管理模板</strong>（第 10 节），并要求每次追加范围回答&quot;买到哪一级&quot;。</li><li><strong>交付模板强制含【禁止陈述】栏</strong>（第 13 节），并与 #151 通报字段联动——通报文案只能从&quot;已知 ≤ C4&quot;的部分生成。</li></ol>
+<h2>15. 常见误解</h2>
+<table><thead><tr><th>误解</th><th>为什么不对</th><th>正确说法</th></tr></thead><tbody><tr><td>&quot;查得越细越安全。&quot;</td><td>细致度不改变上限；C5 之外每加一层，成本上凸而行动不变</td><td>按&quot;要说哪句话&quot;倒推需要哪一级</td></tr><tr><td>&quot;报告没写问题就是没问题。&quot;</td><td>#154 第 10 节：未观测到的信息量取决于成功场景下该方法能否看到东西</td><td>先问&quot;成功时这一层会有内容吗&quot;</td></tr><tr><td>&quot;归因是调查的自然终点。&quot;</td><td>是<strong>成本</strong>终点，不是<strong>结论</strong>终点；多数决策不需要 C6</td><td>归因默认不作为里程碑</td></tr><tr><td>&quot;设备查了才算查过。&quot;</td><td>WP5 是最贵且常无对象的一包；WP3 才是主干</td><td>先服务端，再设备</td></tr><tr><td>&quot;有东西才能下结论。&quot;</td><td>C3/C4 完全可以支撑全部关键行动</td><td>群体级与个体活动级都是可用结论</td></tr><tr><td>&quot;调查越久越彻底。&quot;</td><td>时长与覆盖无关；范围蔓延有四种固定形态</td><td>用止损句约束每一次追加</td></tr><tr><td>&quot;先重置，回头再说。&quot;</td><td>不可回补，且&quot;之后风平浪静&quot;不能证明之前没问题</td><td>先决定是否需要证据链，再决定重置</td></tr><tr><td>&quot;不查心里不踏实，所以要查。&quot;</td><td>踏实感不是交付物；选项 C 同时付焦虑和证据衰减</td><td>要么 T1 结束，要么明确立项</td></tr><tr><td>&quot;专业机构都会给明确结论。&quot;</td><td>给得起 C5/C6 的机构极少；多数合同实际交付 C2/C4</td><td>用 Q1/Q3/Q7 筛</td></tr><tr><td>&quot;装了常驻探针就有了时间序列。&quot;</td><td>那是<strong>未来</strong>的序列，不回答<strong>过去</strong>；且它本身是新信任（#148）</td><td>事前措施不能事后补票</td></tr><tr><td>&quot;C4 可以写成'设备被入侵'。&quot;</td><td>第 4 节规则 1：上下级不可替代</td><td>服务端异常访问只支撑活动级陈述</td></tr><tr><td>&quot;上限写出来显得不专业。&quot;</td><td>不写上限才会被下游越级引用，最终由你承担后果</td><td>上限自述是可辩护性的组成部分</td></tr><tr><td>&quot;所有平台都留日志。&quot;</td><td>各源衰减差异极大，第三方返回内容几乎瞬时消失</td><td>立项前先做 8.1 那张表</td></tr><tr><td>&quot;T3 比 T2 分析更聪明。&quot;</td><td>T3 的钱花在可辩护性，不是智力</td><td>不需要法律用途就不付这个钱</td></tr></tbody></table>
+<h2>16. 与既有各篇的接口</h2>
+<p>本篇是批次的<strong>收口</strong>，它把前面九篇的结论转成预算与措辞：</p>
+<ul><li><strong>#147（设备可感知异常与误判代价，同一批次）</strong>：第 11 节把那三条不可逆动作禁令改写成 A/B/C/D 四方案的价格比较；WP1/WP2 就是那篇十项记录表的执行形态；选项 C 对应那篇的&quot;机会损失&quot;。</li><li><strong>#148（检测产品与第三方检查服务的效力甄别，同一批次）</strong>：A1–A5 分类在本篇变成工作包归属（WP2=A1、WP5 可用 A2/A3、远程鉴定=A5）；第 12 节八问是那篇八个采购判据的合同化；模板（第 13 节）是那篇九项合格交付物的正文格式。</li><li><strong>#149（平台方主动通知与被告知窗口，同一批次）</strong>：第 9 节分诊树把&quot;收到通知&quot;作为最高信息量、最低成本的入口；&quot;群体级通报不触发设备调查&quot;直接来自那篇的通知性质（基于服务侧观测，不是设备检测）。</li><li><strong>#150（浏览器与 WebView 客户端矩阵，同一批次）</strong>：WP4 的投递面重建依赖那篇的 R1–R9 与 C1–C8；影响范围估计按宿主而非按人。</li><li><strong>#151（确认感染后的对外沟通与通报义务，同一批次）</strong>：<strong>本篇兑现那篇第 2 节的承诺</strong>。第 4 节阶梯 = 那篇三栏的可标定版本；第 13 节【禁止陈述】= 那篇四句禁止用语的上游实现；那篇的 W1/W2/W3 分离在本篇第 9 节直接省掉一整个 WP5。</li><li><strong>#152（水坑站点被用作投递面后的运营方自查与协作，同一批次）</strong>：WP4 = 那篇 O1–O8 的项目化；&quot;定向保留&quot;在那篇是策略，在本篇第 8.1 节是保留期表；那篇九步的成本分布见第 5 节。</li><li><strong>#153（网页第三方脚本依赖被篡改后的投递放大，同一批次）</strong>：那篇第 12 节的可得性表是本篇第 4、8 节的直接输入；&quot;个体结论靠服务端、群体结论靠快照&quot;在这里变成 WP3/WP4 的预算分配。</li><li><strong>#154（利用链失败与不匹配时的行为面，同一批次）</strong>：<strong>那篇第 10 节的判据是本篇定价原则的来源</strong>；S0–S5 断点决定 WP5/WP6 有没有对象；第 4 节 C5 行的&quot;仅在断点在 S3+ 时可达&quot;就是那篇&quot;断点在报价时写死&quot;的执行结果。</li><li><strong>#155（锁定模式逐项效果与代价矩阵，同一批次）</strong>：那篇 C1/C2/C3 三项自查 = 本篇 WP2 的最小实现；那篇第 14 节&quot;是否需要新信任/是否花钱/是否当场生效&quot;给本篇第 7 节提供了零成本基准；那篇排第二（仅次于更新）的理由正是本篇的排序标准。</li><li><strong>Coruna 与 DarkSword：商业间谍软件归因方法论</strong>：那篇讲 C6 技术上怎么做，本篇讲 C6 为什么默认不写进目标。两篇必须一起读：只看前者会立项错误，只看后者会低估已达 C5 时的价值。</li><li><strong>Coruna 与 DarkSword：漏洞供应链与商业采购生态 / 防御与检测指南</strong>：那两篇提供技术背景；本篇提供预算与合同层。</li></ul>
+<h2>17. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th><th>支撑</th></tr></thead><tbody><tr><td>1</td><td>调查的标的应该是<strong>一个有明确上限的结论</strong>，不是检查项清单；按覆盖面付钱就是按错觉付钱</td><td>第 3 节</td></tr><tr><td>2</td><td><strong>C0–C6 阶梯</strong>给出可写进合同的标尺；上下级不可互相替代，尤其 C4 不支撑 C5、C5 不支撑 C6</td><td>第 4 节</td></tr><tr><td>3</td><td><strong>WP1→WP2→WP3 是主干</strong>，其余是条件分支；主干成本常低于单独 WP5，且 WP3 是全清单性价比最高的一包</td><td>第 5 节</td></tr><tr><td>4</td><td>成本曲线是<strong>凸的</strong>：C4→C5 贵一个数量级，而引出的行动通常与 C4 相同——<strong>只有需要走法律/公开程序时 C5 才有独立价值</strong></td><td>第 6 节</td></tr><tr><td>5</td><td><strong>C6 的成本不可预算</strong>，且结论经常不可公开使用；应写作&quot;顺路收获&quot;而非里程碑</td><td>第 6 节</td></tr><tr><td>6</td><td>三档预算各有明确边界；<strong>T1 对多数个人是完整决策而非缩水方案</strong>，T3 的钱买的是可辩护性不是智力</td><td>第 7 节</td></tr><tr><td>7</td><td><strong>时间成本不可回收</strong>：保留期不等确认，第三方返回内容瞬时消失，因此&quot;零授权采集&quot;应内嵌在分诊里</td><td>第 8 节</td></tr><tr><td>8</td><td>&quot;先决定要不要证据链，再决定要不要重置&quot;——<strong>A/B 都正当，D（无意识重置）和 C（观望）不是</strong></td><td>第 9、11 节</td></tr><tr><td>9</td><td>范围蔓延有四种形态，共同止损句是<strong>&quot;追加的这笔钱买到 C 几&quot;</strong></td><td>第 10 节</td></tr><tr><td>10</td><td>交付物必须含<strong>【未知/不可达】与【禁止陈述】</strong>两栏：前者防止&quot;未观测&quot;被读成&quot;未发生&quot;，后者防止读者自行越级</td><td>第 13 节</td></tr></tbody></table>
+<blockquote><p><strong>一句话总结：</strong> 一次感染调查真正能买到的从来不是&quot;真相&quot;，而是某一条有上限的陈述——所以先写下你要说的那句话和你要做的那个动作，再倒推哪一级撑得起它、哪一级已经过期、哪一级根本不该出现在目标里。</p></blockquote>
+<h2>说明</h2>
+<p>本篇讨论的是<strong>调查的组织、成本与结论表达</strong>，不提供任何采集技术、取证实现、载荷分析方法或反取证做法。文中&quot;工作包&quot;&quot;数据源&quot;&quot;结论上限&quot;均为项目管理与沟通层面的抽象，<strong>不构成任何具体技术方案</strong>。</p>
+<p>本篇刻意<strong>不做</strong>以下事情：</p>
+<ul><li>不给出任何具体机构、产品或服务的推荐、比较或评价，包括定价数字以外的任何供应商特征描述。第 7 节的三档预算只描述<strong>工作包范围</strong>，其中的金额区间是用于说明量级关系的粗略参照，<strong>不是报价建议</strong>，也不应作为谈判依据；</li><li>不提供绕过平台数据访问限制、批量抓取第三方日志或获取他人账户活动数据的方法。WP3 中&quot;拿到访问权限的协调&quot;指的是<strong>组织内部通过既有授权流程</strong>取得日志访问，不涉及任何外部访问手段；</li><li>不提供内存取证、镜像制作或部件分析的实现路径。需要这类工作时，参照仓库中已有篇目并<strong>交由具备合法资质的机构执行</strong>；</li><li>不承诺任何调查一定能够得到某一级结论。第 4 节的&quot;典型可达性&quot;是对既有条件的描述，不是保证；第 6 节尤其强调 C6 <strong>没有&quot;尽力即可达&quot;的性质</strong>；</li><li>不鼓励把技术结论用于法律或公开指控。第 13 节的模板设计目的恰恰相反：<strong>限制</strong>报告被越级引用。是否需要 C5/C6 取决于是否有正式程序需求，这一判断必须由法律专业人员做出（#151 的&quot;五个必须让律师介入的信号&quot;）。</li></ul>
+<p>本篇关于&quot;多数个人读者不需要调查而需要决策&quot;的判断，是针对<strong>资源分配</strong>的建议，<strong>不是对风险的轻视</strong>：第 9 节分诊树里&quot;撤凭据、隔离会话、隔离设备&quot;这些动作在任何分支下都不打折。所有关于本系列的编号与内容对应关系，以仓库 <code>README.md</code> 索引为准。</p>
+<h2>参考来源</h2>
+<ul><li>NIST SP 800-86：Guide to Integrating Forensic Techniques into Incident Response（事件响应与取证阶段划分的公开基准）· &lt;https://csrc.nist.gov/pubs/sp/800/86/final&gt;</li><li>NIST SP 800-61r2：Computer Security Incident Handling Guide（分诊、保留期、通报节奏）· &lt;https://csrc.nist.gov/pubs/sp/800/61/r2/final&gt;</li><li>ENISA：Threat Landscape（欧洲网络与信息安全局年度态势报告）· &lt;https://www.enisa.europa.eu/topics/threat-risk-management/threats-and-trends&gt;</li><li>FIRST：CSAF / incident disclosure 相关实践文档（协调披露与通报节奏）· &lt;https://www.first.org/&gt;</li><li>MITRE ATT&amp;CK：Mobile（把 C5 级别的行为描述翻译为通用词汇）· &lt;https://attack.mitre.org/matrices/enterprise/mobile/&gt;</li><li>ISO/IEC 27035（信息安全事件管理，用于组织侧流程参照）· &lt;https://www.iso.org/standard/77312.html&gt;</li><li>Apple Security Releases（构建号与修复窗口，用于第 8 节的公开坐标）· &lt;https://support.apple.com/en-us/100100&gt;</li><li>Apple：iPhone 上的锁定模式 · &lt;https://support.apple.com/en-us/105120&gt;</li><li>Amnesty International：Paris Principles（监视技术与人权尽职调查，高风险人群处境的参照）· &lt;https://www.amnesty.org/en/what-we-do/campaigns/paris-principles/&gt;</li><li>Citizen Lab：针对性监视与间谍软件研究合集 · &lt;https://citizenlab.ca/&gt;</li><li>Access Now：Digital Helplines（面向高风险用户的实操支持参照）· &lt;https://www.accessnow.org/&gt;</li><li>Electronic Frontier Foundation：Surveillance Self-Defense（个人侧威胁建模与决策框架）· &lt;https://ssd.eff.org/&gt;</li><li>UK NCSC：Incident management guidance · &lt;https://www.ncsc.gov.uk/collection/incident-management&gt;</li><li>iSight Partners / CIRCL 类协调响应组织的公开手册（事件通报范围界定实践，仅作流程参照）· &lt;https://www.circl.lu/&gt;</li></ul>
+<p><strong>本系列相关篇目</strong>（按仓库索引编号，#147–#156 为同一批次）：</p>
+<ul><li>#147 Coruna 与 DarkSword：设备可感知异常与误判代价</li><li>#148 Coruna 与 DarkSword：检测产品与第三方检查服务的效力甄别</li><li>#149 Coruna 与 DarkSword：平台方主动通知与被告知窗口</li><li>#150 Coruna 与 DarkSword：浏览器与 WebView 客户端矩阵</li><li>#151 Coruna 与 DarkSword：确认感染后的对外沟通与通报义务</li><li>#152 Coruna 与 DarkSword：水坑站点被用作投递面后的运营方自查与协作</li><li>#153 Coruna 与 DarkSword：网页第三方脚本依赖被篡改后的投递放大</li><li>#154 Coruna 与 DarkSword：利用链失败与版本不匹配时的行为面</li><li>#155 Coruna 与 DarkSword：锁定模式逐项效果与代价矩阵</li><li>Coruna 与 DarkSword：商业间谍软件归因方法论</li><li>Coruna 与 DarkSword：漏洞供应链与商业采购生态</li><li>Coruna 与 DarkSword：防御与检测指南</li></ul>
+<p>咨询 iOS 系统请咨询 Telegram：@DZHT333333</p><nav class="nav"><a href="a155.html">← 第 155 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>
