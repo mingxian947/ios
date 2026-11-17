@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下检测指标的生命周期治理 | iOS 安全研究文章库</title>
+<meta name="description" content="本族指标第一性质是**腐烂快于流程**（半衰期以天计而退役节奏以年计，错配即噪声）、指标是提问的位置不是答案故**库的规模由分诊容量决定**、指标／证据／规则／策略四者不混用（证据永不进库、策略优先于规则、最好的指标结局是被一条配置下发取代并退役）、生命周期六站（最常被省略的是 S2 正常基数核对与 S5 退">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a161.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下检测指标的生命周期治理">
+<meta property="og:description" content="本族指标第一性质是**腐烂快于流程**（半衰期以天计而退役节奏以年计，错配即噪声）、指标是提问的位置不是答案故**库的规模由分诊容量决定**、指标／证据／规则／策略四者不混用（证据永不进库、策略优先于规则、最好的指标结局是被一条配置下发取代并退役）、生命周期六站（最常被省略的是 S2 正常基数核对与 S5 退">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a161.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 161 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下检测指标的生命周期治理：一条指标从产生到退役该经过哪六站，谁来删它，以及误报的账该记在谁头上</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这一篇写的是一件在几乎所有本族组织里都<strong>已经存在但从未被治理</strong>的资产：检测指标（域名、IP、URL 与路径、证书与指纹、文件哈希与部件特征、投递时间窗与目标画像、基础设施关联、行为规则）。#148 处理的是&quot;买谁的检测服务、它能到哪个上限&quot;，#154 处理的是&quot;利用链失败时长什么样、为什么提高失败率比提高检测率更值&quot;，#85 处理的是&quot;漏洞情报从哪来、暴露窗口怎么运营&quot;。<strong>没有一篇处理这三者共同依赖的那个东西本身：指标作为一个资产类，它的一生该怎么管。</strong></li><li>核心命题一：<strong>本族指标的第一性质是它腐烂得比任何组织流程都快。</strong> 定向攻击的基础设施是按活动（campaign）投放与替换的：一个投递域名常常只活数天，一条 IP 会被复用给别的活动，一个部件哈希在下一次构建时改变。<strong>这意味着任何一条指标的有效半衰期都以天计，而多数组织的指标库退役节奏以年计——这个错配导致库里的大多数条目不是&quot;低价值&quot;，而是&quot;高误报源&quot;。</strong> 本篇把这条错配命名为治理失败的中心，而不是把它写成&quot;记得更新&quot;的建议。</li><li>核心命题二：<strong>指标不是答案，是提问的位置。</strong> 一条指标命中不告诉你任何结论，它只把一次核查排队到你面前——这与 #147 的&quot;没有异常不能作降级依据&quot;和 #154 的&quot;干净失败判据&quot;是同一条律的反面：<strong>指标的信息服务于分流，不服务于结论。</strong> 而分流的容量是有限的：指标数量超过分诊容量后，命中率会转成噪声，噪声转成两种坏结果——<strong>要么值班的人学会忽略（指标失效于无声），要么当事人被反复约谈（指标失效于成本）。</strong> 因此本篇给出一个可判定的上限式治理：<strong>库的规模由分诊容量决定，不由发现量决定。</strong></li><li>核心命题三：<strong>发布与共享指标是一种能力泄露，其结构与平台方通知的有意滞后同源。</strong> #149 第 4 节解释过通知为什么延迟数月：避免暴露检测手段、避免影响进行中的程序。同样的律适用于指标：<strong>公开一份&quot;我们靠这 12 条规则发现了这类攻击&quot;的清单，等于把对手的重构成本降到最低。</strong> 所以治理必须包含一层发布策略（第 7 节）：什么可共享（已被公开报告的、对方已知的、群体级模式），什么不可（含目标画像的、含内部数据源可及范围的、含方法细节的），以及<strong>共享时如何去除自证信息</strong>——这一条同时保护你、你的用户与所有接收方。</li><li>核心命题四：<strong>误报必须记账，且账要记在指标上，不是记在值班人身上。</strong> 本族的误报代价异常高，因为它触发的动作常常涉及 #147 的四类代价（证据灭失、新信任授予、关系损害、机会损失）与 #148 的数据接触风险：约谈一位 T0 层成员（#157）意味着告知他&quot;你可能被定向攻击&quot;，这句话一旦发出就不可撤回。<strong>本篇第 8 节给出误报账的五栏（触发数／升级数／打扰人数／产生的不可逆动作数／单次成本）与一条退役判据：任何在两个季度里升级率为零、或打扰成本高于其贡献的指标，必须下线。</strong> 这条判据之所以要写成制度，是因为不写的话，<strong>指标库只增不减</strong>——与 #157 名单&quot;只升不降&quot;完全同形的失败模式。</li><li>核心命题五：<strong>指标治理的最大受益方不是检测团队，是修复与入口收窄。</strong> 一篇 #154 已经给出结论（失败率优先），本篇把它变成流程：<strong>每一条指标在登记时都要回答&quot;它指向的入口能不能被批量关&quot;（#160 的第 5 节策略集）；能关的，转成策略项而不是长期规则。</strong> 换句话说：<strong>最好的指标结局是被一条配置下发取代并退役。</strong> 这是本篇最有操作价值的一句话，也是它与其他指标类文档的分工差异。</li><li>一句正向结论：<strong>指标库的健康度不由覆盖度衡量，而由三件事衡量：有多少条还活着、有多少条已经变成配置、有多少条被下线过。</strong> 第三个数字为零的库，无论多大，都是在积累负债。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>主库与案例线在检测方向上已有四类内容：<strong>供给侧甄别</strong>（#148 的五类供给者 A1–A5、八个采购判据、六个红旗、九项合格交付物）、<strong>行为面</strong>（#154 的阶段模型 S0–S5、现象 × 正常基数表、干净失败判据）、<strong>情报侧</strong>（#85 的漏洞情报源与暴露窗口运营——那是补丁情报，不是攻击指标）、<strong>例行核查</strong>（#104 的季度巡检表与异常台账、#147 的十项记录表）。ATT&amp;CK 映射那一篇（既有技术对照）处理战术覆盖，仍不谈生命周期。</p>
+<p><strong>&quot;指标本身作为资产&quot;的治理在四个方向里都不存在。</strong> 而实践里它恰恰是决定这四个方向能否持续的东西：#148 买来的能力要有指标喂；#154 的群体对比要靠指标定义群体；#104 的台账要有指标才能填；#160 的批量策略要靠指标指向入口。<strong>没有生命周期，这四篇都会在第 2 年退化成&quot;一堆没人敢删的规则&quot;。</strong></p>
+<p>本篇同时处理两个高频误用：一是把指标当结论（&quot;命中了就说明被攻击&quot;），二是把指标数量当能力（&quot;我们有八千条规则&quot;）。第 3 节给定义式，第 9 节给一条能当场用的判据句：<strong>&quot;这条指标能把哪一次核查排到谁面前，代价是什么？&quot;</strong></p>
+<hr>
+<h2>3. 指标、证据、规则、策略：四个东西不要混为一谈</h2>
+<table><thead><tr><th>名称</th><th>回答什么</th><th>存在哪</th><th>谁能改</th><th>生命周期</th></tr></thead><tbody><tr><td><strong>指标（Indicator）</strong></td><td>「有没有见过这个特征」</td><td>库／列表</td><td>加要审核，删要有依据</td><td><strong>最短（天—月）</strong>，腐烂最快</td></tr><tr><td><strong>证据（Artifact）</strong></td><td>「某时某设备发生过什么」</td><td>案件档案，冻结</td><td>不可改写（#158 N2）</td><td>与案件同寿，按留存期</td></tr><tr><td><strong>规则（Rule）</strong></td><td>「什么样的组合值得升级」</td><td>检测引擎</td><td>需测试与回归</td><td>中（季—年），受误报账约束</td></tr><tr><td><strong>策略（Policy）</strong></td><td>「这个入口今天形状变了没有」</td><td>管控栈下发（#160）</td><td>变更要留历史</td><td><strong>最长，且它替代指标而不是补充指标</strong></td></tr></tbody></table>
+<p>三条边界要求：<strong>（a）证据永不进指标库</strong>——一次事件里的原始导出不是通用特征，混入后既泄露当事人又会污染后续案件（第 10 节交叉污染，与 #163 相邻）；<strong>（b）规则不等于指标的集合</strong>——单条指标一般不构成升级理由，本族尤其如此（#147 只有一行值得升级；#154 无异常不能降级）；<strong>（c）策略优先于规则</strong>——凡是能转成下发的，转下去并让指标退役。</p>
+<hr>
+<h2>4. 生命周期六站</h2>
+<table><thead><tr><th>站</th><th>名称</th><th>这一站必须产出的东西</th><th>典型失败</th></tr></thead><tbody><tr><td><strong>S1 产生</strong></td><td>从公开报告、合作方、机构通知（#149 S2/S4）、内部事件、厂商披露得到候选</td><td><strong>来源标注</strong>（谁说的、什么时候、原引用于哪）、<strong>依据强度</strong>（直接观察／推断／转述）、<strong>适用范围</strong>（哪个活动、哪个法域、哪类人群）</td><td>无来源即入库；把转述写成观察</td></tr><tr><td><strong>S2 验证</strong></td><td>入库前的判据检查</td><td><strong>正常基数核对</strong>（这条特征在正常流量里出现多少次，#154 的&quot;只有群体对比才有意义&quot;）、<strong>接触面核对</strong>（我们的数据源能不能真的观察它，#148 的数据源 × 可检测性矩阵）、<strong>生命周期估计</strong>（预计多久失效）</td><td>跳过基数核对；把&quot;买来的 feed&quot;当已验证</td></tr><tr><td><strong>S3 上线</strong></td><td>生效为一条可命中的指标</td><td><strong>上线时间与预计复查时间写死</strong>、命中的处置卡（谁收、看什么、多久内决定）、<strong>是否只登记不命中</strong>（观察态）</td><td>直接开命中并通知到人；无处置卡导致命中悬空</td></tr><tr><td><strong>S4 运行</strong></td><td>命中、分诊、升级或关闭</td><td>每次命中一条台账（含关闭理由）；<strong>误报账五栏累计</strong>（第 8 节）</td><td>台账只记命中不记关闭；关闭无理由</td></tr><tr><td><strong>S5 退役</strong></td><td>下线或转成策略</td><td>下线理由（腐烂／被策略替代／打扰成本超贡献／来源被证伪）、<strong>下线时间与保留证据的位置</strong></td><td>从不执行；&quot;先留着以防万一&quot;</td></tr><tr><td><strong>S6 归档</strong></td><td>保留可追溯性</td><td>冻结的历史（供 #158 的判定材料回溯、#163 的跨案对照）；<strong>不与现役库混放</strong></td><td>直接删除导致历史结论无法复核；混放导致复活命中</td></tr></tbody></table>
+<p><strong>六站里最常被省略的是 S2 的正常基数核对与 S5 的退役执行</strong>，这两项恰好是指标库质量的双向闸门：前者决定它上线时是不是噪声，后者决定它运行时会不会变噪声。</p>
+<hr>
+<h2>5. 指标类型 × 腐烂速度 × 可否被策略替代</h2>
+<table><thead><tr><th>类型</th><th>典型对象</th><th>腐烂速度</th><th>误报来源</th><th>可否转成策略</th></tr></thead><tbody><tr><td><strong>T1 域名与 URL</strong></td><td>投递站点、跳转路径、水印查询串</td><td><strong>最快（天）</strong></td><td>复用、旧活动残留、误挂同名正常站点</td><td>部分：可用「陌生域名的远程内容默认拦截」替代逐条名单（#150、#155）</td></tr><tr><td><strong>T2 IP 与 ASN 段</strong></td><td>基础设施、出口</td><td>快</td><td>NAT、云服务共享、机房轮换</td><td>少；ASN 级过宽，几乎必然高误报</td></tr><tr><td><strong>T3 证书与指纹</strong></td><td>TLS 特征、自签与被劫持签发</td><td>中</td><td>正常自签、内部 CA（与 #103 的信任层混淆）</td><td>可：撤销&quot;接受用户安装根证书&quot;的入口（#160 优先级 3）</td></tr><tr><td><strong>T4 文件与部件哈希</strong></td><td>落地物、离线包（#139）</td><td>中快（随构建变）</td><td>常见库文件哈希撞车</td><td>否；只能作为观察，不能作为入口收窄</td></tr><tr><td><strong>T5 行为与序列规则</strong></td><td>解析失败计数、异常重启、非工作时段拉取（#147、#119 的信号面）</td><td>慢</td><td><strong>正常基数不明是首要原因</strong></td><td>部分：能变成&quot;限制某功能&quot;的最值得变</td></tr><tr><td><strong>T6 目标与人群画像</strong></td><td>谁被投递、什么话题被钓</td><td>快且敏感</td><td>转述链条长、易过期</td><td>否；且它是<strong>最不该共享的一类</strong>（第 7 节）</td></tr><tr><td><strong>T7 时间窗与活动关联</strong></td><td>某批次活动的起止、投放窗口</td><td>快</td><td>事后关联被当成事前判据（#146 时基问题）</td><td>否</td></tr></tbody></table>
+<p>三条结论：<strong>（a）T5/T3 类最值得投入</strong>，因为它们腐烂慢且能反向产出策略；<strong>（b）T6 类价值最高但风险最高</strong>——它包含人群信息，一旦泄露等于对外宣告&quot;我们知道谁被盯&quot;（#157 P1/P6）；<strong>（c）任何&quot;T2 ASN 级&quot;指标默认拒绝入库</strong>，除非附带明确的窄化理由与到期日。</p>
+<hr>
+<h2>6. 归属、权限与&quot;谁可以加一条&quot;</h2>
+<table><thead><tr><th>问题</th><th>治理要求</th><th>理由</th></tr></thead><tbody><tr><td>谁能提指标？</td><td><strong>任何人都能提，没人能直接入库</strong></td><td>一线（值班、IT 支持、当事人本人，#149 回流机制）是最早看到形状的人；但 S2 验证不能民主化</td></tr><tr><td>谁能批准上线？</td><td>一个明确的指标负责人 + 一名复核人；<strong>T6 类必须加法务／隐私复核</strong></td><td>T6 含人群与目标信息，误上线等于内部广播（#157 P6）</td></tr><tr><td>谁能下线？</td><td><strong>提出人与负责人都可下线；下线只需一句理由</strong></td><td>增删门槛不对称是库只增不减的制度原因——本篇要求把删除门槛降到与新增一致</td></tr><tr><td>谁收命中？</td><td>每条指标上线时必须绑定一张处置卡：接收角色、看什么、多久决定、何时升级到 #147 十项表</td><td>无接收人的命中是最常见的&quot;库很大、动作很少&quot;的原因</td></tr><tr><td>当事人有没有查询权？</td><td><strong>有</strong>：可查询&quot;我的名字／我的设备是否出现在库中&quot;与命中处置状态</td><td>与 #157 纪律四、#158 当事人可读版同一条律；它同时是库质量最好的外部纠错</td></tr></tbody></table>
+<p><strong>权限设计的一句话总结：入库要有门槛，出库不要有门槛，查询要开放。</strong> 三条同时做到，库会自然收缩到可用规模；缺任意一条，库会朝噪声方向单调增长。</p>
+<hr>
+<h2>7. 共享与发布的四层策略</h2>
+<table><thead><tr><th>层</th><th>可以对外说什么</th><th>不可以说什么</th><th>目的</th></tr></thead><tbody><tr><td><strong>L1 公开（客户、同行、公众）</strong></td><td>已被公开报告覆盖的通用特征、群体级模式描述、&quot;我们建议用户做哪三件事&quot;</td><td>内部数据源的可及范围、规则形式、基数分布、任何 T6 人群信息</td><td>帮助他人防御，同时不降低自身入口形状的信息含量</td></tr><tr><td><strong>L2 定向（合作方、CERT、平台方、行业 ISAC）</strong></td><td>活动级 IOC 与时间窗，附<strong>去自证</strong>处理：不写&quot;我们在哪些系统里看到的&quot;</td><td>客户身份、目标画像、单案细节</td><td>换取对方的对等信息；这是 #149 四类来源成立的前提</td></tr><tr><td><strong>L3 内部（本组织）</strong></td><td>全量，含基数与误报账</td><td>当事人身份不必要地出现在指标备注里（用编号）</td><td>防止个案信息在库内扩散（第 10 节交叉污染）</td></tr><tr><td><strong>L4 冻结（案件档案）</strong></td><td>不进库，只与案件绑定</td><td>任何共享</td><td>保留 #158 判定材料所需的上游依据</td></tr></tbody></table>
+<p><strong>去自证的具体做法（三句可执行）</strong>：<strong>（a）</strong>共享特征不共享发现方式；<strong>（b）</strong>共享时间窗不共享采集精度；<strong>（c）</strong>共享模式不共享阈值。这三句同时保护接收方（不会被迫承担你的方法泄露后果）与你自己（不会因公开而需要重构，#149 的有意滞后逻辑）。</p>
+<hr>
+<h2>8. 误报账五栏与退役判据</h2>
+<table><thead><tr><th>栏</th><th>记录什么</th><th>为什么这一栏必须在</th></tr></thead><tbody><tr><td><strong>C1 触发数</strong></td><td>周期内命中次数</td><td>基本量</td></tr><tr><td><strong>C2 升级数</strong></td><td>其中进入正式核查／调查的比例</td><td>命中率不是价值，升级率才是（#156 分诊树）</td></tr><tr><td><strong>C3 打扰人数</strong></td><td>被约谈、被告知、被临时限制的人次</td><td>本族最独特的一栏：<strong>&quot;你可能被定向攻击&quot;这句话不可撤回</strong>，其代价与 #157 第 8 节纪律直接相关</td></tr><tr><td><strong>C4 不可逆动作数</strong></td><td>因该指标导致的重置口令、擦除、换设备、撤销关系、对外通报（#147 三禁令、#158 N2）</td><td>这一栏不为零的指标必须单独审（多数组织根本没在记）</td></tr><tr><td><strong>C5 单次成本</strong></td><td>每次命中的工时与外部费用（#156 工作包口径）</td><td>让&quot;留着以防万一&quot;变成一个有价格的说法</td></tr></tbody></table>
+<p><strong>三条退役判据（可判定的，不是形容词）：</strong></p>
+<ol><li><strong>零升级判据</strong>：连续两个季度 C2 = 0 → 下线（转归档）。</li><li><strong>打扰倒挂判据</strong>：C3 × 单位打扰成本 &gt; C2 × 单位贡献（同 #156 的上凸成本曲线口径）→ 下线或改为仅登记不命中（观察态）。</li><li><strong>策略替代判据</strong>：该指标指向的入口已被一次批量下发关闭（#160）→ <strong>下线，并在库变更记录里写明&quot;由策略项 X 替代&quot;。</strong></li></ol>
+<p>写一句反向纪律以免被读成&quot;越少越好&quot;：<strong>来自可信直接观察（不是转述）且时间窗未过期的高价值指标，即使 C2 = 0 也不适用判据 1</strong>——它可能只是还没有对应活动发生。判据 1 的例外要在台账里逐条写明，而不是全局关闭。</p>
+<hr>
+<h2>9. 一条指标登记卡（照抄可用）</h2>
+<pre><code>指标 ID：                类型：T1..T7
+来源：                  依据强度：直接观察 / 推断 / 转述（转述需注明原出处）
+首次可得时间：           预计过期时间：           复查时间：
+正常基数核对结果：      核对方法与样本窗口：
+我们的数据源能否观察它：  能 / 不能 / 部分（写明哪一段不能，对应 #148 矩阵行）
+指向的入口：            能否转成策略：能（写明策略项） / 不能
+处置卡：接收角色 / 现场看什么 / 多久内决定 / 升级到 #147 十项表的条件
+误报账：C1 C2 C3 C4 C5（上线时即为空，不预填）
+共享层：L1 L2 L3 L4（默认 L3，升层需复核）
+下线判据：本条适用判据 1/2/3 的哪几条，例外是否已写明</code></pre>
+<p>三句使用要求：<strong>（a）&quot;预计过期时间&quot;不许空</strong>（宁可写 30 天）；<strong>（b）&quot;我们的数据源能否观察它&quot;这格填&quot;不能&quot;的指标不得上线为命中态</strong>——它只能作为背景登记，否则你会得到一个永远不会命中但也永远不会被证伪的规则，这是库噪声最隐蔽的来源；<strong>（c）&quot;能否转成策略&quot;填&quot;能&quot;的指标，其下线日期应与策略项上线日期绑定。</strong></p>
+<hr>
+<h2>10. 七个失败模式</h2>
+<table><thead><tr><th>模式</th><th>表现</th><th>根据</th><th>解</th></tr></thead><tbody><tr><td><strong>只增不减</strong></td><td>库逐年变大，命中率逐年下降</td><td>S5 缺席 + 删除门槛高于新增</td><td>第 6 节权限设计 + 第 8 节三条判据</td></tr><tr><td><strong>无基数上线</strong></td><td>上线即刷屏，值班开始忽略</td><td>S2 被跳过</td><td>基数核对未做不许上线；把结果写进登记卡</td></tr><tr><td><strong>命中悬空</strong></td><td>命中没有接收人，报表存在没人处理</td><td>处置卡缺失</td><td>无处置卡不上线（第 9 节）</td></tr><tr><td><strong>证据入库</strong></td><td>个案导出件、当事人身份出现在库中</td><td>指标／证据不分（第 3 节 a）</td><td>档案与库分系统；T6 需隐私复核</td></tr><tr><td><strong>跨案污染</strong></td><td>上一案的指标被当作本案的依据，形成确认偏差</td><td>无归档隔离 + 时间窗过期仍在命中</td><td>L4 冻结 + S6 归档不混放（与 #163 相邻）</td></tr><tr><td><strong>发布泄露</strong></td><td>公开材料里出现规则形式与数据源范围</td><td>第 7 层 L1/L2 不分</td><td>三句去自证 + 发布前由非作者审一次</td></tr><tr><td><strong>指标当结论</strong></td><td>对外表述&quot;我们检测到了&quot;而其含义只是一次命中</td><td>与 #151 禁止用语、#148 上限阶梯冲突</td><td>所有对外表述按 #158 第 8 节句式写；命中不进通报</td></tr></tbody></table>
+<hr>
+<h2>11. 加固清单</h2>
+<p><strong>组织十项</strong></p>
+<ol><li>给现有库做一次<strong>一次性体检</strong>：按第 5 节分类、按第 8 节三条判据逐条判，先执行一轮批量下线（通常能砍掉可观比例，且立刻降低噪声）。</li><li>上线第 9 节登记卡，并把&quot;预计过期时间&quot;与&quot;数据源可观察性&quot;设为必填；<strong>不接受无卡入库</strong>。</li><li>把删除权限下沉到与新增相同：负责人即可下线，理由一句话。</li><li>为每条现役指标绑定处置卡，季度统计&quot;无接收人的命中数&quot;（这项应为零，若非零就是库在自我欺骗）。</li><li>建立 L1–L4 发布策略与三句去自证，指定一名发布前审核人（非作者）。</li><li>每季度把「被策略替代而下线」的条数作为正指标上报——<strong>这个数字越大越说明治理在起作用</strong>，与&quot;新增多少条&quot;的口径正面对抗。</li><li>给 T6（人群／目标类）指标单独建库与单独权限，不与基础设施指标同表存放。</li><li>建立基数核对的常态化机制：用一段代表性正常流量窗口做定期回归，否则新增指标无从核对。</li><li>把当事人查询权写进流程（第 6 节最后一行），并每季度统计查询数与其纠错数。</li><li>与 #104 季度巡检合并一次节奏：巡检表里加两行（现役指标数、本季下线数），不新开会。</li></ol>
+<p><strong>个人（被指标涉及的人）四项</strong></p>
+<ol><li>你有权问：&quot;这次提醒是哪条指标触发的、它上一次有人核实是什么时候&quot;——这是可判定的追问，不是冒犯。</li><li>若因命中被要求做不可逆动作（重置、换设备、擦除），先问是否有配置与账户快照；顺序按 #158 N2 与 #159 第 5 节 R1。</li><li>收到&quot;我们检测到你有风险&quot;这类通知时，按 #149 的用法处理：<strong>它是一个时间窗和一个基线动作的理由，不是一个结论</strong>。</li><li>如果你的名字出现在库中而你确认无对应活动，走查询与纠错通道；<strong>纠错记录会保护你之后的每一次处置</strong>。</li></ol>
+<hr>
+<h2>12. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>纠正</th></tr></thead><tbody><tr><td>「指标越多越安全」</td><td>库的规模由分诊容量决定；超出后命中率转成噪声，噪声转成忽略</td></tr><tr><td>「命中了就是有攻击」</td><td>指标只把一次核查排队到你面前；结论级别由 #148 的上限阶梯决定</td></tr><tr><td>「买商业 feed 等于有了指标」</td><td>转述不等于观察，未做基数核对的 feed 条目是最主要的误报源</td></tr><tr><td>「共享 IOC 无害，大家都这么做」</td><td>共享特征不共享发现方式；无去自证处理会同时损害你与所有接收方</td></tr><tr><td>「删掉旧指标会失去保护」</td><td>腐烂的指标不保护任何人，它只占用分诊容量并打扰人；归档不丢可追溯性</td></tr><tr><td>「误报是值班人员的判断问题」</td><td>误报是指标属性；账要记在指标上（五栏），否则人会学会忽略而库继续长</td></tr><tr><td>「行为规则比 IOC 高级所以不需要基数」</td><td>恰恰相反：#154 已说明只有群体对比才有意义，行为规则的基数错误更贵</td></tr><tr><td>「指标库是安全团队内部事务」</td><td>它牵动法务（T6 与人群信息）、IT／管控（策略替代）、对外沟通（发布层）与当事人权利（查询）</td></tr></tbody></table>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<ul><li><strong>#148《检测产品与第三方检查服务效力甄别》</strong>：数据源 × 可检测性矩阵是本篇 S2&quot;我们的数据源能否观察它&quot;那一格的来源；五类供给者 A1–A5 与指标库的关系是&quot;谁喂谁&quot;。</li><li><strong>#154《利用链失败与不匹配时的行为面》</strong>：现象 × 正常基数表与&quot;干净失败判据&quot;提供第 5 节 T5 类与判据 1 例外的理论依据；&quot;提高失败率优先于提高检测率&quot;是第 8 节判据 3 的成本论证。</li><li><strong>#156《一次感染调查的成本结构与结论上限》</strong>：C5 单次成本与上凸成本曲线口径由它提供；结论上限阶梯决定第 10 节&quot;指标当结论&quot;这条失败模式为什么必须禁止。</li><li><strong>#160《组织管控栈的可见性与可阻断性》</strong>（本篇之前的一篇）：判据 3 的执行手段全部在那边第 5 节的策略集里；那边的 M2/M3 快照是这边基数核对的数据源。</li><li><strong>#157《高价值目标名单治理》</strong>：T6 类指标的权限层、C3 打扰人数栏、当事人查询权，三条都直接来自那边的第 7/8 节。</li><li><strong>#158《清除判定与复机验收》</strong>：S6 归档保留的历史供那边第 8 节判定材料回溯；C4 不可逆动作数与那边 N2 冻结闸门同一条律。</li><li><strong>#159《服务端与账户侧处置闭环》</strong>：基础设施侧指标（T1/T2/T3）的属主与收回路径在服务侧；那边第 6 节的&quot;列表回读&quot;是本篇基数核对的一个特例。</li><li><strong>#149《平台方主动通知与被告知窗口》</strong>：第 7 节的&quot;有意滞后&quot;逻辑由它给出；S1 产生站的机构来源（S2/S4 类）也在那边。</li><li><strong>#147《设备可感知异常与误判代价》</strong>：处置卡的升级条件写回到那张十项表；四类误判代价账本是 C3/C4 两栏的价值依据。</li><li><strong>#150《浏览器与 WebView 客户端矩阵》、#155《锁定模式逐项》、#103《网络出口与传输信任》、#145《局域网服务发现》</strong>：可转为策略的入口清单来源（T1/T3 类）。</li><li><strong>#139《离线内容与模型包》、#119《用户态服务与 XPC》、#113《其他 Apple 平台》</strong>：T4/T5 类可观察信号的机制依据与不可管平台造成的观测盲区。</li><li><strong>#85《漏洞情报监测与暴露窗口运营》</strong>：那边管补丁情报的生命周期，本篇管攻击指标的生命周期；两篇共用&quot;来源标注 + 依据强度&quot;的登记纪律。</li><li><strong>#104《季度巡检与台账》</strong>：节奏合并（第 11 节第十项）。</li><li><strong>#105《合法调取与云端披露》、#151《对外沟通与通报义务》</strong>：发布层的表述边界；指标命中不得进入通报内容。</li></ul>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>本族指标的第一性质是<strong>腐烂快于流程</strong>：半衰期以天计，退役节奏以年计，错配即噪声</td></tr><tr><td><strong>2</strong></td><td>指标是提问的位置不是答案；<strong>库的规模由分诊容量决定，不由发现量决定</strong></td></tr><tr><td><strong>3</strong></td><td>指标／证据／规则／策略四者不可混用；证据永不进库，策略优先于规则</td></tr><tr><td><strong>4</strong></td><td>六站生命周期里最常被省略的是 S2 基数核对与 S5 退役执行，这两站决定库质量</td></tr><tr><td><strong>5</strong></td><td>权限设计三句：<strong>入库有门槛、出库无门槛、查询开放</strong>——缺任一条库就朝噪声单调增长</td></tr><tr><td><strong>6</strong></td><td>共享要分层并去自证：特征可共享，发现方式、采集精度与阈值不可</td></tr><tr><td><strong>7</strong></td><td>误报账记在指标上（五栏），三条可判定退役判据；<strong>判据 3 的正面指标是&quot;被策略替代而下线&quot;的条数</strong></td></tr><tr><td><strong>8</strong></td><td>最好的指标结局是变成一条配置下发然后退役；健康度由&quot;活着多少／变成策略多少／下线过多少&quot;三数衡量</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>一个指标库真正的能力，不体现在它能列出多少条特征， 而体现在它能不能在每次命中时把一次核查送到对的人面前、在腐烂时自己下线、 <strong>并且在下线时留下一句可以被复述的理由。</strong> 做不到的库会越建越吵，最后由值班的人替你完成退役——用忽略的方式。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的检测资产管理与治理流程分析，不提供任何下列内容：可利用代码、漏洞细节、投递路径复现方法；任何规避、欺骗或干扰检测指标与规则的做法（文中关于&quot;发布等于降低对手重构成本&quot;的讨论仅用于说明共享纪律的必要性，不构成规避指导）；任何伪造指标、污染他人指标库、或冒充 IOC 交换渠道的行为；对任何具体指标类型在特定产品上的可检测性、命中率或误报率的事实性断言（各产品与数据源的可观察范围差异极大且随版本变化，本篇一律以&quot;需按你实际数据源逐格核实&quot;为结论）。涉及人群画像、目标信息与个人身份的数据处理须先经法务与隐私审核；对当事人的查询权与告知义务不因安全理由而豁免。本文不构成法律意见。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（行为规则的战术归类与检测覆盖对照）</li><li><a href="https://www.misp-project.org/" rel="nofollow noopener" target="_blank">MISP / OpenIOC 等威胁情报交换格式的公开规范</a>（指标对象结构、TLP 分级与共享分层实践）</li><li><a href="https://www.first.org/" rel="nofollow noopener" target="_blank">First.org / TLP 与 IOC 处理指南（Traffic Light Protocol 公开说明）</a>（共享层级、去自证与接收方义务）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r3/upd1/final" rel="nofollow noopener" target="_blank">NIST SP 800-61r3 Computer Security Incident Handling Guide</a>（检测、分诊与升级在事件生命周期中的位置）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（可观察信号的系统侧来源：分析数据、描述文件与证书、通知与账户记录）</li><li><a href="https://blog.google/" rel="nofollow noopener" target="_blank">Google Threat Intelligence / Lookout：Operation Coruna 公开报告</a>（活动级基础设施与投递域名的生命周期观察）</li><li><a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Citizen Lab：定向监控与指标共享伦理相关公开报告</a>（共享人群信息的风险与告知纪律）</li><li>本系列 #85、#103、#104、#105、#113、#119、#139、#145、#147、#148、#149、#150、#151、#154、#155、#156、#157、#158、#159、#160（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a160.html">← 第 160 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a162.html">第 162 篇 →</a></nav></article>
+</main></body></html>

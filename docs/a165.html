@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的桌面演练脚本设计与判分 | iOS 安全研究文章库</title>
+<meta name="description" content="通用演练的三项假设（会确认、外部会配合、内部闭环）在本族全部不成立，考点是三个闸门（不可逆决策／外部依赖时限／当事人配合）、设计六原则（**R1 不含任何真实漏洞细节与载荷**、R2 每场一个无确认结局、R3 一张故意不回复的外部卡、R5 只判可观察动作、R6 演练数据带 `EX-` 前缀物理隔离）、六类场景">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a165.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的桌面演练脚本设计与判分">
+<meta property="og:description" content="通用演练的三项假设（会确认、外部会配合、内部闭环）在本族全部不成立，考点是三个闸门（不可逆决策／外部依赖时限／当事人配合）、设计六原则（**R1 不含任何真实漏洞细节与载荷**、R2 每场一个无确认结局、R3 一张故意不回复的外部卡、R5 只判可观察动作、R6 演练数据带 `EX-` 前缀物理隔离）、六类场景">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a165.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 165 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的桌面演练：为本族设计一场能判分、不会造出假案、且演练完真的会改东西的脚本</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>多数组织的应急桌面演练是为<strong>勒索软件或数据泄露</strong>设计的：一次明显的大面积事件、一条清晰的升级链、一个可以用钱解决的结局。#104 的季度巡检表、#155 的&quot;窗口期用法与持续用法的判据和排练清单&quot;、以及 #97 里&quot;演练优于培训&quot;那句话都提到了排练的价值，<strong>但没有一篇给出适用于本族的脚本长什么样。</strong> 本族有三项性质使通用演练失效：<strong>（a）事件可能永远不会&quot;确认&quot;</strong>（#148/#156 的结论上限，多数真实案子停在 C2/C3），于是演练如果设计成&quot;确认被感染&quot;就永远在练一个不存在的场景；<strong>（b）大量关键动作不在组织手里</strong>（#158 K3、#162 E2 的超时不阻塞），于是演练如果设计成&quot;内部决策—执行&quot;闭环，就练不到真正会卡住你的那一格；<strong>（c）处置动作全部要当事人自己执行</strong>（#164 第 9 节），于是演练如果只让安全团队演示，参与的人什么都没练到。</li><li>核心命题一：<strong>本族演练要考的不是&quot;发现&quot;，而是三个具体的判断闸门</strong>： irreversible 决策的闸门（何时允许擦除／重置／迁移，#147 三禁令、#158 D 类决策）、外部依赖的时限处理（保全请求发没发、超时怎么登记，#162 三态）、以及当事人的配合可持续性（约谈次数、告知四要素，#164）。<strong>每一项都必须被写成一道有明确对错判据的题</strong>，否则演练只是一次讨论会。第 4 节给六类场景，第 5 节给 24 张注入卡的样例结构与判分点。</li><li>核心命题二：<strong>判分必须用&quot;是否产生了那个动作／那句话&quot;，不能用&quot;是否表现得专业&quot;。</strong> 可判定的通过项示例：<strong>是否有人在第一次外部依赖出现后的 30 分钟内提出&quot;停止日志轮转&quot;（而不是&quot;要一份报告&quot;）；是否有人说出&quot;这条结论不能写成已确认&quot;；是否有人拒绝&quot;把设备抹掉先&quot;并给出理由；是否有人在结束时写出到期日。</strong>四个都是当场可观察的动作，且都对应真实事件里最常见的失败（#162 §10、#151 禁止用语、#147 三禁令、#163 第 3 节 aging）。** 反过来，&quot;沟通顺畅&quot;&quot;大家很冷静&quot;不是判据。</li><li>核心命题三：<strong>演练会造出假案，这是本族演练最独特也最少被防范的副作用。</strong> 三条机制：<strong>（a）参与人回去后自查，产生大量正常异常并进入台账（#147 的误判代价在演练后集中出现）；（b）演练里编造的域名、路径、样本如果被写进任何真实系统（工单、笔记、指标库），之后被真实命中时会形成自我证实（#161 第 10 节失败模式三/五）；（c）演练习得&quot;上报&quot;这件事之后，上报量上升而阈值不变，分诊容量被吃掉（#163 第 8 节）。</strong> 因此第 7 节给出五项隔离要求：<strong>演练数据一律带 <code>EX-</code> 前缀并禁止进入任何生产库；事前向参与人明示&quot;这是演练&quot;并给出真实上报入口；演练产生的自查异常单独登记不计入指标；结束时发一份&quot;你刚才看到的现象里哪些是正常的&quot;清单；演练记录归档而不是保留在检索可见的位置。</strong></li><li>核心命题四：<strong>每场演练必须产出整改项，而整改项的负责人不能是演练的组织者。</strong> 这是本族演练最普遍的空转原因：组织者把&quot;我们发现流程不清楚&quot;作为结论，然后自己写一份更清楚的文件，第二年重复同样的结论。第 8 节给一条硬规则：<strong>整改项必须落到一个可交付物（一个策略项、一个字段、一个模板、一个入口地址）与一个具名负责人（属于该物所有者职能线：管控归 IT、名单归安全治理、保全模板归法务）；演练组织者只负责核对交付物是否出现，不负责制造它。</strong></li><li>核心命题五：<strong>演练频率要按&quot;人事变化速度&quot;而不是按&quot;日历&quot;定。</strong> 本族处置依赖三类人的判断：T0/T1 名单上的人（#157）、属主侧执行者（IT／法务／HR）、以及当事人自己。<strong>名单换血超过三分之一、或关键角色变更、或上一次真实事件结束满半年</strong>——这三条任一应触发一次演练，而不是&quot;每年一次&quot;。</li><li>一句正向结论：<strong>一场好的本族桌面演练，结束时应该留下三样东西：三个可判定的未通过项、一个已经改好的字段、以及一份参与人带回家的&quot;什么算正常&quot;清单。</strong> 只留下&quot;体验很好&quot;的演练，在真实事件里的价值接近零。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>案例线已有：#104（季度巡检表与异常台账，含企业子集与三类节奏）、#155 末节的&quot;排练清单&quot;（针对锁定模式切换）、#157 第 8/9 节（名单重排与自愿通道）、#158（验收表与判定句式）、#160 第 12 节第十项（&quot;每季做一次五分钟杠杆核对&quot;——这是最接近演练的一条，但只测一个动作）、#162（请求九字段与 T+0/1/3/7/14 节奏）、#163（队列与三分预算）、#164（访谈禁问表）。</p>
+<p><strong>这些提供了演练要考的&quot;考点&quot;，但没有任何一处提供&quot;考卷&quot;。</strong> 而本族的考卷和通用考卷差别极大，因为要测的动作里大半是<strong>不做某件事</strong>（不重启、不擦除、不要口令、不写归因、不在演练里造真特征）——这类判据在通用勒索演练中根本不存在。</p>
+<p>本篇给三件东西：<strong>场景库（第 4 节，六类）+ 注入卡结构与判分点（第 5、6 节）+ 隔离与整改规则（第 7、8 节）</strong>。它可以被直接抄成一次 90 分钟的演练；同时明确一条限制：<strong>本族演练不需要、也不应该使用任何真实漏洞细节或载荷</strong>（第 3 节），因为要考的是判断与流程，而不是识别技巧。</p>
+<hr>
+<h2>3. 设计六原则（先立规矩，再写剧本）</h2>
+<table><thead><tr><th>#</th><th>原则</th><th>原因</th></tr></thead><tbody><tr><td><strong>R1</strong></td><td><strong>不含任何真实漏洞细节、载荷样本或利用描述</strong>；场景只到&quot;某站点向某人提供了异常内容&quot;这一层</td><td>演练材料会被复制传播；本族的攻击侧细节一旦进入内部文档就变成泄露面（#149 有意滞后逻辑、#151 归因表述纪律）</td></tr><tr><td><strong>R2</strong></td><td><strong>每场至少设一个&quot;无确认结局&quot;</strong>：全程得不到&quot;是否被感染&quot;的答案</td><td>真实分布里多数案子停在 C2/C3（#156）；只练确认结局等于练了一个不存在的世界</td></tr><tr><td><strong>R3</strong></td><td><strong>每场至少设两个外部依赖且其中一个故意不回复</strong></td><td>练 E2/E3 的处理与&quot;超时不阻塞结案&quot;（#162、#158 K3）；否则参与人永远以为世界会答复</td></tr><tr><td><strong>R4</strong></td><td><strong>至少一次要求当事人自己执行动作</strong>，并让参与人写出怎么告知</td><td>处置动作全部落在当事人身上（#164 第 9 节）；演练只演内部等于没演</td></tr><tr><td><strong>R5</strong></td><td><strong>判分点全部是可观察的动作或语句</strong>，不评态度</td><td>第 1 命题二</td></tr><tr><td><strong>R6</strong></td><td><strong>演练数据带 <code>EX-</code> 前缀且物理隔离</strong>，结束发&quot;正常现象清单&quot;</td><td>第 1 命题三；这条在演练计划里要写在第一页</td></tr></tbody></table>
+<p>一句概括六条：<strong>演练要复现的是&quot;信息不足 + 权限不足 + 时间不足&quot;，而不是&quot;信息很多、只是没人看&quot;。</strong> 通用演练最常犯的错恰恰是用后一种设定去考前一种世界。</p>
+<hr>
+<h2>4. 场景库：六类，各自考什么</h2>
+<table><thead><tr><th>场景</th><th>剧情一句话</th><th>主要考点</th><th>对应真实判据</th></tr></thead><tbody><tr><td><strong>SC1 一条通知</strong></td><td>一名 T1 层员工收到平台方的攻击警告邮件，转发给了 IT 服务台</td><td>记录先于动作、四条禁令、72 小时节奏、回流机制是否真跑起来</td><td>#149 §7、#147 三禁令</td></tr><tr><td><strong>SC2 站点方回信</strong></td><td>一家行业媒体（水坑候选）通知你们：你们的员工可能通过其站点被定向投递</td><td>保全请求是否当天发出、共享分级、是否避免归因、多方通报</td><td>#162 九字段、#152、#151</td></tr><tr><td><strong>SC3 高管出差前 72 小时</strong></td><td>一名 T0 层成员明天出发，行前发现一处异常</td><td>三阶段流程、四个设备保管状态的假设、是否临时开启锁定模式与如何降回</td><td>#109、#155 窗口期、#157 R 触发</td></tr><tr><td><strong>SC4 无法确认的两个月</strong></td><td>基础设施侧发现关联但设备侧什么都查不到，管理层要求&quot;给个结论&quot;</td><td>上限表述、拒绝过度结论、观察期到期设计、E3 是否可接受</td><td>#156 C 阶梯、#154 干净失败、#158 第 8 节句式</td></tr><tr><td><strong>SC5 三案并发</strong></td><td>同一周出现三条线索，其中一条日志只剩 4 天，预算只够一件深查</td><td>四键排序、合并／拆分记录、三分预算、aging 硬规则</td><td>#163 第 4/5/7 节</td></tr><tr><td><strong>SC6 访谈失控</strong></td><td>一次约谈中参与人问出了&quot;你打开看看&quot;&quot;先重启&quot;&quot;把密码给我们&quot;</td><td>禁问表识别、四要素告知、记录五栏是否补齐、律师早期信号</td><td>#164 第 5/6/9/10 节</td></tr></tbody></table>
+<p><strong>六场一轮换，每场选 1—2 类</strong>（不要一场演完六类，那会变成讨论会）。<strong>SC4 是六场里最重要的一场</strong>，因为它考的是本族最普遍也最难堪的处境：没有答案仍要做决定，而组织语言不允许&quot;不知道&quot;。</p>
+<hr>
+<h2>5. 注入卡结构（每张卡七字段）</h2>
+<pre><code>卡号 EX-S3-07          场景：SC3            计划触发时刻：T+38 分钟
+内容（给参与人看的原文，一段话，不含技术细节）：
+判分点（观察员勾，不提示参与人）：
+  P1 是否有人……          P2 是否有人……        P3 是否说了禁止句……
+期望动作（可交付物，不是&quot;正确想法&quot;）：
+时限（本卡允许停留多久；超时后如何自动转态）：
+副作用控制（本卡会引发什么误报／误判；演练后如何处理）：
+下一卡衔接（若无回复／若无动作，剧情怎样继续）：</code></pre>
+<p>三条写卡纪律：<strong>（a）&quot;内容&quot;栏禁止出现任何真实 CVE、载荷或工具细节</strong>（R1），要考&quot;到达&quot;就用&quot;一个正常-looking 的页面&quot;；<strong>（b）&quot;判分点&quot;必须包含至少一个&quot;是否有人拒绝做某事&quot;</strong>，因为本族的关键动作多为否定动作；<strong>（c）&quot;下一卡衔接&quot;必须写明失败分支</strong>——真实世界里没人回信、没人批准，脚本必须能沿着失败继续，否则演练会退化为&quot;所有假设都成立&quot;的顺利剧本。</p>
+<hr>
+<h2>6. 判分口径：三级、四列、一张表</h2>
+<table><thead><tr><th>级</th><th>定义</th><th>记分</th></tr></thead><tbody><tr><td><strong>A 达成</strong></td><td>出现期望动作，且由参与者主动提出</td><td>2</td></tr><tr><td><strong>B 提示后达成</strong></td><td>观察员提示角色职责后达成</td><td>1</td></tr><tr><td><strong>C 未达成</strong></td><td>未出现，或出现禁句</td><td>0</td></tr></tbody></table>
+<p>四列记分表（每场 24 张卡 → 48 分满分，<strong>注意：分数只用于跨场比较，不用于个人评价</strong>，见第 9 节）：</p>
+<table><thead><tr><th>维度</th><th>权重说明</th><th>常见失分点</th></tr></thead><tbody><tr><td><strong>V1 记录与冻结</strong></td><td>是否在任何动作前取快照、是否拒绝破坏性建议</td><td>第一次听到异常就问&quot;能不能重装&quot;（X3）</td></tr><tr><td><strong>V2 时限与保全</strong></td><td>保全场是否当天发出、跟进节奏是否被记住</td><td>只提提供不提保全（#162 失败模式一）</td></tr><tr><td><strong>V3 上限与表述</strong></td><td>是否拒绝写&quot;确认／归因／已清除&quot;、是否用第 8 节句式</td><td>管理层压力下把 C2 说成 C5</td></tr><tr><td><strong>V4 当事人侧</strong></td><td>是否完成告知四要素、是否给出下一步与到期日</td><td>演练里没人负责&quot;当事人回家做什么&quot;</td></tr></tbody></table>
+<p><strong>判分的一条硬规则：任何一场里 V1—V4 有一项为 0 分（不是低分，是零），该场必须重演该项，且整改项直接落到流程文档而不是培训。</strong> 零分意味着该动作在组织里根本不存在，而不是做得不好。</p>
+<hr>
+<h2>7. 隔离要求五项（防止演练造出假案）</h2>
+<ol><li><strong>命名隔离</strong>：所有演练对象带 <code>EX-</code> 前缀；禁止使用真实员工姓名（用角色名）、真实供应商名（用&quot;某行业媒体&quot;）、真实域名（用保留示例域）。</li><li><strong>库隔离</strong>：演练内容<strong>不得写入</strong>工单系统、检索可见的协作频道、指标库、台账；单独存放并在结束后归档（#161 L4/S6、#163 D3）。</li><li><strong>事前明示</strong>：每位参与人在开始时书面知道&quot;这是演练&quot;，并获得<strong>真实上报入口</strong>——避免演练后真事件被当成演练（这是本族真实发生过的失败：真通知被读作剧本）。</li><li><strong>事后澄清</strong>：结束 24 小时内发一份清单：<strong>你在演练里看到的异常现象，哪些在真实设备上属于正常（对应 #147 的噪声优先排除与&quot;症状 × 工程成因&quot;表）</strong>。这一项是本篇最有独特价值的一条要求，它直接抵消演练引发的自查浪潮。</li><li><strong>误报登记</strong>：演练后两周内产生的真实上报单独标注 <code>post-EX</code>，<strong>计入台账但不计入指标升级率</strong>（否则 #161 的 C2/C3 栏会被演练副作用污染，进而触发错误的退役判据）。</li></ol>
+<hr>
+<h2>8. 整改项规则</h2>
+<table><thead><tr><th>规则</th><th>内容</th></tr></thead><tbody><tr><td><strong>D-1 交付物形式</strong></td><td>整改项必须写成四类之一：<strong>一个策略项</strong>（#160 下发）<strong>／一个字段</strong>（模板新增列）<strong>／一个入口地址</strong>（谁、什么渠道）<strong>／一个到期规则</strong>（写死天数）。&quot;加强沟通&quot;&quot;提高意识&quot;不算整改项</td></tr><tr><td><strong>D-2 负责人归属</strong></td><td>负责人必须是该交付物<strong>所有者职能线</strong>的人：策略归 IT／管控，模板与保全归法务，名单与授权归安全治理，当事人告知归 HR 或沟通负责人。<strong>演练组织者不得认领交付物</strong></td></tr><tr><td><strong>D-3 期限与核对</strong></td><td>每项给日期，下一场开场用 3 分钟核对是否出现；<strong>核对方式是&quot;东西在哪&quot;而不是&quot;做了没有&quot;</strong></td></tr><tr><td><strong>D-4 上限</strong></td><td>每场最多 5 项整改，超过即说明场景设计过宽；<strong>未关闭的整改项数量达到 3 时，禁止安排新场景，先补旧的</strong></td></tr><tr><td><strong>D-5 可复述</strong></td><td>每项整改要能在员工手册或流程页里被非参与者读懂——否则它只对当时在场的人有效</td></tr></tbody></table>
+<p>一句为什么 D-2 关键：<strong>演练组织者的角色是出题与判卷；如果同时是整改执行人，第二年就会出现&quot;流程已完善&quot;这个永远无法证伪的结论</strong>——这是本族演练空转的制度原因（第 1 命题四）。</p>
+<hr>
+<h2>9. 人不评、角色评：参与规则</h2>
+<table><thead><tr><th>规则</th><th>原因</th></tr></thead><tbody><tr><td><strong>不记名到人</strong>：分数只统计到角色与维度（V1—V4），不写个人姓名</td><td>一旦记名，参与人会选择&quot;安全答案&quot;而不是&quot;真实答案&quot;，演练随即失去诊断价值（X5/X6 那类禁句就再也演不出来）</td></tr><tr><td><strong>允许并鼓励&quot;我不会／我不知道该找谁&quot;</strong></td><td>这句在真实事件里高频出现，若演练中不允许说，就永远发现不了入口缺失（D-1 的第 3 类交付物正是为它准备）</td></tr><tr><td><strong>每场设一名&quot;当事人扮演者&quot;，且不参与判分会</strong></td><td>让扮演者能自由表达不配合、恐惧与疑问（#99、#106 的心理成本在演练里也要出现一次）</td></tr><tr><td><strong>设一名外部观察员（不属于安全团队）</strong></td><td>由他判&quot;这句话能不能被非专业者理解&quot;（#151 三栏写法、#164 G1 语言要求）</td></tr><tr><td><strong>明确禁止归因讨论</strong></td><td>演练里出现的&quot;这是谁做的&quot;话题一律由引导员收回到&quot;我们只知道……&quot;（R1/R2）</td></tr></tbody></table>
+<p>一句：演练的唯一安全目标是<strong>让错误在纸上发生</strong>。任何使参与人避免犯错表现的规则（记名、评人、要求答对）都会摧毁它。</p>
+<hr>
+<h2>10. 六个失败模式</h2>
+<table><thead><tr><th>模式</th><th>表现</th><th>根因</th><th>解</th></tr></thead><tbody><tr><td><strong>演成了确认结局</strong></td><td>剧本最后&quot;确认感染&quot;，全员执行处置，皆大欢喜</td><td>违反 R2</td><td>用 SC4 做常规场景；结局只允许 E1/E2/E3 三态</td></tr><tr><td><strong>所有外部都回信</strong></td><td>服务商每次都立刻给日志</td><td>违反 R3</td><td>至少一张卡设&quot;无回复&quot;，并要求参与人写出 E2/E3 措辞</td></tr><tr><td><strong>演练材料进生产库</strong></td><td>假域名出现在工单／指标库里，之后被真实命中</td><td>违反 R6/§7</td><td><code>EX-</code> 前缀 + 库隔离 + 归档；#161 判据 1 例外的写法</td></tr><tr><td><strong>演练后异常上报潮</strong></td><td>参与人自查产生大量正常异常，分诊被打满</td><td>未做事后澄清</td><td>§7 第 4/5 项；<code>post-EX</code> 标注</td></tr><tr><td><strong>整改全是培训</strong></td><td>结论是&quot;要加强意识&quot;，下一年重复同样失分</td><td>违反 D-1/D-2</td><td>交付物四类 + 负责人归职能线 + D-4 上限</td></tr><tr><td><strong>一年一次雷打不动</strong></td><td>名单与角色已换血，脚本仍是旧人熟悉的那一套</td><td>违反频率原则</td><td>第 1 命题五的三条触发：名单换血 1/3、关键角色变更、真实事件结束满半年</td></tr></tbody></table>
+<hr>
+<h2>11. 一场 90 分钟的标准脚本（可直接抄用）</h2>
+<table><thead><tr><th>时间</th><th>环节</th><th>产出</th></tr></thead><tbody><tr><td>0—8</td><td>开场：明示这是演练、给出真实上报入口、角色分配、说明不记名</td><td>§7 第 3 项兑现</td></tr><tr><td>8—20</td><td>背景包：一份三页简报（组织、名单层分布、当时的版本与管控状态），<strong>不含任何技术细节</strong></td><td>R1</td></tr><tr><td>20—55</td><td>主体：10—12 张注入卡，含至少 1 张无回复、1 张要求当事人执行、1 张诱导禁句</td><td>V1—V4 记分</td></tr><tr><td>55—70</td><td>结局分支：由观察员宣布&quot;本次到此为止，真实世界里你们不会得到确认&quot;——<strong>要求每组写出判定材料的五段</strong></td><td>V3；#158 第 8 节句式</td></tr><tr><td>70—85</td><td>判分回顾：只讲零分项与禁句，不讲个人；收集&quot;你不会的那一件事&quot;清单</td><td>第 9 节</td></tr><tr><td>85—90</td><td>整改认领：最多 5 项，写明交付物形式、职能线负责人与日期</td><td>D-1/D-2</td></tr><tr><td>+24h</td><td>发&quot;正常现象清单&quot;与归档；开 <code>post-EX</code> 登记窗口</td><td>§7 第 4/5 项</td></tr></tbody></table>
+<p>一句：第 55—70 分钟那一段是全场的核心。<strong>把结局设成&quot;没有结局&quot;并强迫各组写出带未闭合项的判定句，是本族演练与通用演练唯一的、决定性的区别。</strong></p>
+<hr>
+<h2>12. 加固清单</h2>
+<p><strong>组织八项</strong></p>
+<ol><li>用第 11 节的 90 分钟结构建立<strong>脚本模板</strong>，并把六类场景写成可替换的卡包（每类 8—12 张）。</li><li>每份脚本第一页印 R1—R6 六原则，尤其是&quot;不含技术细节&quot;与&quot;带 <code>EX-</code> 前缀&quot;。</li><li>建立观察员名单（含至少一名非安全团队），轮换担任；<strong>引导员不得兼任判分人</strong>。</li><li>判分只统计到角色与维度，写进演练章程；任何&quot;某人表现&quot;的记录不允许产生。</li><li>整改项台账独立于演练记录，每季度核对一次交付物是否出现；<strong>新场景安排在旧整改清零之后</strong>。</li><li>演练触发条件写进流程（三条：名单换血、角色变更、真实事件后半年），不写&quot;每年一次&quot;。</li><li>每场结束后 24 小时内发&quot;正常现象清单&quot;，并建立两周 <code>post-EX</code> 登记窗口。</li><li>每两年做一次<strong>半桌半实操</strong>：在演到&quot;下发策略&quot;那一步时，真的对一批测试设备执行一次（#160 第 12 节第十项的五分钟杠杆核对），以证伪&quot;我们以为自己会做&quot;。</li></ol>
+<p><strong>参与人四项</strong></p>
+<ol><li>记住本场有一个动作你当时不知道找谁——把它写进整改认领，这是你能给出的最有价值的信息。</li><li>演练结束后如果自查发现异常，<strong>按真实流程上报并说明你刚参加过演练</strong>；不要自己判断&quot;这大概是正常的&quot;（#147 的五项噪声优先排除是给你参考，不是给你结论）。</li><li>不要把演练材料（假域名、假样本名、脚本截图）复制进任何工作文档或聊天。</li><li>如果你演到了禁句，记下当时是什么压力让你说出那句话——<strong>那句话的触发条件是真实流程要修的东西，不是你的缺点。</strong></li></ol>
+<hr>
+<h2>13. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>纠正</th></tr></thead><tbody><tr><td>「演练要越真实越好，所以要用真的漏洞细节」</td><td>本族演练考的是判断与流程；真实细节只增加泄露面与复制风险（R1）</td></tr><tr><td>「演到确认感染才算完整」</td><td>真实分布里多数案子停在低上限；没有&quot;无确认结局&quot;的演练练不到最难的处境（SC4）</td></tr><tr><td>「演练分数要评到人」</td><td>记名会让人选择安全答案，禁句再也演不出来，诊断价值归零</td></tr><tr><td>「外部方会配合，剧本里就让他们回信」</td><td>必须演无回复；E2/E3 的措辞与超时处理是真实事件里最容易缺的能力</td></tr><tr><td>「演练结束发个总结就够了」</td><td>必须发&quot;哪些现象是正常的&quot;，否则会造出真实上报潮与假案</td></tr><tr><td>「整改项写'加强培训'」</td><td>只有四类交付物算整改；负责人归职能线而不是组织者</td></tr><tr><td>「一年一次足够」</td><td>频率应按人事变化；名单换血与角色变更才是真正的触发</td></tr><tr><td>「演练证明我们没问题」</td><td>演练的价值在暴露零分项；一场没有零分的本族演练，几乎一定是脚本设计过于顺利</td></tr></tbody></table>
+<hr>
+<h2>14. 与既有各篇的接口</h2>
+<ul><li><strong>#104《季度巡检与台账》</strong>：巡检表提供演练可考的常态动作，演练暴露的缺口反过来变成巡检表新增行；第 12 节第七项与那边的九字段台账共用节奏。</li><li><strong>#155《锁定模式逐项》末节排练清单</strong>：是 SC3 的单点版本（切换要当有日志的动作）；本篇把它扩展成多角色脚本。</li><li><strong>#157《名单治理》</strong>：演练角色取自 T 层；频率触发第 1 条（换血 1/3）来自那边的季度重排；第 8 节纪律四与 D-2 负责人归属同源。</li><li><strong>#158《清除判定与复机验收》</strong>：第 11 节&quot;结局分支&quot;要求写的五段判定材料就是那边的第 8 节结构；E2/E3 措辞的判分点也在那边。</li><li><strong>#160《组织管控栈》</strong>：第 12 节第八项的&quot;半桌半实操&quot;就是那边五分钟杠杆核对的演练化；策略类整改项由那节的策略集承接。</li><li><strong>#162《服务商协作》</strong>：无回复卡、保全当天发出、九字段与 T+0/1/3/7/14 节奏全部来自那边；V2 维度是它的记分形式。</li><li><strong>#163《并发事件》</strong>：SC5 直接取自那边的四键排序、合并／拆分记录与三分预算；aging 硬规则是 V3/V4 之外的第五个零分高危项。</li><li><strong>#164《访谈纪律》</strong>：SC6 与禁问表 X1—X10、告知四要素、律师早期信号完全对应；&quot;当事人扮演者&quot;角色由那边第 9 节支撑。</li><li><strong>#161《指标生命周期治理》</strong>：<code>EX-</code> 前缀、库隔离、<code>post-EX</code> 登记与误报账污染风险全部来自那边第 3/7/10 节。</li><li><strong>#149《平台通知》、#147《体感异常》、#148《检测甄别》、#156《成本上限》、#151《对外沟通》、#154《失败行为面》、#159《服务侧闭环》、#99《人身安全》、#106《老年照护》、#109《差旅方案书》、#152《站点自查》、#153《第三方脚本》、#110《多身份架构》</strong>：分别提供 SC1 的回流考点、事后澄清清单的内容、上限阶梯与零授权顺序、无确认结局的世界观、归因收口的语言、噪声排除表、E 三态的外部对象、扮演者的心理现实、SC3 的三阶段流程、站点方视角、共享分级与不写归因的纪律。</li></ul>
+<hr>
+<h2>15. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>通用演练的三项假设（会确认、外部会配合、内部执行闭环）在本族全部不成立；<strong>考点是三个闸门：不可逆决策、外部时限、当事人配合</strong></td></tr><tr><td><strong>2</strong></td><td>判分只用可观察的动作与语句；<strong>&quot;是否有人拒绝做某事&quot;必须占判分点</strong>，因为本族关键动作多为否定动作</td></tr><tr><td><strong>3</strong></td><td>每场必须有&quot;无确认结局&quot;与&quot;无回复卡&quot;；结束时强迫写出带未闭合项的判定句——这是本族演练与通用演练的决定性区别</td></tr><tr><td><strong>4</strong></td><td>演练会造假案：<code>EX-</code> 前缀、库隔离、事前明示、事后&quot;正常现象清单&quot;、<code>post-EX</code> 登记五项不可省</td></tr><tr><td><strong>5</strong></td><td>整改只有四类交付物，负责人归职能线，组织者不认领；<strong>未清零整改达三项时禁止上新场景</strong></td></tr><tr><td><strong>6</strong></td><td>人不评、角色评；记名即失去诊断价值</td></tr><tr><td><strong>7</strong></td><td>频率由人事变化触发（换血 1/3、角色变更、真实事件后半年），不由日历触发</td></tr><tr><td><strong>8</strong></td><td>每场好演练的产物是三样：零分项、一个已改好的字段、一份带回家的&quot;什么算正常&quot;清单</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>桌面演练对本族的真正价值，不是让团队排练一次成功处置， 而是让他们在没有任何确认、外部不回信、当事人害怕的三重条件下， <strong>当场暴露出&quot;我们不知道该找谁&quot;的那一句——并在接下来 90 天里，把它变成一个真的存在的入口。</strong></p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的演练设计与组织治理分析，不提供任何下列内容：可利用代码、漏洞细节、载荷样本、投递路径复现方法或任何可被用于实施定向攻击的技术描述（本篇第 3 节 R1 明确要求演练与文档均不得包含此类内容）；任何伪造事件、制造虚假告警以测试或干扰他人的方法（第 7 节的隔离要求正是为禁止演练内容进入生产系统而写）；针对任何具体人员的评价、甄别或施压技巧；对任何具体产品、服务商在演练或真实场景中的响应能力与时效的事实性断言。文中涉及员工监控、劳动关系、数据保护与法律程序的流程要求，须先经法务与相应专业人士审核；本文不构成法律意见。对高危个体的演练场景（SC3、SC6）应在当事人知情与同意的前提下设计，避免演练本身成为新的风险来源。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r3/upd1/final" rel="nofollow noopener" target="_blank">NIST SP 800-61r3 Computer Security Incident Handling Guide</a>（演练与 tabletop 在事件响应生命周期中的定位、演练后评估）</li><li><a href="https://csrc.nist.gov/publications" rel="nofollow noopener" target="_blank">NIST SP 800-84 Guide to IT Security Experiments / 技术演练方法学</a>（演练设计、判分与隔离方法的一般框架）</li><li><a href="https://www.first.org/" rel="nofollow noopener" target="_blank">FIRST.org — CSIRT 演练与协作服务相关标准</a>（跨组织演练的角色、信息共享与反馈义务）</li><li><a href="https://www.enisa.europa.eu/" rel="nofollow noopener" target="_blank">ENISA Incident Response / CSIRT Exercises 公开材料</a>（演练脚本结构、评估与整改跟踪）</li><li><a href="https://www.iso.org/" rel="nofollow noopener" target="_blank">ISO/IEC 27035 系列：信息安全事件管理</a>（事件管理组织与演练要求）</li><li><a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Citizen Lab / Front Line Defenders / Security-Front：高危群体安全演练与培训实践</a>（知情同意、避免制造恐慌、事后澄清的做法）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（演练可引用的真实读出项与设置入口，用于编写&quot;零风险事实核对&quot;卡）</li><li>本系列 #99、#104、#106、#109、#110、#147、#148、#149、#151、#152、#153、#154、#155、#156、#157、#158、#159、#160、#161、#162、#163、#164（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a164.html">← 第 164 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a166.html">第 166 篇 →</a></nav></article>
+</main></body></html>

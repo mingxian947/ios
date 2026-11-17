@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下多起并发事件的组合分诊与优先级 | iOS 安全研究文章库</title>
+<meta name="description" content="并发是本族结构特征（活动化投递、信号发布节奏、社交传播）故流程必须默认 N&gt;1、队列五状态 Q0–Q4 与 30 天 aging 硬规则（静默滞留是唯一不可接受）、**四键排序：不可逆窗口＞共享前提＞后果不可逆性＞单案重要性**（第四键只定预算档次不定顺序，故 CEO 的案子可排在两名员工之后）、合并六">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a163.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下多起并发事件的组合分诊与优先级">
+<meta property="og:description" content="并发是本族结构特征（活动化投递、信号发布节奏、社交传播）故流程必须默认 N&gt;1、队列五状态 Q0–Q4 与 30 天 aging 硬规则（静默滞留是唯一不可接受）、**四键排序：不可逆窗口＞共享前提＞后果不可逆性＞单案重要性**（第四键只定预算档次不定顺序，故 CEO 的案子可排在两名员工之后）、合并六">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a163.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 163 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的多起并发事件：一个组织同时压着三四个&quot;疑似定向攻击&quot;时，队列该怎么排、案子什么时候该合并、以及预算怎样不被第一件吃光</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>前面几篇全部按&quot;一次事件&quot;写：#147 怎么记、#148 找谁查、#151 怎么说、#156 花多少钱、#158 何时签字、#162 怎么向外部要记录。<strong>而现实里没有一个组织只处理一件。</strong> 一次定向攻击活动会同时打中同一组织的多人（同一水坑站点、同一批投递时段）；一个行业里的多个组织会在同一周收到同一类线索；一份指标上线会让四个案子在同一天涌进队列（#161 的命中潮）。<strong>这时真正决定结果的不是单案的技术能力，而是三件从没被写下来的东西：队列怎么排、案子什么时候合并、预算怎么分。</strong> 本篇就是给这三件事写判据。</li><li>核心命题一：<strong>并发是本族的一种结构特征，不是异常。</strong> 三条原因：<strong>（a）投递是按活动组织的</strong>——一个活动会覆盖一批目标，因此&quot;只有一人中招&quot;反而是少数情形；<strong>（b）可观测信号是按发布节奏到达的</strong>——公开报告、机构通知（#149 S2/S4）、指标上线、服务商回信，都会在同一时刻让多个案子的状态变化；<strong>（c）怀疑是按社交传播的</strong>——一个人被约谈，同岗位的人会开始自查（#147 的误判代价账本在这里以群体形式出现）。<strong>因此流程必须默认 N&gt;1：如果流程只在 N=1 时能跑通，它在真实事件里必然崩。</strong></li><li>核心命题二：<strong>并发使&quot;最贵的那一件&quot;不再是&quot;最该先做的那一件&quot;。</strong> #156 教的是一案之内的定价（按结论上限而不是完成度），但在多案并列时出现了两个新因素：<strong>不可逆窗口</strong>（某些案子的证据只剩几天，#156 的存活期表在这里变成排序键）与<strong>共享前提</strong>（多个案子可能共用同一条基础设施事实，一次 WP3 能同时回答三案）。<strong>于是正确排序不再是&quot;最重要的先做&quot;，而是一条四键顺序：不可逆窗口 &gt; 共享前提 &gt; 后果不可逆性 &gt; 单案重要性。</strong> 第四条最反直觉——<strong>一个 CEO 的案子可能应该排在两个普通员工的案子后面</strong>，因为后两者共同验证的那条基础设施结论会改变 CEO 案子的处置方向。</li><li>核心命题三：<strong>合并与拆分是两种都有代价的动作，而组织的默认值是&quot;不合并、也不拆分&quot;。</strong> 合并的好处是省一次 WP3、口径统一、避免同一事实被三次解释；合并的代价是<strong>范围污染与结论污染</strong>（一个案子的结论上限被另一个案子的证据抬高，这是 #156 范围蔓延在跨案维度上的形态）。拆分的好处是责任与表述清晰；代价是重复劳动与三份不同的口径。<strong>本篇第 5 节给出六条&quot;该合并&quot;判据与四条&quot;必须拆开&quot;判据</strong>，并要求每一项决定写成一行的合并／拆分记录（可复述、可事后审）。</li><li>核心命题四：<strong>跨案污染是本族多案场景里最严重、也最少被防范的质量问题。</strong> 三种污染路径：<strong>证据借用</strong>（B 案没查到的东西被当成 A 案的否证，违反 #154 的&quot;干净失败判据只对同一方法同一范围成立&quot;）、<strong>指标串味</strong>（A 案产生的个案特征进入通用库，之后被 B 案命中并&quot;验证&quot;，形成自我证实——#161 第 10 节失败模式五）、<strong>叙述趋同</strong>（分析师在第四个案子里沿用第一个案子的假设，因为那是他最近一次成功解释过的形状）。<strong>三条的防线是同一个结构：一名案子的负责人不得同时是另一案的证据审阅人；跨案对照只在&quot;结论装配&quot;阶段做一次，且只允许引用格式化的事实行，不允许引用结论句。</strong>（第 6 节给字段。）</li><li>核心命题五：<strong>预算被第一件吃光是多案场景里最常见、也最可预防的失败。</strong> 现象是：第一案按 #156 的 T3 档走完，钱与人用完，第二、第三案降级为&quot;记录一下、观察观察&quot;，而它们的证据正在衰减。<strong>解法是预先分配而不是事后节省：在队列建立时就把预算切成三份（锚案、并行案、机动），并且机动那一份不允许被前两份借用</strong>（第 7 节给三档比例与规则）。这条纪律的心理成本很高——它要求你在只看到第一案时就承认&quot;可能不是最严重的那件&quot;——但它是本篇唯一能明确避免&quot;后半程全部 C0&quot;的手段。</li><li>一句正向结论：<strong>多案场景的正确产出不是&quot;每个案子都有结论&quot;，而是&quot;每条共享事实只被确定一次，并且被所有案子一致引用&quot;。</strong> 这一句同时是本篇的排序依据、合并判据与质量判据。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#156 是全库最接近的一篇，但它的对象是<strong>一次调查</strong>：结论上限阶梯、八个工作包、三档预算、范围蔓延四形态。<strong>它假设只有一个 WP1 分诊决策树在被走。</strong> 本篇处理 N 棵树同时被走时的额外问题——排序键不同、包可以共享、上限会互相污染、预算会互相挤占。</p>
+<p>案例线其他各篇在多处暗示并发但没有处理：#149 第 10 节的组织回流机制（回流带来的就是多条线索）、#152 第 9 节的失败模式（站点方同时面对多家受害组织的询问）、#157 第 9 节 R4 同侪事件（一旦触发，队列长度立刻大于 1）、#160 第 7 节冲突（批量动作会影响多个案子）、#161 第 8 节打扰成本（一条指标上线会让多个案子同时升级）。<strong>主库里的 #104（巡检与异常台账）有一个&quot;异常登记&quot;结构，但它的默认前提是异常之间互不相关；而本族并发事件恰恰高度相关。</strong></p>
+<p>同时纠正两个流行误用：把&quot;并发&quot;当&quot;巧合&quot;（三个案子被写成三件互不相关的事，浪费三次 WP3），以及把&quot;并发&quot;当&quot;一案&quot;（四个案子合成一案，最后用一句超出上限的话结案）。<strong>本篇的第 5 节就是为了让这两个方向都要写出理由。</strong></p>
+<hr>
+<h2>3. 队列的形状：五种状态与一条 aging 规则</h2>
+<table><thead><tr><th>状态</th><th>定义</th><th>允许停留</th><th>转出条件</th></tr></thead><tbody><tr><td><strong>Q0 候选</strong></td><td>一条线索，尚未分诊</td><td>最多 5 个工作日</td><td>#156 的分诊树给出&quot;不需要证据链／需要核查／需要调查&quot;三种出口之一</td></tr><tr><td><strong>Q1 观察</strong></td><td>决定不调查，只按窄观察跟踪（#158 第 9 节）</td><td><strong>必须有到期日</strong>，默认 90 天</td><td>到期即结案或升级，不允许&quot;继续观察&quot;</td></tr><tr><td><strong>Q2 核查</strong></td><td>只做零授权记录与配置快照（#147 十项表、#160 的 M2/M3 导出）</td><td>由共享前提决定，一般 1—2 周</td><td>得到可引用的事实行即转出</td></tr><tr><td><strong>Q3 调查</strong></td><td>启动工作包（#156 WP1—WP8）</td><td>按预算与上限</td><td>结论装配完成即转出</td></tr><tr><td><strong>Q4 待外部</strong></td><td>关键动作卡在服务商与属主（#158 K3、#162 E2）</td><td><strong>不占用调查资源</strong>，只占台账一行</td><td>回信或转 E3</td></tr></tbody></table>
+<p><strong>一条 aging 规则（写死）：任何案子在 Q0/Q1/Q2 停留超过 30 天，必须要么升级、要么以一句理由结案；不允许静默滞留。</strong> 这条规则的存在是因为多案场景里最普遍的失败不是做错，而是<strong>没做完也没关掉</strong>——静默的案子会在六个月后被同一条指标重新命中，届时既没有新鲜证据也没有当初的判断依据（#161 第 5 节 T6 类的过期问题在这里复现）。</p>
+<hr>
+<h2>4. 四键排序：不可逆窗口 &gt; 共享前提 &gt; 后果不可逆性 &gt; 单案重要性</h2>
+<table><thead><tr><th>键</th><th>怎么量</th><th>举例</th></tr></thead><tbody><tr><td><strong>K1 不可逆窗口</strong></td><td>该案的关键数据源还剩几天（#156 §8.1 存活期表、#162 U2 留存上限）</td><td>某站点的访问日志还剩 4 天 → 这一案先发保全，甚至先只发保全（E2 状态、进 Q4，不占资源）</td></tr><tr><td><strong>K2 共享前提</strong></td><td>该案能否确定一条被多案引用的事实</td><td>三案都指向同一投递域名 → 先做一次基础设施重建（WP4），三案同时受益；<strong>这是并发场景里唯一真正的加速</strong></td></tr><tr><td><strong>K3 后果不可逆性</strong></td><td>若本案未处置，会发生什么不可撤销的事（#92、#89、#99、#101）</td><td>当事人是他人账户的恢复要素、或能单方面触发不可撤销授权（#157 G5）→ 优先于&quot;数据量大但可撤销&quot;的案子</td></tr><tr><td><strong>K4 单案重要性</strong></td><td>当事人的层与事件的关注度（#157）</td><td><strong>排在最后</strong>：它决定资源档次（用哪一档预算），不决定顺序</td></tr></tbody></table>
+<p>一句可直接引用的判据：<strong>&quot;先做那个能让其他案子变简单、或者正在消失的案子；先给那个身份最显眼的人多一档预算。&quot;</strong> 顺序与档次是两件事——<strong>这是 K4 与预算分配（第 7 节）的分工</strong>，把它们混在一起是组织在多案时最常见的错误：把&quot;最重要&quot;同时当成&quot;最先做&quot;和&quot;最贵&quot;。</p>
+<hr>
+<h2>5. 合并与拆分：六条该合并、四条必须拆开</h2>
+<p><strong>该合并（任一成立即考虑，成立两条以上则应合并）</strong></p>
+<ol><li><strong>同一基础设施事实</strong>：投递域名、证书、回源或投放位相同或存在直接关联（#162 H1—H5、#161 的 T1/T3）。</li><li><strong>同一时间窗与同一目标画像</strong>：条件分发形状一致（#153 的 C1—C3 排查顺序）。</li><li><strong>同一入口类型</strong>：都经同一宿主（浏览器／WebView／消息附件／近场，#150、#145）且关闭动作是同一个（#160 的策略项）。</li><li><strong>同一数据源</strong>：三案都要同一份服务商日志 → 一次请求覆盖三窗（第 5 节字段 3 要写多段窄窗）。</li><li><strong>同一处置口径</strong>：对外沟通、当事人告知与验收判定需要一致表述（#151 三文书分离在此要求一份统一底稿）。</li><li><strong>同一批人</strong>：当事人属于同一岗位群体，其暴露依据一致（#157 F1）。</li></ol>
+<p><strong>必须拆开（任一成立即不得合并）</strong></p>
+<ol><li><strong>后果不同层</strong>：一案有潜在人身后果（#99）、另一案只有数据面后果——告知义务、渠道与律师介入点完全不同。</li><li><strong>当事人利益冲突</strong>：不同部门的当事人、或其中一人可能是另一方事件的报告者／决策者（#120、#157 第 8 节纪律四）。</li><li><strong>上限会被抬高</strong>：一案证据强、另一案证据弱，合并后弱案会被读成强案（这是拆分的头号理由，也是 #148/#156 上限阶梯的纪律在跨案上的延伸）。</li><li><strong>法域或程序不同</strong>：一案已进入法律程序或需向监管报告，另一案没有（#105、#151 五个转律师信号）。</li></ol>
+<p><strong>每条合并／拆分决定写一行</strong>：<code>案 A（+B）| 合并| 依据 K2/K4| 结论上限按最弱一案表述| 负责人| 复审日期</code>。<strong>这一行是防止&quot;合并悄悄发生&quot;（分析师在脑子里把两案当一案）的唯一手段</strong>，而悄悄合并正是第 6 节叙述趋同的入口。</p>
+<hr>
+<h2>6. 跨案污染的三道防线</h2>
+<table><thead><tr><th>防线</th><th>具体规则</th><th>防的是哪条污染</th></tr></thead><tbody><tr><td><strong>D1 角色隔离</strong></td><td>一案负责人不得担任另一案的证据审阅人；结论装配（WP8）由第三人复核一次</td><td>证据借用（B 案的&quot;没查到&quot;被写成 A 案的&quot;没有&quot;）</td></tr><tr><td><strong>D2 事实行格式</strong></td><td>跨案只允许传递<strong>格式化事实行</strong>：<code>来源 + 方法 + 时间窗 + 对象 + 上限级</code>；<strong>禁止传递结论句</strong></td><td>叙述趋同（&quot;上一案是 A 所以本案大概也是 A&quot;）</td></tr><tr><td><strong>D3 库与案分离</strong></td><td>个案产生的特征只进案件档案（L4 冻结），不进通用指标库；跨案对照表与库表分系统存放（#161 第 3/10 节）</td><td>指标串味（自造特征反过来&quot;验证&quot;另一个案子）</td></tr></tbody></table>
+<p><strong>一次跨案对照的正确做法（可当场执行）</strong>：在所有案子的核查完成后、结论装配前，做一次<strong>唯一的</strong>横向比对，产出一张对照表：</p>
+<table><thead><tr><th>案</th><th>入口段（#154 S0—S5）</th><th>时间窗</th><th>关键事实行</th><th>上限级</th><th>共享项</th><th>未闭合项</th></tr></thead><tbody><tr><td>A</td><td>S0</td><td>…</td><td>…</td><td>C3</td><td>域名 X</td><td>E2 ×2</td></tr><tr><td>B</td><td>S0/S1</td><td>…</td><td>…</td><td>C2</td><td>域名 X</td><td>E3 ×1</td></tr></tbody></table>
+<p>对照表的用途被限定为一句话：<strong>统一共享事实的表述，并暴露不一致处</strong>。<strong>它不是证据，不得作为任何一案的结论依据写入判定材料</strong>——这一句必须印在表头上，因为这张表是多案场景里最容易被误当结论的东西。</p>
+<hr>
+<h2>7. 预算三分：锚案、并行、机动</h2>
+<table><thead><tr><th>份</th><th>用途</th><th>建议比例</th><th>规则</th></tr></thead><tbody><tr><td><strong>锚案</strong></td><td>队列里最深、最能定义共享事实的那一案（通常是第一个 Q3）</td><td>~50%</td><td>允许买到 C4/C5；<strong>它的结论是其他案的事实行来源，故其上限必须写得比任何一案都保守</strong></td></tr><tr><td><strong>并行案</strong></td><td>其余 Q2/Q3 案的基础核查与保全</td><td>~30%</td><td><strong>只做零授权记录、配置快照、一次 WP3/WP4</strong>（#156）；不得为并行案买深检</td></tr><tr><td><strong>机动</strong></td><td>队列里第 N+1 件突然出现、或某案 K1 窗口急速收窄</td><td>~20%</td><td><strong>不允许被前两份借用</strong>；若季度末未使用，说明预测偏严（这是正常结果，不是浪费）</td></tr></tbody></table>
+<p>三条反直觉但必须写的规则：<strong>（a）机动那一份的存在本身就是防&quot;第一件吃光全部&quot;的手段，其未使用不是失败</strong>——把它当成 KPI 会诱导组织在季度末花掉它；<strong>（b）锚案可以换</strong>：若第二案确定了一条推翻锚案前提的事实，重设锚案并保留一次记录（换锚是并发场景里少见的正确决策，也是组织最不愿意做的）；<strong>（c）并行案降级为 Q1 时，必须同时写明它的到期日与转 Q2 的判据</strong>，否则它就是被静默处置的案子（第 3 节 aging 规则）。</p>
+<hr>
+<h2>8. 并发时的人力与当事人成本</h2>
+<table><thead><tr><th>成本</th><th>表现</th><th>控制</th></tr></thead><tbody><tr><td><strong>同一当事人被反复约谈</strong></td><td>三案都找他，每次问同一批问题，第四天他不再配合</td><td>一次访谈、多案共用记录（#164）；<strong>约谈次数是一个需要登记的消耗品</strong>（#156 的等待成本之外新增一项）</td></tr><tr><td><strong>设备只有一台</strong></td><td>多人多案都要求&quot;先把这台设备交出来&quot;（#148 A4 设备托管）</td><td>排队规则按 K1/K3 而不是按职级；<strong>优先做导出而非托管</strong>（可复核、不占用设备）</td></tr><tr><td><strong>值班容量被命中潮吃掉</strong></td><td>一条指标上线让 Q0 从 1 变 12（#161 第 3 节）</td><td>指标上线前先估分诊容量；超出即把新指标设为&quot;仅登记不命中&quot;</td></tr><tr><td><strong>口径漂移</strong></td><td>三个案子分别对外表述，同一事实三种说法</td><td>合并判据第 5 条：口径共用一份底稿；<strong>每案引用它而不是重写它</strong>（#151 三文书分离在此的复用）</td></tr><tr><td><strong>决策者疲劳</strong></td><td>每周被要求批准一次不可逆动作，开始出现无原则批准或无原则否决</td><td>不可逆决策的判据事先写死（#158 第 8 节句式、#147 三禁令），<strong>不逐案重议</strong></td></tr></tbody></table>
+<p>本节一句总结：<strong>并发场景里最先耗尽的不是钱，是当事人的配合意愿与决策者的判断力。</strong> 这两项都要当容量来管——这是 #156&quot;贵的是等待不是分析&quot;在多案维度的对偶。</p>
+<hr>
+<h2>9. 五个失败模式</h2>
+<table><thead><tr><th>模式</th><th>表现</th><th>根因</th><th>解</th></tr></thead><tbody><tr><td><strong>顺序按职级排</strong></td><td>高管案先做完，正在消失的日志没人保全</td><td>K4 被当成第一键</td><td>第 4 节四键顺序；保全不占资源（Q4）所以永远可先发</td></tr><tr><td><strong>悄悄合并</strong></td><td>两案在分析师脑中成了一案，结论用了较强一案的上限</td><td>无合并记录</td><td>第 5 节一行制；上限按最弱一案写（拆判据 3）</td></tr><tr><td><strong>后半程全部 C0</strong></td><td>第一件花完预算，其余案子只留一行&quot;待观察&quot;且无到期日</td><td>无机动份 + 无 aging 规则</td><td>第 7 节三分 + 第 3 节 30 天硬转</td></tr><tr><td><strong>自我证实的队列</strong></td><td>后续案子命中前一案自造的&quot;特征&quot;，于是全部结论趋同</td><td>库与案未分离</td><td>D3 + #161 第 10 节</td></tr><tr><td><strong>对照表当结论</strong></td><td>横向比对表被引用进判定材料，成为&quot;三案一起说明……&quot;的依据</td><td>表头用途未限定</td><td>第 6 节表头一句 + 判定材料只引用格式化事实行</td></tr></tbody></table>
+<hr>
+<h2>10. 加固清单</h2>
+<p><strong>组织八项</strong></p>
+<ol><li>事件流程里把&quot;队列&quot;作为一级对象：状态、排序键、aging 规则、换锚规则写成一页，而不是靠负责人记忆。</li><li><strong>保全类动作脱离调查预算</strong>：任何人可在 Q0 状态发出保全请求并进入 Q4，不等分诊结论（#162 T+0 闸门）。</li><li>队列建立当天做一次&quot;共享事实识别&quot;（哪些案子可共用 WP3/WP4），并把结论写进对照表而不是聊天里。</li><li>每条合并／拆分决定登记一行，含依据与复审日期；季度统计&quot;合并后被迫拆开&quot;的条数（这项非零说明判据执行不严）。</li><li>预算三分并事先批准比例；<strong>机动份的动用不需重新立项</strong>，只需一句理由——这一条决定它是否真的存在。</li><li>建立 D1 角色隔离表（谁负责哪案、谁审哪案的证据），并发超过两案时强制第三人做 WP8 复核。</li><li>把&quot;当事人配合次数&quot;与&quot;不可逆决策次数&quot;当作台账列统计；单项超过三次即触发流程复审而不是继续推进。</li><li>每季度复盘三数：<strong>静默滞留后被迫关闭的案子数</strong>（应为 0）、后半程降级为观察的比例、以及跨案不一致事实被发现的时间点（越晚越糟）。</li></ol>
+<p><strong>个人（同时被卷入多案的当事人）四项</strong></p>
+<ol><li>若你已被就同一件事谈过一次，主动要求把新约谈合并到你已有的记录上——<strong>重复解释不是配合度高，是流程问题</strong>。</li><li>你的设备被要求交出时，问清是&quot;导出&quot;还是&quot;托管&quot;（#148 A1/A4），后者占用时间更长且有接触面代价。</li><li>你有权知道有几件相关的事被并在一起处理，以及你的案子被允许支撑到哪一级结论（#158 当事人可读版）。</li><li>若你的案子被写成&quot;已合并结案&quot;而你的未闭合项没有列出来，按 #158 第 8 节句式要求补上。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>纠正</th></tr></thead><tbody><tr><td>「并发说明防护整体失败，应该先做根因」</td><td>并发是本族的结构特征（第 1 命题一）；先按窗口排序，根因在对照表之后</td></tr><tr><td>「三案同因，就合成一案查」</td><td>同因不等于同上限、同后果、同程序；六条判据与四条拆判据都要写理由</td></tr><tr><td>「最重要的案子先做」</td><td>顺序按 K1/K2/K3；K4 决定预算档次不决定顺序</td></tr><tr><td>「第一件做完再看第二件」</td><td>证据按各自窗口衰减；先做保全、后做分析，两者不必同一批人</td></tr><tr><td>「一案没查到可以帮另一案排除」</td><td>干净失败判据只对同一方法同一范围成立（#154）；跨案借用是污染不是效率</td></tr><tr><td>「对照表能证明活动关联」</td><td>它只统一表述并暴露不一致；结论级关联需要按 #148/#156 的上限单独支撑</td></tr><tr><td>「预留机动是浪费」</td><td>机动是并发场景里唯一能保证队列后半程还有动作的东西；未用是正常结果</td></tr><tr><td>「案子多就多招人手」</td><td>最先耗尽的是当事人配合与决策者判断力，不是分析师工时；容量管理的对象不同</td></tr></tbody></table>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li><strong>#156《成本结构与结论上限》</strong>：本篇是它的多案版——那边管一案的包与价格，本篇管队列与分配；K1 键直接引用那边的存活期表与&quot;贵的是等待&quot;，第 7 节三分对应那边的三档预算。</li><li><strong>#148《检测产品甄别》</strong>：跨案的角色隔离与上限表述沿用那边的九项合格交付物；设备托管（A4）与导出（A1）的取舍在第 8 节第二行。</li><li><strong>#154《利用链失败行为面》</strong>：入口段 S0—S5 是合并判据第 3 条与对照表第一列的定义来源；&quot;干净失败判据&quot;是本篇拆判据 1 与误解五的直接依据。</li><li><strong>#147《设备可感知异常与误判代价》</strong>：Q2 核查状态的内容就是那张十项表；误判代价四类账本在并发时按人次放大（第 8 节）。</li><li><strong>#157《名单治理》</strong>：K4 键与第 7 节档次都由 T 层决定；R4 同侪事件是队列变长的最常见触发；第 8 节口径漂移接那边的第 8 节纪律。</li><li><strong>#158《清除判定与复机验收》</strong>：Q4 与第 6 节事实行服务于验收表；三态与 #162 的 E1/E2/E3 同构；当事人可读版在第 10 节个人第三项复用。</li><li><strong>#160《组织管控栈》</strong>：共享前提最常见地表现为一条可批量下发的入口收窄；命中潮与分诊容量那边的 M2/M3 快照相关。</li><li><strong>#161《指标生命周期治理》</strong>：D3 库案分离、C3 打扰人数栏、上线前估分诊容量三条全部来自那边；本篇第 9 节&quot;自我证实的队列&quot;是那边失败模式五的跨案形态。</li><li><strong>#162《服务商协作》</strong>：K1 键的执行手段、Q4 的状态定义、多段窄窗与&quot;不写归因&quot;两条纪律都在那边。</li><li><strong>#151《对外沟通与通报义务》</strong>：合并判据第 5 条的统一底稿、三文书分离、五个转律师信号在多案场景下同时适用于每一案。</li><li><strong>#153《第三方脚本依赖》、#152《站点自查》、#150《浏览器矩阵》、#145《局域网信任》、#149《平台通知》、#146《时间基准》、#132《会话层》、#99《人身安全》、#92《可用性破坏》、#120《组织交接》、#105《合法调取》</strong>：分别提供共享事实的类型、口径统一的需求、时基对齐、拆判据 1/4 的机制依据。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>并发是本族的结构特征（活动化投递、信号发布节奏、社交传播），<strong>流程必须默认 N&gt;1</strong></td></tr><tr><td><strong>2</strong></td><td>队列五状态 + 一条 30 天 aging 硬规则；静默滞留是唯一不可接受的默认结果</td></tr><tr><td><strong>3</strong></td><td>排序按四键：<strong>不可逆窗口 &gt; 共享前提 &gt; 后果不可逆性 &gt; 单案重要性</strong>；第四键只决定档次不决定顺序</td></tr><tr><td><strong>4</strong></td><td>合并六判据、拆分四判据，<strong>每条决定写一行</strong>；上限永远按最弱一案表述</td></tr><tr><td><strong>5</strong></td><td>跨案污染三防线：角色隔离、只传格式化事实行、库案分离；对照表不是证据</td></tr><tr><td><strong>6</strong></td><td>预算三分且机动份不可借用；锚案可以换，换锚要留记录</td></tr><tr><td><strong>7</strong></td><td>并发最先耗尽的是当事人配合意愿与决策者判断力，两项都要当容量登记</td></tr><tr><td><strong>8</strong></td><td>正确产出是<strong>每条共享事实只被确定一次并被一致引用</strong>，不是每案都有结论</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>一个组织在定向攻击上的成熟度，不看它能不能把一件事查到底， 而看它同时压着四件事时，还有没有一条不会静默的队列、一张不抬高上限的对照表， <strong>以及一笔谁也借不走的机动预算。</strong></p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的多事件并发治理与资源分配分析，不提供任何下列内容：可利用代码、漏洞细节、投递路径复现方法；任何把多起事件用于制造关联假象、互相背书或抬高结论强度的表述方法（本篇关于&quot;上限按最弱一案&quot;的规则正是为禁止此类操作而写）；任何规避组织审批、隐瞒案件状态或绕过当事人知情权的做法；对任何具体机构、行业或活动并发规模的事实性断言（并发数量、活动重叠与共享基础设施关系依具体情报而定，本篇全部为方法与判据）。涉及法律程序、监管报告、劳动关系与跨境情形的判断应以律师及相关专业人士意见为准，本文不构成法律意见。多案合并涉及不同当事人的利益时，须先评估利益冲突与告知义务，不得为效率牺牲任何一方的表述准确性与知情权。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r3/upd1/final" rel="nofollow noopener" target="_blank">NIST SP 800-61r3 Computer Security Incident Handling Guide</a>（事件队列、分诊与升级、并发事件的协调）</li><li><a href="https://www.first.org/" rel="nofollow noopener" target="_blank">FIRST.org — 事件响应服务标准（TRS）与协调处置实践</a>（多案并行时的分派、优先级与跨组织协调）</li><li><a href="https://www.enisa.europa.eu/" rel="nofollow noopener" target="_blank">ENISA 事件响应与 CSIRT 服务框架（CSIRT Services Framework）</a>（CSIRT 容量管理、服务分级与积压治理）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（活动内多目标的行为一致性与入口段归类）</li><li><a href="https://blog.google/" rel="nofollow noopener" target="_blank">Google Threat Intelligence / Lookout：Operation Coruna 公开报告</a>（活动化投递与批量目标的公开观察）</li><li><a href="https://citizenlab.org/" rel="nofollow noopener" target="_blank">Citizen Lab / Amnesty International Security Lab 公开方法论报告</a>（多案例并行时的证据隔离、结论表述与告知纪律）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（可用于多案快照的服务端与设备侧记录类型）</li><li>本系列 #92、#99、#105、#120、#132、#145、#146、#147、#148、#149、#150、#151、#152、#153、#154、#156、#157、#158、#160、#161、#162（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a162.html">← 第 162 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a164.html">第 164 篇 →</a></nav></article>
+</main></body></html>
