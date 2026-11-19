@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下跨境取证与司法协助的时间尺度 | iOS 安全研究文章库</title>
+<meta name="description" content="跨境取证的瓶颈不是法律难度是**日历**（证据以天计、程序以月计，错两个数量级）故「等材料回来再判断」在启动那一刻就已失败；三时钟 **证据／业务／程序** 并行、四类所在地 A 自控／B 平台账号／C 基础设施层／D 运营接入（穿透链条要事前画好）、核心纪律 **保存先于调取**（保存可自助、有期限须续期；">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a170.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下跨境取证与司法协助的时间尺度">
+<meta property="og:description" content="跨境取证的瓶颈不是法律难度是**日历**（证据以天计、程序以月计，错两个数量级）故「等材料回来再判断」在启动那一刻就已失败；三时钟 **证据／业务／程序** 并行、四类所在地 A 自控／B 平台账号／C 基础设施层／D 运营接入（穿透链条要事前画好）、核心纪律 **保存先于调取**（保存可自助、有期限须续期；">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a170.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 170 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的跨境取证与司法协助：数据在谁手里、谁能取、以及时间为什么是主要成本</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这一篇处理一个几乎每起本族事件都会撞上、却很少被提前规划的问题：<strong>关键证据不在你的法域里</strong>。账户记录在服务商的境外机房、投递域名注册在另一个国家、运营商日志由第三国公司持有、受害者是跨境出差的员工——而你能直接命令的只有自己机房里的那几台服务器。前二十篇里，#105 处理&quot;服务商收到合法请求会不会给&quot;，#117 处理&quot;民事理赔方要你怎么配合&quot;，#169 处理&quot;向本国主管部门报送什么&quot;。<strong>没有一篇处理中间那一段：你需要的材料在境外，而取它的通道不由你控制。</strong></li><li>核心命题一：<strong>跨境取证的瓶颈不是法律难度，是日历。</strong> 一条司法协助请求从起草到收到回执，公开讨论中的常见量级是<strong>数月</strong>；而本族事件的证据半衰期以<strong>天</strong>计（#116 的证据衰减表）。这两条时间尺度差了两个数量级，因此<strong>任何&quot;等材料回来再判断&quot;的方案，在它开始执行的那一刻就已经失败了</strong>。</li><li>核心命题二：<strong>保存与调取是两件完全不同的事，而多数人只做后者。</strong> 向服务商发一份<strong>保存请求</strong>（要求其冻结某账号、某域名在某时段的记录，不要求交出内容）通常快得多，且在很多情形下不依赖司法协助；而<strong>调取</strong>（要求其交出内容）才需要完整程序。只做调取、不做保存，等于在等一份<strong>正在被自动删除的</strong>材料——本族事件的日志保留窗口常短于程序周期（#167 的 90–180 天条款正是为此设的）。</li><li>核心命题三：<strong>证据能力分三级，而多数组织在错误的那一级上花了全部预算。</strong> 内部判断（谁被命中、影响了什么）只需要<strong>你自己能看到的</strong>东西；民事诉讼需要<strong>可被对方质证</strong>的东西；刑事程序需要<strong>符合取证规范</strong>的东西。三级的要求逐级上升、可复用性逐级下降。<strong>先明确你要的是哪一级</strong>，否则会用刑事级的标准去做一份内部判断，或者用内部判断的材料去打一场需要质证的官司。</li><li>核心命题四：<strong>等待期不是空档，是唯一能完成&quot;不依赖他法域&quot;的动作的窗口。</strong> 冻结自己的日志、固化时间线、分离已确认与待确认、给受影响人一个不需要等材料的处置方案——这五件事全部在你自己的边界内（第 7 节），而且它们的价值会随时间<strong>下降</strong>：晚一天做，能做出来的东西就少一天。</li><li>核心命题五：<strong>最容易犯的错都发生在等待期，而且都不可逆。</strong> 为了&quot;先弄清楚&quot;而重启设备、为了&quot;减少暴露&quot;而清除账号、为了&quot;配合调查&quot;而把原始材料导成截图、为了&quot;尽快恢复&quot;而用旧备份回滚——这四件事各自都会永久销毁一条本可以等的证据（第 8 节）。</li><li>一句正向结论：<strong>跨境场景的正确姿势是&quot;两条并行的时间线&quot;</strong>：一条由你控制、在 72 小时内跑完；另一条由他法域控制、以月计。前一条负责<strong>不让局面恶化</strong>，后一条负责<strong>补齐归因</strong>。把两者串成串行流水线，是本族跨境事件最常见的结构性错误。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#105 处理的是<strong>云端数据的合法获取边界</strong>：数据在哪、谁拿得到、保护层级与密钥托管如何决定&quot;云端副本是否可产出&quot;。那一篇站在&quot;请求方与被请求方&quot;的制度视角，回答的是<strong>能不能给</strong>。</p>
+<p>本篇站在<strong>受害组织</strong>的视角，回答的是<strong>什么时候能拿到、拿到的东西能用来干什么、在拿到之前做什么</strong>。三个问题的答案都不是法律问题，而是<strong>时间与流程的工程问题</strong>。</p>
+<p>#117 处理的是<strong>民事理赔与第三方调查方的索取</strong>：索取强度的 S1/S2/S3 阶梯、可替代材料、反向风险。那一篇的对手是<strong>合同相对方</strong>，压力来自合同违约；本篇的对手是<strong>日历</strong>，压力来自证据在消失而程序没走完。</p>
+<p>#169 与 #175 处理的是<strong>出口侧的两条通道</strong>（报送与公开披露）。本篇处理的是<strong>入口侧</strong>：材料从境外进来的那条路。三者合起来才是一张完整的&quot;证据流&quot;图：<strong>进来靠本篇，出去靠那两篇。</strong></p>
+<hr>
+<h2>3. 为什么时间是主要成本：三个并行的时钟</h2>
+<p>一起跨境事件里，至少有三个时钟同时在走，而它们的速度差了两个数量级。</p>
+<table><thead><tr><th>时钟</th><th>起算点</th><th>典型量级</th><th>谁在走它</th><th>你能否加速</th></tr></thead><tbody><tr><td><strong>证据时钟</strong></td><td>事件发生（往往早于你知悉）</td><td>以天计；部分日志以小时计</td><td>服务商与运营商的自动轮转、设备自身的写入</td><td>只有<strong>保存请求</strong>能停住它，且必须在轮转之前</td></tr><tr><td><strong>业务时钟</strong></td><td>你知悉的那一刻</td><td>以小时到天计</td><td>业务连续性、客户信任、合同 SLA（#173）</td><td>能，但加速的代价是取证质量</td></tr><tr><td><strong>程序时钟</strong></td><td>你决定走跨境程序的那一刻</td><td>以月计</td><td>他法域的司法机关、中央机关、服务商的响应队列</td><td>几乎不能；只能提前准备、减少往返</td></tr></tbody></table>
+<p>三个时钟的相互关系决定了一切战术：</p>
+<ul><li><strong>证据时钟最快、程序时钟最慢</strong>，因此&quot;先保存、后调取&quot;不是建议而是唯一可行的顺序。</li><li><strong>业务时钟与证据时钟竞争同一批资源</strong>：要求立刻恢复业务的压力，往往正是要求&quot;清除感染、重装、回滚&quot;的压力，而这些动作会停掉证据时钟能给你的一切（#166 的清除判定与复机验收标准正是在这一对张力上写的）。</li><li><strong>程序时钟的不可压缩性，意味着你必须在事件</strong>之前<strong>就把通道准备好</strong>：谁是你所在法域的联络律师、哪些服务商有公开的执法请求入口、哪些国家的程序走得更快——这些知识如果在事件当周才开始收集，你就已经落后程序时钟一个月了。</li></ul>
+<p><strong>一个反直觉的推论</strong>：跨境事件里，&quot;什么都不做、等程序走完&quot;通常比&quot;边等边做一些看起来无害的清理&quot;更安全。因为清理是不可逆的，而等待只会让你丢掉那些<strong>本来也留不住</strong>的东西（除非你先做了保存请求）。</p>
+<hr>
+<h2>4. 数据在谁手里决定谁能取：四类所在地</h2>
+<p>同样的&quot;账号记录&quot;，落在四个不同的位置，可获取性差一个数量级。</p>
+<table><thead><tr><th>类型</th><th>典型持有者</th><th>典型位置</th><th>你能直接要求吗</th><th>主要通道</th></tr></thead><tbody><tr><td><strong>A. 你自己的系统</strong></td><td>你的服务器、你的 MDM、你的邮件网关</td><td>你能控制的机房/云</td><td>能</td><td>内部流程 + 你与云厂商的合同（#167）</td></tr><tr><td><strong>B. 消费级平台账号</strong></td><td>平台服务商（iCloud、邮件、协作工具）</td><td>服务商全球基础设施，落盘地由其策略决定</td><td>不能</td><td>平台自身的执法/数据请求入口；跨境时叠加 #105 的制度问题</td></tr><tr><td><strong>C. 基础设施层</strong></td><td>注册商、DNS、CDN、托管商、VPS</td><td>常与他法域重叠，且层层转租</td><td>不能</td><td>保存请求 + 司法协助；常需逐层穿透（#162）</td></tr><tr><td><strong>D. 运营与接入层</strong></td><td>电信运营商、企业专线、酒店与机场 Wi-Fi</td><td>各司法辖区本地</td><td>不能</td><td>本地程序为主，跨境只覆盖用户归属地</td></tr></tbody></table>
+<p>四类的处置逻辑完全不同，而事件中最常见的错误是<strong>用 A 类的直觉去处理 B/C/D</strong>：以为&quot;发一封邮件要求配合&quot;就够了。恰恰相反：</p>
+<ul><li><strong>A 类是你唯一能在半小时内冻结的</strong>，因此它必须在事件第一小时就完成（第 7 节的第一件事）。</li><li><strong>B 类多数有标准化的自助入口</strong>，其中&quot;保存&quot;与&quot;调取&quot;往往分开申请，且&quot;保存&quot;的响应快得多。把 B 类当成纯法律问题，会让你在最有价值的头两天里什么都不发。</li><li><strong>C 类最容易断层</strong>：域名注册商、DNS 提供商、CDN、实际托管方常常是四家公司，跨三个法域（#162 的水坑链路服务商协作与此同构）。<strong>穿透链条要提前画好</strong>，因为事件中你不会有时间重新查 Whois 的每个层级。</li><li><strong>D 类的留存期最短、覆盖最碎</strong>，而且往往需要<strong>受害者本人</strong>而不是组织去申请。这一点决定了：跨境出差的员工<strong>在出发前</strong>就应该知道自己该做什么（#109 的行程三段式），而不是在回国后补。</li></ul>
+<hr>
+<h2>5. 保存与调取：两个动作，两种速度</h2>
+<p>这是本篇最实用的一节，也是最容易被跳过的一节。</p>
+<table><thead><tr><th>维度</th><th>保存请求（Preservation）</th><th>调取请求（Production / Disclosure）</th></tr></thead><tbody><tr><td>目的</td><td>阻止数据在轮转中被删除</td><td>把数据交到你手上</td></tr><tr><td>需要的程序</td><td>多数情形下只需平台内部流程或一封合规请求</td><td>通常需要法律程序；跨境时叠加司法协助</td></tr><tr><td>典型响应</td><td>快（数小时到数日）</td><td>慢（周、月至数月）</td></tr><tr><td>有效期</td><td>有，通常需要<strong>定期续期</strong></td><td>无（一次性）</td></tr><tr><td>谁可以发</td><td>组织自身常可发；个人在部分平台也可自行发起</td><td>多数需要适格主体，跨境时需经法定通道</td></tr><tr><td>常见失败</td><td>忘了续期，材料在第 N 天后被释放</td><td>在保存之前就发了调取，回来的是空壳</td></tr></tbody></table>
+<p><strong>四条操作纪律：</strong></p>
+<ol><li><strong>对每一个 B/C 类对象，先发保存、再谈调取。</strong> 保存请求不丢人、成本低、且不构成对任何人的指控；它只是&quot;请别删&quot;。</li><li><strong>保存有期限，必须记进日历。</strong> 把&quot;续期日&quot;写进事件时间线（#116 的时间轴），并指定一个人负责续。</li><li><strong>保存请求里要写清范围与时段，而不是诉求。</strong> &quot;请保存账号 X 自某日至某日的登录、认证与邮件元数据&quot;比&quot;请协助调查&quot;有效得多。</li><li><strong>保存不产生证据能力，但产生&quot;以后能调取&quot;的前提。</strong> 它解决的是第 3 节那条&quot;证据时钟&quot;，不是&quot;程序时钟&quot;。</li></ol>
+<blockquote><p>一句话：<strong>保存是你能控制的唯一一段证据时针，调取不是。</strong></p></blockquote>
+<hr>
+<h2>6. 司法协助的四种通道与各自的量表</h2>
+<p>跨境获取材料在公开讨论中一般被归纳为四条通道。它们的速度、适用条件与&quot;你作为受害组织能推动的力度&quot;各不相同。</p>
+<table><thead><tr><th>通道</th><th>大致适用</th><th>速度量级</th><th>受害组织能做什么</th><th>主要风险</th></tr></thead><tbody><tr><td><strong>司法协助请求</strong>（中央机关转递的正式请求）</td><td>需要当地强制力才能取得的材料</td><td>月级</td><td>提供<strong>精确、完整、可被直接采纳</strong>的请求材料，减少往返</td><td>材料写得含糊导致多次补充，每次补充都是一轮月级等待</td></tr><tr><td><strong>执法直接协作</strong>（对口单位之间的快速通道）</td><td>紧急情形、有明确对口关系</td><td>周级（不保证）</td><td>通过本国执法提出，附完整时间线</td><td>是否进入快速通道不由你决定</td></tr><tr><td><strong>服务商的执法请求入口</strong></td><td>B 类平台账号</td><td>天到周</td><td>如实提交、按格式提交</td><td>与跨境程序叠加时谁来提交、提交给谁</td></tr><tr><td><strong>当事人自愿提供 / 合同路径</strong></td><td>你有权要求的一方（供应商、外包、关联方）</td><td>天级</td><td>直接依合同主张（#167 的协查义务）</td><td>只覆盖合同相对方，不覆盖平台与运营商</td></tr></tbody></table>
+<p>由此得到三条判断规则：</p>
+<ul><li><strong>优先找&quot;不需要强制力&quot;的那条。</strong> 凡是持有者<strong>自愿</strong>就能给的（合同相对方、你自己委托的服务商、员工本人同意的个人账号），都应当先走合同与同意路径，因为它们是以天计的。</li><li><strong>强制力通道的成败，八成取决于你提交的材料质量。</strong> 一份写清&quot;要什么数据、什么时段、为什么与本案相关、以什么格式&quot;的请求，与一份只写&quot;请协助调查一起网络攻击&quot;的请求，往返次数可能差三倍。<strong>这部分的准备工作完全在你手里</strong>，且应当在事件之前就有模板。</li><li><strong>不要在等待中反复补充同一件事。</strong> 每补充一次，程序时钟就重置一次方向；把&quot;可能被问到的问题&quot;一次性答完，是缩短程序时钟的唯一杠杆。</li></ul>
+<hr>
+<h2>7. 等待期不能等的五件事（全部在你自己的边界内）</h2>
+<p>这五件事不依赖任何他法域，且价值随时间下降，因此应当在 72 小时内跑完（与 #166 的处置时间线对齐）。</p>
+<table><thead><tr><th>#</th><th>动作</th><th>为什么必须现在做</th><th>验收信号</th></tr></thead><tbody><tr><td>1</td><td><strong>冻结 A 类日志与时间同步</strong></td><td>你自己的日志也在轮转；且时钟不同步会让后面所有时间线无法拼接</td><td>关键系统日志已转存到独立介质，各源时钟偏差已记录</td></tr><tr><td>2</td><td><strong>固化一条&quot;只增不改&quot;的事件时间线</strong></td><td>事件中新建的表格会被反复改写；先写下的原始记录才可作内部依据</td><td>时间线只追加、带来源字段（谁说的、来自哪个系统）</td></tr><tr><td>3</td><td><strong>把所有材料分成&quot;已确认 / 待确认 / 已排除&quot;三栏</strong></td><td>与 #151 的三栏陈述同构；它让&quot;等材料&quot;期间的所有沟通都不越界</td><td>每一栏都能说出&quot;依据是什么&quot;</td></tr><tr><td>4</td><td><strong>对受影响人给出一个不依赖归因的处置方案</strong></td><td>受影响人不需要知道是谁干的，就需要知道现在该做什么（#150 的处置动作）</td><td>处置方案已发出，且明确&quot;后续可能更新&quot;</td></tr><tr><td>5</td><td><strong>把 C 类的穿透链条画出来并发保存请求</strong></td><td>这是唯一能在程序时钟启动前停住证据的动作（第 5 节）</td><td>每一层都有联系人、请求编号、续期日</td></tr></tbody></table>
+<p>这五件事的共同点：<strong>它们的产出不因&quot;后来发现是误报&quot;而作废。</strong> 一条干净的时间线与一份干净的处置方案，在事件被证伪之后仍然是你下次的基础资产。</p>
+<hr>
+<h2>8. 等待期最容易犯的三个不可逆错误</h2>
+<table><thead><tr><th>错误</th><th>看起来的理由</th><th>实际销毁了什么</th><th>正确替代</th></tr></thead><tbody><tr><td><strong>重启或重装受害设备以&quot;先让它干净&quot;</strong></td><td>业务要恢复、用户要能用</td><td>内存态、未落盘的临时文件、部分开启的文件句柄、崩溃与内核记录（#116 的第一条硬规则）</td><td>先隔离网络、保持开机、做只读快照，再决定（#166）</td></tr><tr><td><strong>清除账号、重置密钥以&quot;减少暴露&quot;</strong></td><td>怕攻击方还在用</td><td>登录历史、会话与令牌的留存、服务商侧的异常行为观测</td><td>先导出记录、再按 harm 排序撤销（#99 的&quot;先记录后撤销&quot;）</td></tr><tr><td><strong>把原始材料导成截图/转录件</strong></td><td>方便传阅、方便给律师</td><td>元数据、时间戳、完整性与可核验性（#117 的&quot;给话/给数据/给载体&quot;阶梯）</td><td>保留原始载体，另做派生件；派生件标注来源</td></tr></tbody></table>
+<p>三者的共同结构是：<strong>&quot;为了马上安全&quot;而做的动作，恰恰消掉了&quot;以后能说清楚&quot;的能力。</strong> 在跨境事件里这一点被放大了，因为你等材料的时间长，中途&quot;做点什么&quot;的冲动也强。</p>
+<hr>
+<h2>9. 证据能力的三个分级</h2>
+<p>跨境材料的用途决定你该付出多少成本。三级之间的差距不是&quot;好一点/差一点&quot;，而是<strong>能不能用</strong>。</p>
+<table><thead><tr><th>级别</th><th>用途</th><th>最低要求</th><th>常见不足</th><th>何时够用</th></tr></thead><tbody><tr><td><strong>L1 内部判断</strong></td><td>决定处置动作、决定是否升级、决定对谁说什么</td><td>你自己能看到的记录 + 说得清来源</td><td>单源、无时间同步、来自二手转述</td><td>事件早期、需要快速决策时</td></tr><tr><td><strong>L2 民事可用</strong></td><td>向对方主张违约金/赔偿、向保险人证明损失（#168）</td><td>可追溯到原始系统、有时间基准、有保管链说明</td><td>只有截图、只有平台导出的汇总报表</td><td>与合同相对方、保险人交涉时</td></tr><tr><td><strong>L3 程序可用</strong></td><td>刑事程序、监管调查、需要被质证</td><td>符合取证规范、原载体完好、保管链完整可陈述</td><td>在 L1 阶段就被&quot;整理&quot;过</td><td>决定追责或进入正式程序时</td></tr></tbody></table>
+<p>关键判断：<strong>L3 的达成几乎不可事后补救。</strong> 如果在事件第一周就把设备重装、把日志导出成 Excel、把账号清干净，那么无论后来花多少钱，都回不到 L3。因此<strong>分级不是&quot;以后再说&quot;，而是&quot;现在决定要不要保留那条路&quot;</strong>：</p>
+<ul><li>如果事件可能在数月后进入刑事或监管程序（本族的高价值目标场景下这是常态），那么第一周就必须按 L3 的保留要求行事，<strong>即使当下只需要 L1</strong>。</li><li>如果事件确认只是钓鱼误报、且无第三方受损，按 L3 保留的成本可以按比例下降——但<strong>&quot;不重启&quot;这一条不应下降</strong>，因为它的成本几乎为零。</li></ul>
+<hr>
+<h2>10. 跨境场景的七个现实约束</h2>
+<p>这些约束无法通过努力消除，只能被提前接受并纳入方案。</p>
+<ol><li><strong>你无法加速他法域的程序。</strong> 任何以&quot;我们能推动对方&quot;为前提的计划都是脆弱的；计划里必须有&quot;材料晚到三个月&quot;的分支。</li><li><strong>你不是程序的当事人。</strong> 你提供材料、陈述损失，但程序的节奏与结果不由你掌握；因此<strong>不要把组织的对外表述建立在&quot;程序结果&quot;上</strong>（#151 的 B2/B3 分级正是为此）。</li><li><strong>不同法域对&quot;数据出境&quot;的限制是双向的。</strong> 你把材料交给境外律师、境外取证方，本身也可能触发你所在法域的限制（#169 的报送与共享边界在此同样适用）。</li><li><strong>服务商的实体分布与法律辖区不总是一致。</strong> 合同主体在 A 国、机房在 B 国、母公司所在 C 国，请求要发给谁是一个需要提前查清的问题。</li><li><strong>运营层证据往往只覆盖&quot;某一段&quot;，而不是&quot;某一个人&quot;。</strong> 运营商日志能证明连接，不能证明访问了什么；指望它回答&quot;他拿了什么&quot;会落空。</li><li><strong>&quot;境外&quot;也包括你自己的境外分支与境外员工。</strong> 同一个组织在两地，内部调取也会撞上数据出境规则。</li><li><strong>时间越长，口径越难统一。</strong> 三个月后不同人给出的数字会不一致；这就是为什么第 7 节的&quot;只增不改的时间线&quot;必须在第一周就建立。</li></ol>
+<hr>
+<h2>11. 加固清单（事前准备，全部可在平静期完成）</h2>
+<table><thead><tr><th>#</th><th>准备项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>指定两名联络律师（本辖区 + 主要数据所在辖区）</td><td>联系方式与响应承诺</td><td>双方都知道彼此的升级路径</td></tr><tr><td>2</td><td>为 B 类平台整理&quot;执法/数据请求入口&quot;清单</td><td>一张表：平台 → 入口 → 保存/调取是否分开 → 主体资格要求</td><td>至少三家主力平台已核实</td></tr><tr><td>3</td><td>画好 C 类穿透链条（注册商/DNS/CDN/托管）</td><td>一张随资产变化的图</td><td>每个域名都能一眼看到四层是谁</td></tr><tr><td>4</td><td>准备&quot;保存请求&quot;模板与&quot;司法协助请求&quot;素材模板</td><td>两份可填空的文档</td><td>含范围、时段、格式、联系人与续期规则</td></tr><tr><td>5</td><td>建立日志转存与时钟同步的常态机制</td><td>独立的日志存储与时钟偏差记录</td><td>任何时候都能给出&quot;某日某时&quot;的一致版本</td></tr><tr><td>6</td><td>在出差流程中前置个人侧取证常识（#109）</td><td>出发前清单里增加&quot;设备与账号如何保留现场&quot;</td><td>出差人知道出事时不要做什么</td></tr><tr><td>7</td><td>把&quot;跨境材料可能晚到&quot;写进沟通口径</td><td>三栏陈述的模板中预留&quot;待境外材料&quot;一栏</td><td>对外沟通不因材料缺口而失信</td></tr><tr><td>8</td><td>每年走一次桌面推演，只演&quot;等待期&quot;</td><td>一份演练记录与改进项</td><td>演练中不出现重启、清除、导出截图这三个动作</td></tr></tbody></table>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;我们有全球律师，所以程序会快。&quot;</strong> 律师能提高材料质量、减少往返，但无法压缩他法域机关的排队；把律师当成加速器会在第一次月级等待时被打回原形。</li><li><strong>&quot;先把设备恢复了，证据以后再说。&quot;</strong> 恢复是不可逆的，而且恢复动作恰好覆盖证据密度最高的那几个区域；这是本族跨境场景里最常见、最贵的一个决定。</li><li><strong>&quot;保存请求没用，反正最后要调取。&quot;</strong> 没有保存就没有可调取的对象；日志按天轮转，程序按月推进，两者一交叉，回去的就是空壳。</li><li><strong>&quot;平台后台能导出，就等于拿到了证据。&quot;</strong> 导出件通常是汇总报表，缺原始事件、缺时间基准、缺保管链说明，且大量平台导出件不含被删改与否的校验信息；它至多支撑 L2 的一部分。</li><li><strong>&quot;跨境取证是法务部门的事。&quot;</strong> 保存请求、日志冻结、时间线固化全部是 IT 与安全团队的活；法务只能处理&quot;调取&quot;那一半。</li><li><strong>&quot;等材料回来再告诉受影响的人。&quot;</strong> 受影响人的处置不需要归因（第 7 节第 4 项）；等三个月再通知，是把一个技术事件升级成信任事件。</li><li><strong>&quot;我们不是当事人，所以不用准备材料。&quot;</strong> 受害组织在多数程序里以&quot;提供材料的一方&quot;出现，材料质量直接决定程序能不能用得上你给的东西。</li><li><strong>&quot;境外就等于更慢，没有别的差别。&quot;</strong> 真正的差别是<strong>不可控</strong>：你不知道何时回、不知道会回来什么格式、不知道会不会被要求补充——因此方案必须是分支式的，而不是线性期待。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#105 云端披露与合法获取边界</td><td>服务商&quot;能不能给&quot;</td><td>本篇回答&quot;什么时候能拿到、拿到前做什么&quot;</td></tr><tr><td>#116 入侵时间轴与证据衰减</td><td>证据在哪一段时间里存在</td><td>本篇把&quot;证据时钟&quot;与&quot;程序时钟&quot;并列，给出两线并行</td></tr><tr><td>#117 理赔方与第三方索取</td><td>合同对方的索取与可替代材料</td><td>本篇的 L1–L3 分级为&quot;给话/给数据/给载体&quot;提供依据</td></tr><tr><td>#151 对外沟通与通报义务</td><td>对谁说、说什么、分几级</td><td>本篇的第 7 节第 3 项为三栏陈述补上&quot;待境外材料&quot;这一栏</td></tr><tr><td>#162 水坑链路服务商协作</td><td>C 类穿透与逐层协作</td><td>本篇把&quot;逐层穿透&quot;提前到事前准备（加固清单第 3 项）</td></tr><tr><td>#166 清除判定与复机验收</td><td>什么时候可以清除、如何复机</td><td>本篇第 8 节说明&quot;清除&quot;必须在取证分级之后</td></tr><tr><td>#167 供应商合同安全条款</td><td>合同相对方的协查义务与时限</td><td>本篇第 6 节把&quot;合同路径&quot;列为最快的通道</td></tr><tr><td>#169 报送与共享边界</td><td>出口侧的材料去向</td><td>本篇管入口，二者构成完整证据流</td></tr><tr><td>#173 客户与合同相对方的责任分配</td><td>业务侧的损失与赔付</td><td>等待期越长，SLA 压力越大，两篇互为约束</td></tr></tbody></table>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>跨境事件的主要成本是什么</td><td>日历：证据以天计、程序以月计</td></tr><tr><td>第一件该做的事</td><td>发保存请求并冻结自己的日志，而不是发调取请求</td></tr><tr><td>等材料期间做什么</td><td>五件不依赖他法域的事（第 7 节），全部在 72 小时内</td></tr><tr><td>什么绝对不能做</td><td>重启/重装、清除账号、把原始材料导成截图</td></tr><tr><td>要保留到哪一级</td><td>先判断最坏情况下需要哪一级（L1/L2/L3），再决定第一周的保留力度</td></tr><tr><td>什么可以提前准备</td><td>律师、平台入口清单、穿透链条图、两份请求模板、日志与时钟机制</td></tr></tbody></table>
+<blockquote><p>把跨境取证当成一条以月计的慢线，把处置与沟通当成一条以小时计的快线——两条线并行，而不是串联。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇是<strong>防御与准备视角</strong>的流程分析，不提供任何规避取证、规避调查或在明知材料将被调取时销毁材料的做法；文中&quot;不要重启/不要清除&quot;的理由是<strong>保留可核验信息</strong>，与妨碍程序无关。</li><li>关于司法协助、数据出境、取证规范的具体要求，各法域差异很大且会变化，<strong>以当地执业律师与主管部门的正式意见为准</strong>；本篇只描述公开讨论中常见的流程形态与时间量级，不构成法律意见。</li><li>文中不涉及任何具体案件的定性，也不对任何机构或个人作出指控；所有对&quot;慢&quot;的描述指向<strong>流程的一般性质</strong>。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（保管链、时间基准与证据完整性的一般方法）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件时间线与证据保留的流程位置）</li><li><a href="https://www.iso.org/standard/44381.html" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据识别、收集、获取与保存指南</a>（跨境场景常引用的取证流程标准）</li><li><a href="https://www.hcch.net/" rel="nofollow noopener" target="_blank">海牙国际私法会议：跨境取证相关公约与说明</a>（司法协助通道的公开框架）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：跨境事件协作与取证实践</a>（欧洲视角的流程与时间讨论）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术行为的通用表述框架）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（设备侧日志与保留能力的事实来源）</li><li>本系列 #105、#116、#117、#151、#162、#166、#167、#169、#173（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a169.html">← 第 169 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a171.html">第 171 篇 →</a></nav></article>
+</main></body></html>

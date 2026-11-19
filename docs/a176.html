@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下长期能力建设与培训有效性 | iOS 安全研究文章库</title>
+<meta name="description" content="培训的产品不是知识而是**在压力下仍能做出的判断**，故能力三层 **知道／做过一次／在压力下做成**，只有第三层算数；有效性四测 行为改变／**时间中位数下降且方差收窄**（方差收窄才说明不依赖个别高手）／覆盖完整（含替补、夜班、外包）／知识留存；四类能力 **识别→判断→执行→协作** 顺序不可颠倒且瓶颈">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a176.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下长期能力建设与培训有效性">
+<meta property="og:description" content="培训的产品不是知识而是**在压力下仍能做出的判断**，故能力三层 **知道／做过一次／在压力下做成**，只有第三层算数；有效性四测 行为改变／**时间中位数下降且方差收窄**（方差收窄才说明不依赖个别高手）／覆盖完整（含替补、夜班、外包）／知识留存；四类能力 **识别→判断→执行→协作** 顺序不可颠倒且瓶颈">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a176.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 176 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的长期能力建设与培训有效性：怎么知道&quot;我们准备好了&quot;不是一句自我安慰</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>本族事件的防御有一个残酷的特点：<strong>它奖励长期、惩罚临时。</strong> 一次定向投递的成败很少取决于事件当天做了什么，而取决于<strong>之前十八个月里积累了什么</strong>：谁看得懂异常、谁有权在凌晨三点做决定、谁能在没有完整信息时给出可用指令。前二十篇把这些动作写得足够细，但它们全部建立在一个未被检验的假设上——<strong>组织具备执行它们的&quot;能力&quot;</strong>。本篇处理这个假设。</li><li>核心命题一：<strong>培训的产品不是知识，是在压力下仍能做出的判断。</strong> 一场培训让人&quot;知道了&quot;某事，与让他在凌晨三点、信息不全、上级在催、业务在喊的情况下<strong>做出正确动作</strong>，是两件完全不同的事。前者用考试衡量，后者只能用<strong>在干扰下的实际表现</strong>衡量。</li><li>核心命题二：<strong>能力有三层，只有第三层算数：知道 / 做过一次 / 在压力下做成。</strong> 多数组织的&quot;能力建设&quot;停在第一层与第二层的交界处：文档写了、讲过、演练过一次，然后归档。而本族事件考验的恰恰是第三层。</li><li>核心命题三：<strong>&quot;有效&quot;必须是可测的，而且是可测的四个方面：行为改变、时间缩短、覆盖完整、知识留存。</strong> 缺其中任何一项，&quot;有效性&quot;就退化为一句主观判断——而主观判断在预算评审时最脆弱（#171）。</li><li>核心命题四：<strong>能力会衰减，而且衰减是静默的。</strong> 人走、流程改、工具换、注意力转移——每一样都会让某项能力在无人察觉的情况下失效。因此能力建设不是&quot;完成一个项目&quot;，而是<strong>维护一组有到期日的资产</strong>（#161 的指标寿命是同一结构的另一个例子）。</li><li>核心命题五：<strong>外包提供的是产能，不是能力。</strong> 你可以购买取证、购买监控、购买律师，但你买不到&quot;在事件第一小时做出正确取舍&quot;这件事——它只能由组织内部的人完成，因为只有他们知道这台设备上跑着什么、这个决定会伤到谁（#172 的取舍、#157 的名单）。</li><li>一句正向结论：<strong>把&quot;我们准备好了&quot;改写成一个可执行的检验</strong>：谁在什么情况下会做什么、多久能做到、上一次真的做成是什么时候。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#165 处理的是<strong>桌面推演</strong>：一次演练怎么设计、怎么演、怎么记录、怎么转化成改进项。那是一次<strong>事件</strong>。</p>
+<p>本篇处理的是<strong>长期</strong>：能力如何被建立、如何被度量、如何被发现已经失效。演练只是本篇列举的<strong>三种转化机制之一</strong>，其余两种（复盘与工具嵌入）恰恰是更常被忽略的。</p>
+<p>#104 处理<strong>季度巡检与例外台账</strong>——那是&quot;看得见的动作&quot;；本篇处理&quot;做动作的人&quot;，以及这个人<strong>在压力下是否还能做</strong>。</p>
+<p>#171 处理<strong>决策授权</strong>；本篇处理<strong>被授权的人是否具备执行能力</strong>。一个走了授权的流程，落到一个没做过第三次演练的人手里，仍然会在当天卡住。</p>
+<p>#166 处理<strong>清除判定与复机验收</strong>（技术的验收标准）；本篇提供<strong>组织侧的验收标准</strong>（第 10 节的八条），两者共同构成&quot;我们的处置是否真的可以执行&quot;的完整答案。</p>
+<hr>
+<h2>3. 培训为什么经常无效：三个结构性原因</h2>
+<p>失效很少是因为&quot;员工不认真&quot;。它通常是设计问题。</p>
+<table><thead><tr><th>原因</th><th>机制</th><th>表现</th><th>纠正方向</th></tr></thead><tbody><tr><td><strong>教的是知识，测的是记忆</strong></td><td>内容正确但无法转化为动作</td><td>考试通过率很高，事件中仍然做错</td><td>以&quot;动作&quot;为最小教学单位，以&quot;在干扰下完成&quot;为考核</td></tr><tr><td><strong>场景与真实不匹配</strong></td><td>训练环境干净、信息完整、无人催促</td><td>演练中从容、真实中僵硬</td><td>加入时间压力、信息缺失与冲突指令（#165 的设计要点）</td></tr><tr><td><strong>学完即归档</strong></td><td>没有再次使用的机会</td><td>六个月后回到零</td><td>把知识嵌入工具与流程（第 7 节），而不是留在课件里</td></tr></tbody></table>
+<p>一个反直觉的推论：<strong>把培训做得更&quot;好懂&quot;，并不会提高第三层能力。</strong> 易懂降低的是入门门槛，而第三层能力的瓶颈是<strong>在压力下的检索与判断</strong>——这只能靠<strong>重复暴露于压力</strong>获得，不能靠讲得更清楚获得。</p>
+<hr>
+<h2>4. 有效性的四个可测方面</h2>
+<table><thead><tr><th>方面</th><th>怎么测</th><th>基线</th><th>目标形态</th><th>常见伪指标</th></tr></thead><tbody><tr><td><strong>行为改变</strong></td><td>观察关键动作是否在真实场景中出现（如&quot;发现异常先隔离还是先重启&quot;）</td><td>事件前统计</td><td>正确动作占比上升</td><td>培训满意度</td></tr><tr><td><strong>时间缩短</strong></td><td>从&quot;异常可被观察&quot;到&quot;正确动作完成&quot;的时长</td><td>上一季度中位数</td><td>中位数下降且方差收窄</td><td>平均响应时间（会被极端值掩盖）</td></tr><tr><td><strong>覆盖完整</strong></td><td>关键角色是否都在（含替补、含夜班、含外包）</td><td>角色清单</td><td>无&quot;只有一个人会&quot;的环节</td><td>参训人数</td></tr><tr><td><strong>知识留存</strong></td><td>三个月后的随机抽测（不看课件）</td><td>首次得分</td><td>留存率保持在阈值以上</td><td>结课考试分数</td></tr></tbody></table>
+<p><strong>&quot;时间缩短且方差收窄&quot;是最有价值的一项。</strong> 中位数下降说明整体变快；方差收窄说明<strong>不依赖个别高手</strong>——这正是组织能力与个人能力的区别。一个组织如果只有一个人能在 20 分钟内做对，它没有这项能力，它有一个关键人风险。</p>
+<hr>
+<h2>5. 四类能力与各自的验证方式</h2>
+<table><thead><tr><th>能力</th><th>内容</th><th>谁需要</th><th>验证方式</th><th>失效信号</th></tr></thead><tbody><tr><td><strong>识别</strong></td><td>从噪声中看出异常（#149 的可感知异常）</td><td>全员 + 关键角色</td><td>嵌入真实工作流的&quot;盲测&quot;（不预告、不给提示）</td><td>报告量骤降或骤升</td></tr><tr><td><strong>判断</strong></td><td>在信息不全时判断&quot;这是不是需要升级&quot;</td><td>一线与值班</td><td>给不完整信息，要求在时限内表态</td><td>永远&quot;上报等指示&quot;</td></tr><tr><td><strong>执行</strong></td><td>按预授权完成动作（隔离、保存、通知）</td><td>值班与技术</td><td>在干扰下实操（#165）</td><td>首次演练顺利，二次演练卡住</td></tr><tr><td><strong>协作</strong></td><td>跨部门在同一时间线上工作</td><td>各部门接口人</td><td>多方演练（含法务、业务、财务）</td><td>演练中各说各话</td></tr></tbody></table>
+<p><strong>四类能力的顺序不可颠倒。</strong> 识别失效，判断就没有输入；判断失效，执行就没有方向；执行失效，协作就无从发生。多数组织只训练&quot;执行&quot;（因为最好演示），而真正的瓶颈往往在&quot;判断&quot;。</p>
+<hr>
+<h2>6. 值班能力：不是&quot;有人在线&quot;，是&quot;有人能决定&quot;</h2>
+<table><thead><tr><th>层次</th><th>形态</th><th>能做什么</th><th>缺什么</th></tr></thead><tbody><tr><td><strong>有人在</strong></td><td>电话接得通</td><td>记录、转达</td><td>不能做任何决定</td></tr><tr><td><strong>有人会</strong></td><td>能按手册操作</td><td>执行已定义的步骤</td><td>手册未覆盖时停机</td></tr><tr><td><strong>有人能定</strong></td><td>有权在预授权内直接行动（#171 第 5 节）</td><td>隔离、发起保存、启用外部资源</td><td>——</td></tr><tr><td><strong>有人能撑</strong></td><td>在长时间事件中轮换、交接、保持判断质量</td><td>连续多日的高质量决策</td><td>——</td></tr></tbody></table>
+<p>三个常被忽略的条件：</p>
+<ul><li><strong>替补。</strong> 每一个&quot;有人能定&quot;的位置都必须有第二个人在同一时段可被联系到；否则它不是值班，是单点。</li><li><strong>交接。</strong> 长时间事件中最容易出错的时刻是交接班，而不是夜深时；交接必须有<strong>书面的、只追加的</strong>记录（#171 第 7 节）。</li><li><strong>夜间与假期的</strong>同一标准<strong>。</strong> 如果夜间只有&quot;有人会&quot;而没有&quot;有人能定&quot;，那么攻击者只需要挑一个周末。</li></ul>
+<hr>
+<h2>7. 从培训到能力：三种转化机制</h2>
+<table><thead><tr><th>机制</th><th>做什么</th><th>转化什么</th><th>频率</th></tr></thead><tbody><tr><td><strong>演练</strong></td><td>在受控条件下做一次（#165）</td><td>把&quot;知道&quot;转成&quot;做过&quot;</td><td>半年至一年</td></tr><tr><td><strong>复盘</strong></td><td>对真实事件与演练事后追问&quot;为什么&quot;</td><td>把&quot;做过&quot;转成&quot;改过&quot;</td><td>每次事件后</td></tr><tr><td><strong>工具嵌入</strong></td><td>把正确动作变成默认路径（检查表、按钮、模板）</td><td>把&quot;改过&quot;转成&quot;不会再错&quot;</td><td>持续</td></tr></tbody></table>
+<p>三者的关系是一条链：<strong>演练产生素材，复盘产生改进，工具固化改进。</strong> 缺最后一环，前两环的成果会在人员变动中流失——这是本族组织最常见的&quot;能力回流&quot;现象：每一次演练都很好，每一次事件都还是手忙脚乱，因为两次之间没有任何东西被固化下来。</p>
+<p><strong>工具嵌入的具体形态</strong>（它们比培训更有效，因为不依赖记忆）：</p>
+<ul><li>异常提示里直接给出下一步动作，而不是只给结论；</li><li>预授权以&quot;按钮&quot;或&quot;工单模板&quot;的形式存在，而不是以文件形式存在；</li><li>通知模板预填了必填字段，漏填无法提交；</li><li>决策记录的表单强制&quot;已知/未知/决定/批准人&quot;四栏（#171）。</li></ul>
+<hr>
+<h2>8. 能力衰减与再训练的节奏</h2>
+<table><thead><tr><th>衰减源</th><th>机制</th><th>典型时间</th><th>应对</th></tr></thead><tbody><tr><td><strong>遗忘</strong></td><td>未被使用的知识衰退</td><td>3–6 个月</td><td>短周期、低成本的&quot;再接触&quot;（如季度 20 分钟回顾）</td></tr><tr><td><strong>人员流动</strong></td><td>关键人离开</td><td>随时</td><td>每个关键角色至少两人可执行；离职前完成交接演练（#120）</td></tr><tr><td><strong>流程变更</strong></td><td>系统升级、组织调整</td><td>随变更</td><td>变更后 30 天内做一次针对性演练</td></tr><tr><td><strong>工具更替</strong></td><td>新的管控栈或平台（#160）</td><td>随采购</td><td>把&quot;新工具的演练&quot;写进采购验收</td></tr><tr><td><strong>注意力转移</strong></td><td>平静期越长越松懈</td><td>6–12 个月</td><td>用可测指标而非主观感觉判断（第 4 节）</td></tr></tbody></table>
+<p>一条纪律：<strong>每次&quot;变更&quot;都是一次能力重置事件。</strong> 换 MDM、换邮件网关、换值班表、换负责人——任何一项都会让之前建立的能力部分归零，而组织往往在变更三个月后才在事件中发现这一点。</p>
+<hr>
+<h2>9. 外部依赖的幻觉</h2>
+<table><thead><tr><th>你以为买了</th><th>实际得到的</th><th>你仍然必须自己做的</th></tr></thead><tbody><tr><td>外包监控</td><td>告警产能</td><td>判断&quot;这条告警意味着什么&quot;、决定是否升级</td></tr><tr><td>外部取证</td><td>技术能力与材料</td><td>决定取证范围、决定何时清除（#166）</td></tr><tr><td>律师</td><td>法律意见</td><td>决定业务取舍、决定对外表述（#151/#173）</td></tr><tr><td>保险</td><td>赔付可能（#168）</td><td>报案纪律、材料准备、现金流</td></tr><tr><td>托管安全服务</td><td>7×24 的响应</td><td>授权、口径、以及&quot;这家供应商出事时怎么办&quot;</td></tr></tbody></table>
+<p><strong>&quot;能力&quot;与&quot;产能&quot;的区别在于：产能可以被购买并在需要时扩大；能力包含&quot;在信息不全时做取舍&quot;的部分，它必须长在组织内部。</strong></p>
+<p>一个可操作的测试：<strong>假设所有外部供应商明天都无法联系，你的组织还能完成哪几件事？</strong> 能完成的那几件，才是你真正拥有的能力。</p>
+<hr>
+<h2>10. 一项能力的验收标准（八条）</h2>
+<p>对任何一项声称&quot;我们具备&quot;的能力，用这八条检验。</p>
+<table><thead><tr><th>#</th><th>标准</th><th>不合格的表现</th></tr></thead><tbody><tr><td>1</td><td><strong>有名字</strong>：知道谁负责、谁是替补</td><td>&quot;这是大家的事&quot;</td></tr><tr><td>2</td><td><strong>有触发条件</strong>：什么情况下启动</td><td>&quot;看情况&quot;</td></tr><tr><td>3</td><td><strong>有预授权</strong>：不需要临时请示即可启动</td><td>&quot;要先开会&quot;</td></tr><tr><td>4</td><td><strong>有时间预算</strong>：从触发到完成动作的时限</td><td>从未测过</td></tr><tr><td>5</td><td><strong>做过至少两次</strong>：含一次在干扰下</td><td>只演练过一次且很顺利</td></tr><tr><td>6</td><td><strong>有观测</strong>：完成后能证明它按预期发生</td><td>只有&quot;感觉挺顺&quot;</td></tr><tr><td>7</td><td><strong>有失效信号</strong>：什么现象说明它已经退化</td><td>无</td></tr><tr><td>8</td><td><strong>有到期日</strong>：下次复核的时间与负责人</td><td>&quot;以后再说&quot;</td></tr></tbody></table>
+<p>八条中最容易被跳过的是<strong>第 7 条与第 8 条</strong>——而它们正是&quot;能力会静默衰减&quot;的直接对策。</p>
+<hr>
+<h2>11. 六个失败模式</h2>
+<table><thead><tr><th>#</th><th>失败模式</th><th>表现</th><th>根因</th><th>纠正</th></tr></thead><tbody><tr><td>1</td><td><strong>以考代训</strong></td><td>通过率高、实战错</td><td>测的是记忆</td><td>改为在干扰下测动作</td></tr><tr><td>2</td><td><strong>以文档代能力</strong></td><td>&quot;我们有预案&quot;</td><td>文档存在被当作能力存在</td><td>用第 10 节八条验收</td></tr><tr><td>3</td><td><strong>关键人依赖</strong></td><td>只有一个人会</td><td>未做替补要求</td><td>覆盖度指标（第 4 节）</td></tr><tr><td>4</td><td><strong>演练不走心</strong></td><td>每次都顺利、每次事件都乱</td><td>场景太干净</td><td>加入缺失信息与冲突指令</td></tr><tr><td>5</td><td><strong>能力回流</strong></td><td>改进项无固化</td><td>缺工具嵌入（第 7 节）</td><td>把改进写进默认路径</td></tr><tr><td>6</td><td><strong>变更不重置</strong></td><td>换工具后能力归零无人知</td><td>变更流程无演练项</td><td>变更后 30 天内演练</td></tr></tbody></table>
+<hr>
+<h2>12. 加固清单（年度节奏）</h2>
+<table><thead><tr><th>#</th><th>事项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>列出关键角色与替补</td><td>角色清单</td><td>无&quot;只有一个人&quot;的格子</td></tr><tr><td>2</td><td>为每项能力写触发条件与时间预算</td><td>能力卡</td><td>八条验收中至少六条可填</td></tr><tr><td>3</td><td>建立四个可测方面的基线</td><td>指标表</td><td>有上一季度的中位数与方差</td></tr><tr><td>4</td><td>把&quot;识别&quot;做成嵌入工作流的盲测</td><td>测试方案</td><td>不预告、无提示、有回收</td></tr><tr><td>5</td><td>演练加干扰（时间压力、信息缺失、冲突指令）</td><td>演练脚本</td><td>至少有一次出现&quot;卡住&quot;并被记录</td></tr><tr><td>6</td><td>每次事件与演练后 10 个工作日内完成复盘</td><td>复盘记录</td><td>改进项有负责人与到期日</td></tr><tr><td>7</td><td>把改进项嵌入工具或模板</td><td>变更记录</td><td>三个月后仍在使用</td></tr><tr><td>8</td><td>每次变更后 30 天内做针对性演练</td><td>演练记录</td><td>变更清单与演练记录一一对应</td></tr></tbody></table>
+<hr>
+<h2>13. 八条常见误解</h2>
+<ol><li><strong>&quot;培训完成了，能力就有了。&quot;</strong> 培训最多到第二层（做过一次）；能力在第三层。</li><li><strong>&quot;通过率 95%，说明效果很好。&quot;</strong> 测的是记忆，不是压力下的表现。</li><li><strong>&quot;我们有预案，所以准备好了。&quot;</strong> 文档存在不等于能力存在；用第 10 节检验。</li><li><strong>&quot;演练很顺利，说明准备充分。&quot;</strong> 顺利的演练往往意味着场景太干净。</li><li><strong>&quot;关键人很可靠，不需要替补。&quot;</strong> 关键人就是单点；攻击者只需要挑他休假的那周。</li><li><strong>&quot;买了托管服务就不用自己建能力。&quot;</strong> 买的是产能；取舍能力必须长在内部。</li><li><strong>&quot;能力建好就不会退化。&quot;</strong> 衰减是静默的；需要到期日与失效信号。</li><li><strong>&quot;这次事件暴露的问题，下次自然会改。&quot;</strong> 没有工具嵌入，改进会在人员变动中回流。</li></ol>
+<hr>
+<h2>14. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#104 季度巡检与例外台账</td><td>常态治理的记录与节奏</td><td>巡检发现的问题需要能力承载</td></tr><tr><td>#120 人员离场与交接</td><td>关键角色离开时的边界</td><td>本篇的替补要求与交接演练</td></tr><tr><td>#149 可感知异常</td><td>用户能观察到的信号</td><td>&quot;识别&quot;能力的输入来源</td></tr><tr><td>#157 名单治理</td><td>谁被单独保护</td><td>保护动作的执行需要能力</td></tr><tr><td>#160 管控栈可见性与阻断</td><td>工具能看见/阻断什么</td><td>新工具引入即能力重置事件</td></tr><tr><td>#161 指标生命周期</td><td>资产有到期日</td><td>能力维护同构</td></tr><tr><td>#165 桌面推演</td><td>一次演练怎么设计</td><td>本篇把演练列为三种转化机制之一</td></tr><tr><td>#166 清除判定与复机验收</td><td>技术验收标准</td><td>本篇提供组织侧八条验收</td></tr><tr><td>#171 董事会与高管层治理</td><td>授权与预算</td><td>能力建设预算与预授权的批准</td></tr><tr><td>#172 业务连续性与降级运行</td><td>运行形态</td><td>降级方案能否执行取决于能力</td></tr><tr><td>#176 与 #104 的分工</td><td>——</td><td>前者维护&quot;人&quot;，后者维护&quot;记录&quot;</td></tr></tbody></table>
+<hr>
+<h2>15. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>培训有效性的标准是什么</td><td>行为改变、时间缩短、覆盖完整、知识留存</td></tr><tr><td>能力有几层</td><td>三层，只有&quot;压力下做成&quot;算数</td></tr><tr><td>怎么知道能力还在</td><td>有失效信号与到期日；用八条验收</td></tr><tr><td>为什么演练好而实战乱</td><td>场景太干净、改进未固化</td></tr><tr><td>外包能替代吗</td><td>替代产能，不替代取舍能力</td></tr><tr><td>最低限度的节奏</td><td>季度再接触 + 半年演练 + 每次事件复盘 + 每次变更演练</td></tr></tbody></table>
+<blockquote><p>判断一个组织是否准备好，不看它写了多少，看它上一次在干扰下做对是什么时候。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>组织能力建设与培训设计</strong>，不涉及任何针对个人的考核滥用、监控或不当施压；所有指标均指向<strong>系统与流程的有效性</strong>，而非对个人的评价。</li><li>文中对演练与测度的建议为通用实践；具体合规要求（如行业强制的演练频次）<strong>以当地法规与主管要求为准</strong>。</li><li>不涉及任何具体组织的培训项目评价，也不对任何个人能力作出判断。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/50/final" rel="nofollow noopener" target="_blank">NIST SP 800-50：构建信息安全与意识培训项目</a>（培训项目的设计与度量框架）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/84/final" rel="nofollow noopener" target="_blank">NIST SP 800-84：测试、训练与演练指南</a>（演练设计与评价方法）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（复盘与改进的流程位置）</li><li><a href="https://www.iso.org/standard/75106.html" rel="nofollow noopener" target="_blank">ISO 22301：业务连续性管理体系</a>（能力维护与演练的通用要求）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：演练与能力建设公开资源</a>（演练形式与评价的公开材料）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术行为的通用表述框架）</li><li>本系列 #104、#120、#149、#157、#160、#161、#165、#166、#171、#172（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a175.html">← 第 175 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>

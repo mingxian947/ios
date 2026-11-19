@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下监管报送与行业信息共享的边界 | iOS 安全研究文章库</title>
+<meta name="description" content="报送（义务驱动、有法定时限）与共享（自愿驱动、有边界）是**两条独立流水线**，混用会同时违反两边规则；报送最小事实集六项、四个坑（把 #147 的十项表原样附上是最贵的一个）、共享去标识化四级 L0–L3 与纪律句 **共享指标，不共享出处**、**再接合**（三条分别脱敏的记录合并后唯一指向你：时间／人数">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a169.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下监管报送与行业信息共享的边界">
+<meta property="og:description" content="报送（义务驱动、有法定时限）与共享（自愿驱动、有边界）是**两条独立流水线**，混用会同时违反两边规则；报送最小事实集六项、四个坑（把 #147 的十项表原样附上是最贵的一个）、共享去标识化四级 L0–L3 与纪律句 **共享指标，不共享出处**、**再接合**（三条分别脱敏的记录合并后唯一指向你：时间／人数">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a169.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 169 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的监管报送与行业共享：报给谁、报什么、以及共享本身带来的新暴露</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这一篇处理同一个事实的两种去向：<strong>报送</strong>（向主管部门，义务驱动、有法定时限）与<strong>共享</strong>（向同业、CERT、行业组织，自愿驱动、有边界）。前二十篇把&quot;对谁说&quot;写到了 #151（受影响人、外部、监管的沟通义务），但<strong>没有一篇处理报送之后那份材料本身的命运</strong>：它被谁保存、被谁再分发、被谁与什么合并——而这份材料的价值，对攻击方而言不低于 #157 那份名单。</li><li>核心命题一：<strong>报送与共享是两种行为，混用会同时违反两边的规则。</strong> 用共享的宽松去处理报送，会漏掉法定的时限与内容；用报送的名义去共享，会让你把一份本该只给监管方的材料递给同业。二者的共同点是：<strong>都以&quot;事实&quot;为原料</strong>，因此原料的写法决定了后面所有环节。</li><li>核心命题二：<strong>报送材料里最危险的不是技术细节，是身份与关联。</strong> 一份写着&quot;某公司于某日被定向投递，影响某部门三名员工&quot;的报送，对攻击方的价值是：确认命中、确认你已知、确认你的响应阶段（#154 的 S0–S5）。因此报送的最小事实集必须<strong>只回答义务要求的问题</strong>，而不是把 #147 的十项记录表原样附上。</li><li>核心命题三：<strong>共享的价值集中在指标（IOC），风险却在上下文。</strong> 一条域名、一个哈希、一条规则，去标识化后价值仍然完整；而&quot;这条指标来自哪个受害者、何时出现、影响了哪些账户&quot;——这三句话才是让指标变得可用的部分，也是让接收方（乃至泄露后的任何一方）能反向定位你的部分。<strong>共享指标，不共享出处</strong>，是本篇给出的第一条纪律。</li><li>核心命题四：<strong>去标识化不是一次操作，是一条链条。</strong> 单条记录去标识不等于合并后不可识别（#128 的&quot;数据跟着索引走&quot;在共享场景的复现）：三条分别脱敏的记录，合并起来往往重新指向唯一一家机构。因此共享前必须问的是&quot;<strong>这批材料合并后能不能唯一指向我们</strong>&quot;，而不是&quot;这条里有没有写名字&quot;。</li><li>一句正向结论：<strong>把报送与共享当成两个独立的产品来做</strong>：报送求&quot;符合义务且不超出&quot;，共享求&quot;可用且不可回溯&quot;。二者的共同底座是你已经写好的三栏陈述（#151 的已知/推断/未知），因为它同时满足&quot;不漏报&quot;与&quot;不夸大&quot;。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#151 处理的是<strong>沟通的方向与内容</strong>：对内、对受影响的人、对外（含监管）三向，B1/B2/B3 三级触发，W1 可行动通知 / W2 事实说明 / W3 归因陈述三类不得混写，十二个通知字段与八个治理字段。<strong>那一篇解决&quot;说什么&quot;，本篇解决&quot;送出去之后&quot;。</strong></p>
+<p>#149 处理的是<strong>你被告知的窗口</strong>，其中第 10 节&quot;组织侧告知回流六要素&quot;已经指出：员工收到的提示是观测数据。本篇把它推一步——<strong>你报送出去的材料也是别人的观测数据</strong>，而它会在很长一段时间里被存档、被比对、被引用。</p>
+<p>#161 处理指标的生命周期，#162 处理服务商协作，#157 处理名单保密。本篇与这三篇构成&quot;情报的出口侧&quot;：<strong>你手里的东西一旦离开，就同时变成别人的资产与你的负债。</strong></p>
+<hr>
+<h2>3. 两条独立的流水线</h2>
+<table><thead><tr><th>维度</th><th>报送（义务侧）</th><th>共享（自愿侧）</th></tr></thead><tbody><tr><td>驱动</td><td>法定义务、合同义务、监管要求</td><td>互惠、行业惯例、自我保护</td></tr><tr><td>时限</td><td>由规则决定，通常自&quot;知悉&quot;起算，分初步与最终</td><td>由你决定，可以是事后数周</td></tr><tr><td>内容</td><td>必须覆盖义务要求的字段；<strong>不要求的不必给</strong></td><td>由你裁剪，以&quot;可用&quot;为标准</td></tr><tr><td>接收方</td><td>确定的机构与人</td><td>一个群体，成员会变化</td></tr><tr><td>主要风险</td><td>迟报、漏报、超范围提供</td><td>二次暴露、再接合、被再分发</td></tr><tr><td>谁签</td><td>有授权的人（见 #171 的签字链）</td><td>安全负责人 + 法务共同确认</td></tr></tbody></table>
+<p><strong>把它们做成一张流程图的人，通常会在事件当天犯同一个错误</strong>：把给监管的那份材料转给同业群，因为&quot;反正已经写好了&quot;。</p>
+<hr>
+<h2>4. 报送材料的最小事实集（六项）</h2>
+<ol><li><strong>时间线</strong>：知悉时间、发现方式、当前阶段（用 #154 的 S0–S5 表述比用&quot;正在调查&quot;更有信息量，也更安全）；</li><li><strong>影响对象类别</strong>：不写姓名，写&quot;某业务线的员工账户&quot;这种类别；</li><li><strong>涉及的系统类别</strong>：自建、SaaS、托管——这三类的责任人不同（#167、#159）；</li><li><strong>已知手法的类别</strong>：只写类别与阶段，不写细节（细节属于取证材料，不属于报送）；</li><li><strong>已采取的动作</strong>：隔离、凭据轮换、通知、监控加强——只写完成态，不写计划；</li><li><strong>下一次更新的时间与联系人</strong>。</li></ol>
+<p><strong>这六项之外的任何内容，都要能回答&quot;义务是否要求&quot;。</strong> 不能回答的，就不要放进去——不是隐瞒，而是<strong>范围纪律</strong>：#151 的&quot;已知/推断/未知&quot;三栏在这里的作用，是让你在不超范围的前提下不漏项。</p>
+<hr>
+<h2>5. 报送的四个坑</h2>
+<table><thead><tr><th>坑</th><th>表现</th><th>后果</th></tr></thead><tbody><tr><td><strong>把&quot;不确定&quot;写成&quot;没有&quot;</strong></td><td>为了报送材料的完整性，把尚未查清的部分写成&quot;未发现异常&quot;</td><td>一旦后续证实相反，你面对的是&quot;前后不一致&quot;，而 #154 已证明<strong>&quot;未发现&quot;本身就是信息量很低的结论</strong></td></tr><tr><td><strong>把客户信息当证据打包</strong></td><td>附上原始日志、账户清单、设备标识</td><td>接收方未必需要，而它一旦泄露，你无法主张&quot;这不在我们控制范围内&quot;</td></tr><tr><td><strong>报送与对外口径不一致</strong></td><td>报送写&quot;定向攻击&quot;，对外写&quot;未发现针对性证据&quot;</td><td>三处说法不一致时，最弱的那一份会代表你的全部可信度（#151 的同一条）</td></tr><tr><td><strong>把&quot;已报送&quot;当&quot;已处置&quot;</strong></td><td>报送完成即内部结案</td><td>#166 的结案基线包不会因为报送而缩短，复发判定也不会因此变松</td></tr></tbody></table>
+<hr>
+<h2>6. 共享的去标识化四级</h2>
+<table><thead><tr><th>级别</th><th>做法</th><th>还能回答什么</th><th>残留风险</th></tr></thead><tbody><tr><td><strong>L0 原样</strong></td><td>直接给材料</td><td>全部</td><td>只在有明确互信协议、且接收方受同等约束时可用</td></tr><tr><td><strong>L1 移除直接标识</strong></td><td>去掉名称、域名、IP、账户</td><td>手法、时间窗、阶段</td><td>中等：时间 + 行业 + 规模三项合并常常唯一指向一家</td></tr><tr><td><strong>L2 泛化</strong></td><td>行业、规模、时间都改为区间</td><td>只回答&quot;某类组织在这一时段遭遇了什么&quot;</td><td>低</td></tr><tr><td><strong>L3 只留 TTP</strong></td><td>只给行为模式与检测思路（#148 的 C5 机制级以下）</td><td>几乎只回答&quot;怎么防&quot;</td><td>最低，但价值也最低</td></tr></tbody></table>
+<p><strong>决定用哪一级的不是礼貌，是问题。</strong> 你要向同业问的是&quot;你有没有见过这种投递节奏&quot;，那就只需要 L2；你要问的是&quot;这条域名你是否也见过&quot;，那就是 L1 的指标级共享，且<strong>只给指标不给上下文</strong>。</p>
+<hr>
+<h2>7. 再接合：三条分别脱敏的记录如何重新指向你</h2>
+<p>设 A 记录写&quot;某制造业组织，2026 年 10 月&quot;，B 记录写&quot;受影响约 40 人，涉及财务与法务&quot;，C 记录写&quot;攻击者使用了某类投递路径，在某个星期三&quot;。三条单独看都无法定位；但接收方手里往往还有 #149 提到的那类公开信息（研究机构发布、平台通知、行业通报）：</p>
+<blockquote><p><strong>只有几家企业同时满足&quot;制造业 + 40 人 + 那个星期三有异常&quot;</strong> ——而攻击方同样能拿到这三条。</p></blockquote>
+<p>可执行的三条防线：</p>
+<ol><li><strong>时间泛化</strong>：共享用的时间统一改为月或季度，<strong>内部保留精确时间</strong>；</li><li><strong>人次泛化</strong>：不给精确人数，给区间；</li><li><strong>组合检查</strong>：共享前把这一批材料<strong>当成一个整体</strong>问一次&quot;合并后是否唯一&quot;，而不是逐条检查。</li></ol>
+<p>第 3 条是本篇认为最容易被跳过、而收益最高的一步，它与 #128 的方法论完全一致：<strong>风险不在单条，在合并。</strong></p>
+<hr>
+<h2>8. 互惠的另一面：你也是接收方</h2>
+<p>拿到同业共享的同时，你承担了三项义务，而它们常常不在你的制度里：</p>
+<ul><li><strong>保护义务</strong>：对方按 L1 给你，你不能按 L0 用；材料进入你的系统后，就受你自己的保留与访问控制约束（#157 的&quot;材料即情报&quot;）；</li><li><strong>再分发限制</strong>：多数共享带 TLP 一类的标记（红/琥珀/绿/白），<strong>标记是约束不是注释</strong>；把一条琥珀色材料转进公开群，是最常见的一次性失信；</li><li><strong>溯源义务</strong>：当对方问&quot;这条指标后来确认了吗&quot;，你必须能答——这要求你在 #161 的指标生命周期里，为共享出去的指标单独留一栏。</li></ul>
+<hr>
+<h2>9. 受害者二次暴露：报送与共享材料的保管</h2>
+<p>这类材料有一个反直觉的性质：<strong>它们比事件本身更容易泄露。</strong> 因为它们被存放在沟通工具、共享盘、邮件附件里——正是 #144、#152、#153 反复证明的那一层。</p>
+<p>因此，报送与共享材料要像 #157 的名单一样管理：</p>
+<table><thead><tr><th>控制项</th><th>要求</th></tr></thead><tbody><tr><td>载体</td><td>单一受控位置，不用协作工具频道、不用群聊传文件</td></tr><tr><td>访问</td><td>按人授予，事件结束后 30 天内复核并收缩</td></tr><tr><td>命名</td><td>不写机构名与案件编号到文件名里（文件名会出现在预览、通知与截图里）</td></tr><tr><td>版本</td><td>每次对外发送留版本号与发送记录</td></tr><tr><td>销毁</td><td>按 #166 的留存矩阵处理，销毁留证明</td></tr></tbody></table>
+<hr>
+<h2>10. 六个失败模式</h2>
+<ol><li><strong>一份材料三处用</strong>：报送、同业、客户，用同一份文档，结果各自的要求都不满足。</li><li><strong>把&quot;共享得多&quot;当成&quot;合作得好&quot;</strong>：共享量不是信任的度量，<strong>共享的克制才是</strong>。</li><li><strong>去标识化只看单条</strong>：合并后仍能定位，且定位结果会先出现在研究机构的报告里。</li><li><strong>报送内容由技术写、由公关发</strong>：两个环节各改一遍，最后两边的说法不一致。</li><li><strong>不登记共享清单</strong>：半年后没人知道&quot;我们到底给出去过什么&quot;。</li><li><strong>把报送当结案</strong>：报送是义务的完成，不是风险的结束（#166 的第 7 节：结案是状态不是终点）。</li></ol>
+<hr>
+<h2>11. 加固清单</h2>
+<p><strong>个人与小团队</strong></p>
+<ul><li>若你被要求配合报送或共享，只提供被问到的字段，其余用&quot;未知，可在 X 日内补充&quot;；</li><li>共享指标时只说指标与时间区间，不说来源机构与你自己的处置阶段；</li><li>保留一份&quot;我提供过什么给谁&quot;的记录（一行一条，含日期与版本）。</li></ul>
+<p><strong>组织</strong></p>
+<ul><li>把报送与共享拆成两条流程、两份模板、两个签字人；</li><li>在模板里预置 §4 的六项与 §6 的四个级别，让每次填写不需要临场判断；</li><li>建立<strong>共享台账</strong>：日期、对象、级别、内容摘要、标记、到期复核日；</li><li>每年做一次<strong>再接合检查</strong>：把上一年度对外提供过的材料合并起来，看能否唯一指向本组织；</li><li>把报送材料纳入 §9 的保管控制，与名单同级。</li></ul>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;报送越详细越好&quot;</strong>——详细应留给取证材料，报送只求符合义务。</li><li><strong>&quot;同业共享是免费的帮助&quot;</strong>——它同时是一次不可撤回的信息交付。</li><li><strong>&quot;去掉了公司名就安全了&quot;</strong>——时间、行业、规模三项合并足以定位。</li><li><strong>&quot;指标共享没有风险&quot;</strong>——指标本身低风险，但<strong>&quot;我们见过这条指标&quot;</strong>是高风险事实。</li><li><strong>&quot;标记只是礼貌&quot;</strong>——标记是可追责的分发约束。</li><li><strong>&quot;监管会替我们保密&quot;</strong>——保密义务在你这边同样成立，两者不互相替代。</li><li><strong>&quot;报告写完就完事了&quot;</strong>——报告里的每一句，都会在半年后被重新引用。</li><li><strong>&quot;我们没有什么可共享的&quot;</strong>——多数组织至少有一条&quot;这类投递最近在本行业出现过&quot;的时间信息，而那一条恰恰是最容易被反向利用的。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>关系</th></tr></thead><tbody><tr><td>#151</td><td>本篇沿用其三栏陈述与三类文书的纪律，但处理的是材料的<strong>去向</strong>而不是措辞</td></tr><tr><td>#149</td><td>你报送的材料会成为别人的观测数据；对应地，别人发给你的通知也是你的观测数据</td></tr><tr><td>#154</td><td>用 S0–S5 描述阶段，比&quot;正在调查&quot;更有信息量且更安全</td></tr><tr><td>#157</td><td>材料即情报，保管要求同级</td></tr><tr><td>#161</td><td>共享出去的指标必须在生命周期里单独留痕</td></tr><tr><td>#162</td><td>服务商侧的事实要先进你的材料，才可能被报送</td></tr><tr><td>#166</td><td>报送完成不等于结案；留存与销毁按 #166 的矩阵</td></tr><tr><td>#170</td><td>跨境报送与共享另受所在地规则约束</td></tr><tr><td>#175</td><td>公开叙事是第三种去向，边界更宽而控制更弱</td></tr></tbody></table>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>报送和义务、共享和自愿，是两条流水线，不要让它们共用一份材料</td></tr><tr><td><strong>2</strong></td><td>报送只写义务要求的六项；细节留给取证材料</td></tr><tr><td><strong>3</strong></td><td>共享指标，不共享出处；出处是让指标可用、也让你暴露的部分</td></tr><tr><td><strong>4</strong></td><td>去标识化要按&quot;合并后是否唯一&quot;来验收，而不是逐条检查</td></tr><tr><td><strong>5</strong></td><td>标记（TLP 一类）是约束；再分发是最常见的一次性失信</td></tr><tr><td><strong>6</strong></td><td>报送材料本身比事件更容易泄露，按名单同级保管</td></tr><tr><td><strong>7</strong></td><td>&quot;已报送&quot;不是&quot;已处置&quot;，也不缩短 #166 的结案条件</td></tr><tr><td><strong>8</strong></td><td>三处口径必须一致，不一致时最弱的那一份代表你</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>报送回答&quot;我必须让谁知道&quot;，共享回答&quot;我愿意让谁用来防&quot;。 这两件事共用同一批事实，却要求完全相反的动作：前者要求<strong>不漏</strong>，后者要求<strong>不多</strong>。 把这两件事写在同一张模板上，就是在事件当天用一次忙碌换来一次长期暴露。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的合规流程与信息共享分析，不提供任何下列内容：规避、延迟、遗漏或虚假报送的方法；伪造、删改或不实陈述事故材料；在共享中植入误导信息或误导性指标；对任何具体监管制度、法条或合规义务的解释与适用意见；对任何具体机构、行业组织或共享平台的评价。文中所有关于时限、字段与分级的内容均为通用方法描述，具体的报送义务、内容范围与时限须以适用法律、监管要求与有效合同为准，并应由律师审核；本文不构成法律意见。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：网络安全事件报告与信息共享公开材料</a>（事件报告与共享的一般框架）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：事件报告与协作的行业实践</a>（报送流程与共享边界的公开讨论）</li><li><a href="https://www.first.org/tlp/" rel="nofollow noopener" target="_blank">FIRST：TLP 流量灯协议说明</a>（共享材料的标记与再分发约束）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/150/final" rel="nofollow noopener" target="_blank">NIST SP 800-150：网络威胁信息共享指南</a>（共享的信任、范围与去标识化方法）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（TTP 级共享的通用表述框架）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（事实来源的可核验性）</li><li>本系列 #149、#151、#154、#157、#161、#162、#166、#170、#175（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a168.html">← 第 168 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a170.html">第 170 篇 →</a></nav></article>
+</main></body></html>

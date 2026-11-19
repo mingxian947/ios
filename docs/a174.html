@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下跨案对比方法与统计口径 | iOS 安全研究文章库</title>
+<meta name="description" content="「和之前那起一样」其实是**三层判断**：事件关联／工具链同源／行为体归属，证据不可跨层（本族最贵的一次跳跃是用基础设施重合支持归属结论）；四种相似度（表象、战术、工具链、归属——**表象相似不是弱证据，它不是证据**）、可比性五维（时间／目标／技术／基础设施／后果）与「先分组再求和」、四个统计陷阱（**分母">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a174.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下跨案对比方法与统计口径">
+<meta property="og:description" content="「和之前那起一样」其实是**三层判断**：事件关联／工具链同源／行为体归属，证据不可跨层（本族最贵的一次跳跃是用基础设施重合支持归属结论）；四种相似度（表象、战术、工具链、归属——**表象相似不是弱证据，它不是证据**）、可比性五维（时间／目标／技术／基础设施／后果）与「先分组再求和」、四个统计陷阱（**分母">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a174.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 174 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的跨案对比方法与统计口径：什么可比、什么不可比、以及&quot;同源&quot;到底要证明几层</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>本族讨论里出现频率最高的一句话是&quot;这和之前那起是同一个团伙&quot;。这句话一旦被写进报告、董事会材料或对外声明，就会变成一串后续判断的前提：预算按它分配（#171）、名单按它排序（#157）、防御按它加固（#160）。而<strong>它很少被拆开检验</strong>——因为它听起来像是一个事实，实际上至少是三层独立的判断。本篇处理的就是<strong>把这句判断拆成可以分别验证的部分</strong>，以及由多起案例汇总出结论时<strong>避免统计失真</strong>的方法。</li><li>核心命题一：<strong>&quot;同源&quot;不是一个是/否问题，而是三层问题：事件关联、工具链同源、行为体归属。</strong> 三层的证据门槛依次上升，而报告里最常发生的错误是<strong>用第一层的证据支持第三层的结论</strong>（&quot;两个域名解析到同一个 IP&quot;→&quot;同一个组织所为&quot;）。</li><li>核心命题二：<strong>可比的不是&quot;事件&quot;，是&quot;事件里可测量的量&quot;。</strong> 两起事件可以在目标类型上相似而在技术上毫无关系，也可以技术上高度重合而受害者完全不同。<strong>跨案比较必须先声明比较的是哪一个量</strong>，否则所有结论都建立在&quot;看起来像&quot;上。</li><li>核心命题三：<strong>公开案例库不是事件总体的样本。</strong> 进入案例库的门槛是&quot;被发现、被披露、被记录&quot;——这三道门槛各自筛掉一批，且筛选与后果相关（越严重越可能被披露，越成功越不可能被发现）。因此&quot;在我们统计的 N 起案例中，有 M 起…&quot;这句话，<strong>N 是分子，不是分母</strong>。</li><li>核心命题四：<strong>统计口径的四个陷阱——分母缺失、幸存者偏差、归因漂移、时间窗口</strong>——每一个都足以让一份看起来很严谨的统计得出相反结论。它们无法被&quot;更努力地收集数据&quot;消除，只能被<strong>写在结论旁边</strong>。</li><li>核心命题五：<strong>案例库的价值不在于&quot;归因&quot;，而在于&quot;预测下一次的形态&quot;。</strong> 即使永远无法确定是谁，工具链与投递形态的演化仍然可以被统计：哪一类入口在增多、哪一种绕过在失效、哪一段时间窗口在收窄。<strong>这些结论不需要归因就能指导防御</strong>，而它们恰恰是最少被整理的部分。</li><li>一句正向结论：<strong>把每一句&quot;和之前那起一样&quot;改写成一个可回答的问题</strong>：哪一层一样、依据是什么、如果不是同源这个结论还成立吗。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#78 处理的是<strong>行为体归因方法论</strong>：如何从技术痕迹、基础设施、行动模式推定&quot;是谁&quot;。那一篇的问句是&quot;<strong>是谁</strong>&quot;。</p>
+<p>本篇处理的是<strong>案例之间的可比性与汇总口径</strong>：问句是&quot;<strong>这两起能不能放在一起比、放在一起之后能得出什么</strong>&quot;。归因只是其中一层证据，而多数跨案统计在归因之前就已经错了。</p>
+<p>#90 处理<strong>攻击者起始位置 P0–P5</strong>，#94 处理<strong>暴露画像</strong>——两者提供了&quot;挂到每个案例上的坐标&quot;。本篇提供的是<strong>坐标系的用法</strong>：同一坐标上的两个点是否可比、坐标缺失时如何标注。</p>
+<p>#161 处理<strong>检测指标的生命周期</strong>，#174 与它的关系是：<strong>指标是案例库最重要的一列，但不是唯一一列</strong>；只看指标会导致把&quot;共享同一批域名&quot;误读为&quot;同一批人&quot;。</p>
+<p>#169 处理<strong>共享的去标识化</strong>——共享的是指标与形态，本篇则是&quot;拿到别人的案例之后如何入库与比较&quot;的方法；二者共同构成案例库的输入侧。</p>
+<hr>
+<h2>3. &quot;看起来一样&quot;的四种相似度</h2>
+<p>同样是&quot;像&quot;，背后可以是四种完全不同的关系。</p>
+<table><thead><tr><th>相似度</th><th>含义</th><th>典型证据</th><th>它能支持什么</th><th>它不能支持什么</th></tr></thead><tbody><tr><td><strong>表象相似</strong></td><td>受害者类型、行业、时间接近</td><td>公开报道中的描述</td><td>提示&quot;可能存在同一波行动&quot;</td><td>任何技术与归因结论</td></tr><tr><td><strong>战术相似</strong></td><td>使用同类手法（如定向投递 + 0-click）</td><td>TTP 级描述（#169 的共享层）</td><td>说明&quot;同一类能力在流通&quot;</td><td>说明是同一批人</td></tr><tr><td><strong>工具链同源</strong></td><td>载荷、加载器、基础设施存在可关联的痕迹</td><td>代码复用、域名/证书模式、编译特征</td><td>说明&quot;同一条供应链&quot;</td><td>说明是同一个操作方</td></tr><tr><td><strong>行为体归属</strong></td><td>指向具体的组织或国家背景</td><td>多源独立证据 + 情报交叉</td><td>政策与法律层面的判断</td><td>直接的技术处置</td></tr></tbody></table>
+<p><strong>四层不是四个等级，而是四个不同的对象。</strong> 常见错误有三：</p>
+<ol><li><strong>跨层跳跃。</strong> 用工具链证据支持行为体结论，中间那一层（谁买了这条供应链）没有证据。本族的商业供给生态（#77）意味着<strong>同一条工具链可以卖给多个客户</strong>。</li><li><strong>反向跳跃。</strong> 因为&quot;不是同一个行为体&quot;就否认工具链关联，从而放弃本可共享的检测指标。</li><li><strong>把表象相似当成弱证据。</strong> 表象相似不是&quot;弱证据&quot;，它<strong>不是证据</strong>——它是提出假设的起点，而不是支持结论的依据。</li></ol>
+<hr>
+<h2>4. 可比性的五个维度</h2>
+<p>两起事件要放在同一张表里比较，至少要在五个维度上<strong>分别</strong>声明可比性。</p>
+<table><thead><tr><th>维度</th><th>可比要求</th><th>不可比时的处理</th></tr></thead><tbody><tr><td><strong>时间</strong></td><td>同一时期（如同一季度）</td><td>跨越多年时，工具链与防护基线都已变化，只能比&quot;形态&quot;不能比&quot;成功率&quot;</td></tr><tr><td><strong>目标</strong></td><td>同类受害者（行业/角色/规模）</td><td>不同类型目标的可比性需显式论证；否则分组统计</td></tr><tr><td><strong>技术</strong></td><td>同一入口类别（0-click / 链接 / 应用）</td><td>不同入口的成功率不可直接相加（#90 的 P 级不同）</td></tr><tr><td><strong>基础设施</strong></td><td>是否共享可追溯的元素</td><td>共享域名不等于共享运营方（见第 7 节）</td></tr><tr><td><strong>后果</strong></td><td>同一分级（#91 的 C1–C7）</td><td>不同级别的后果不能求平均；应分别计数</td></tr></tbody></table>
+<p><strong>三个操作规则：</strong></p>
+<ul><li><strong>先分组、再求和。</strong> 本族事件的样本天然稀疏，任何&quot;总体成功率&quot;都必须先按入口类别与目标类型分组；把不同入口的案例合并成一个比率，等于把不同分母强行相加。</li><li><strong>缺失维度要标注，而不是补零。</strong> 案例库中最危险的一列是&quot;未知&quot;被当成&quot;没有&quot;（例：未观察到外传 = 没有外传）。</li><li><strong>每个结论后面写&quot;适用于哪一组&quot;。</strong> &quot;在本组 8 起案例中&quot;与&quot;在本族事件中&quot;是两个完全不同的断言。</li></ul>
+<hr>
+<h2>5. 统计口径的四个陷阱</h2>
+<table><thead><tr><th>陷阱</th><th>机制</th><th>例子</th><th>纠正</th></tr></thead><tbody><tr><td><strong>分母缺失</strong></td><td>只统计&quot;已知的案例&quot;，把分子当总体</td><td>&quot;我们分析了 12 起案例，9 起绕过了锁定模式&quot;</td><td>明确写出&quot;这 12 起是从多少个来源中筛出的、筛选标准是什么&quot;</td></tr><tr><td><strong>幸存者偏差</strong></td><td>成功的攻击不会被记录</td><td>&quot;公开案例中多数在 48 小时内被发现&quot;</td><td>承认该结论只适用于&quot;被发现的那一部分&quot;；不要外推到全部</td></tr><tr><td><strong>归因漂移</strong></td><td>同一事件在不同来源被归到不同行为体，汇总时被重复计数或错分</td><td>一起事件在 A 报告里属于 X，在 B 报告里属于 Y，统计里算了两次</td><td>以&quot;事件&quot;为主键，不以&quot;行为体&quot;为主键；记录多源分歧</td></tr><tr><td><strong>时间窗口</strong></td><td>案例的选择性截取</td><td>&quot;近三个月案件激增&quot;——恰逢披露季</td><td>固定窗口 + 同比；标注披露节奏</td></tr></tbody></table>
+<p>一条元规则：<strong>任何跨案统计的结论，都应当附带&quot;它可能错在哪&quot;。</strong> 这不是谦逊，而是让读者能判断该结论能否用于他们的场景。</p>
+<hr>
+<h2>6. 案例库的字段设计</h2>
+<p>一份可用的案例库不需要大，需要<strong>列对齐</strong>。以下字段覆盖了比较所需的最小集合。</p>
+<table><thead><tr><th>#</th><th>字段</th><th>取值形式</th><th>为什么需要</th></tr></thead><tbody><tr><td>1</td><td>事件 ID</td><td>内部唯一编号（不以行为体为主键）</td><td>避免归因漂移导致重复计数</td></tr><tr><td>2</td><td>时间</td><td>首次可观测 / 首次披露 / 处置完成</td><td>三个时间常不同，混用会扭曲统计</td></tr><tr><td>3</td><td>受害者类别</td><td>行业 + 角色（不给具体名称）</td><td>分组统计的基础</td></tr><tr><td>4</td><td>目标规模</td><td>受影响人数/设备数的量级</td><td>用于加权，而非求平均</td></tr><tr><td>5</td><td>入口类别</td><td>0-click / 链接 / 应用 / 物理（#90）</td><td>不同入口不可直接相加</td></tr><tr><td>6</td><td>投递面</td><td>水坑 / 定向消息 / 应用分发</td><td>与 #162 的链路分类对齐</td></tr><tr><td>7</td><td>利用的技术类别</td><td>按 #81 的缺陷类别</td><td>可比的最小技术单位</td></tr><tr><td>8</td><td>绕过/持久化手法</td><td>按公开分类描述，不写实现</td><td>支持&quot;演化&quot;统计</td></tr><tr><td>9</td><td>基础设施线索</td><td>域名族、证书模式、托管层（脱敏，见 #169）</td><td>支持工具链关联</td></tr><tr><td>10</td><td>加载器/载荷特征</td><td>结构特征、而非哈希清单</td><td>哈希寿命短（#161）</td></tr><tr><td>11</td><td>后果分级</td><td>#91 的 C1–C7</td><td>后果不可平均</td></tr><tr><td>12</td><td>可逆性</td><td>是/否/部分</td><td>与 #101 的&quot;关系结束凭据仍可用&quot;同构</td></tr><tr><td>13</td><td>检测窗口</td><td>从投递到发现的时间</td><td>衡量防御有效性的核心量</td></tr><tr><td>14</td><td>关联证据等级</td><td>表象/战术/工具链/归属（第 3 节）</td><td>每一条关联都标等级</td></tr><tr><td>15</td><td>归因分歧</td><td>多源归属 + 分歧说明</td><td>保留不确定性</td></tr><tr><td>16</td><td>指标</td><td>指标类型 + 有效期（#161）</td><td>唯一可直接用于防御的一列</td></tr><tr><td>17</td><td>信息来源</td><td>公开报告/自建/共享（#169 的 TLP）</td><td>可追溯性与可再分发性</td></tr><tr><td>18</td><td>已知未知</td><td>明确列出未确认项</td><td>防止&quot;未知被当成没有&quot;</td></tr><tr><td>19</td><td>复现条件</td><td>是否可被独立验证</td><td>决定结论强度</td></tr><tr><td>20</td><td>复盘状态</td><td>内部复盘是否完成</td><td>案例库与改进闭环的连接点</td></tr></tbody></table>
+<p>三条设计原则：</p>
+<ul><li><strong>不要以行为体为主键。</strong> 一个事件可能有多个归属主张；一个行为体可能有多次行动。以事件为主键，才能同时容纳&quot;一对多&quot;与&quot;多对一&quot;。</li><li><strong>每一列都要能填&quot;未知&quot;。</strong> 不允许留空，因为留空与&quot;没有&quot;无法区分。</li><li><strong>指标列必须带有效期。</strong> 否则三个月后整张表看起来&quot;什么都对&quot;。</li></ul>
+<hr>
+<h2>7. 同源判定的证据分级</h2>
+<p>把第 3 节落到可操作的判定上，给出三级证据与各自的&quot;能说到什么程度&quot;。</p>
+<table><thead><tr><th>等级</th><th>证据形态</th><th>可支持</th><th>已知的混淆源</th></tr></thead><tbody><tr><td><strong>S1 强</strong></td><td>多类独立证据同时指向同一工具链/同一操作方（代码复用 + 基础设施 + 行为时序 + 第三方交叉）</td><td>&quot;很可能是同一条工具链/同一批操作&quot;</td><td>供应链复用、团队人员流动、外包</td></tr><tr><td><strong>S2 中</strong></td><td>单一类别内的强关联（如罕见的代码特征、独特的加载顺序）</td><td>&quot;可能同源&quot;</td><td>同一套商业工具被多个客户购买（#77）</td></tr><tr><td><strong>S3 弱</strong></td><td>域族重叠、证书模式相似、目标类型相近、时间接近</td><td>只支持&quot;值得进一步核查&quot;</td><td>批量注册、模板化基础设施、同一投递服务</td></tr></tbody></table>
+<p><strong>三条使用纪律：</strong></p>
+<ol><li><strong>S3 不能堆叠成 S1。</strong> 十个弱信号不等于一个强信号；它们往往共享同一个混淆源（例如都来自&quot;同一家投递服务商&quot;，而该服务商服务多个客户）。</li><li><strong>结论的强度不得超过证据等级。</strong> 在报告里，&quot;可能同源（S2）&quot;与&quot;同源（S1）&quot;是两个不同的断言，对预算与决策的影响完全不同（#171）。</li><li><strong>写出反证条件。</strong> 对每个判定，写明&quot;如果发现什么，这个判定就不成立&quot;。这是让判定可被复查的唯一方式。</li></ol>
+<hr>
+<h2>8. 三种&quot;看起来同源其实不同&quot;的情形</h2>
+<table><thead><tr><th>情形</th><th>表现</th><th>为什么容易误判</th><th>正确读法</th></tr></thead><tbody><tr><td><strong>共享供应商</strong></td><td>两起事件的基础设施高度重合</td><td>同一家投递服务/托管商服务多个客户（#162）</td><td>反映的是<strong>供给市场</strong>，不是同一操作方</td></tr><tr><td><strong>工具流转</strong></td><td>载荷结构完全一致</td><td>工具被转卖、被复制、被泄露（#77）</td><td>反映的是<strong>工具生命周期</strong>，不是同一批人</td></tr><tr><td><strong>模仿</strong></td><td>手法与目标高度相似</td><td>后来者借用已知手法降低研发成本</td><td>反映的是<strong>公开情报的扩散</strong>，不是同一来源</td></tr></tbody></table>
+<p>三者的共同特征是：<strong>关联指向的是&quot;共享的东西&quot;，而不是&quot;共同的人&quot;。</strong> 在案例库里，这三类应当有独立的标记，否则它们会在统计中不断被当作&quot;同源证据&quot;，虚高出一个并不存在的&quot;活跃团伙&quot;。</p>
+<hr>
+<h2>9. 从案例库能得出与不能得出的结论</h2>
+<table><thead><tr><th>能得出</th><th>不能得出</th></tr></thead><tbody><tr><td>哪一类入口在增多（按季度、按分组）</td><td>某一行为体的&quot;成功率&quot;（分母不可知）</td></tr><tr><td>哪一类技术手法在失效（检测窗口缩短）</td><td>本族的&quot;总体规模&quot;（公开样本有偏）</td></tr><tr><td>哪一种投递面在集中（与 #162 的链路分类）</td><td>特定组织是否被&quot;点名&quot;（需 S1 证据）</td></tr><tr><td>检测窗口的中位数变化</td><td>行业之间的风险排名（口径不可比）</td></tr><tr><td>指标的有效期在缩短（#161）</td><td>防护措施的有效性（除非有对照组）</td></tr><tr><td>事件间的工具链关联网络</td><td>&quot;下一次一定还会用同一手法&quot;</td></tr></tbody></table>
+<p><strong>最好用的一类结论是&quot;窗口类&quot;</strong>：从投递到发现、从发现到处置、从处置到恢复的中位时间。它们的分母清晰（都是你自己的案例）、口径可控、且直接可行动。</p>
+<hr>
+<h2>10. 与其他分析的关系</h2>
+<table><thead><tr><th>需求</th><th>用哪一篇</th></tr></thead><tbody><tr><td>&quot;是谁干的&quot;</td><td>#78 行为体归因方法论</td></tr><tr><td>&quot;这两起能不能一起比&quot;</td><td>本篇</td></tr><tr><td>&quot;该共享什么指标&quot;</td><td>#169 去标识化 + #161 指标生命周期</td></tr><tr><td>&quot;怎么把结论写进决策&quot;</td><td>#171 的决策留痕与 #157 的名单排序</td></tr><tr><td>&quot;攻击者处在什么位置&quot;</td><td>#90 的 P0–P5 坐标</td></tr></tbody></table>
+<p>一个常见的流程错误是<strong>顺序颠倒</strong>：先做归因、再统计、最后才问&quot;这些案例可比吗&quot;。正确的顺序是<strong>先建口径、再入库、再做归因</strong>——因为归因结论会污染案例库的分类，而分类决定了统计。</p>
+<hr>
+<h2>11. 加固清单（建立自己的案例库）</h2>
+<table><thead><tr><th>#</th><th>事项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>按第 6 节建立 20 字段表</td><td>一张空表</td><td>每一列都能填&quot;未知&quot;</td></tr><tr><td>2</td><td>以&quot;事件&quot;为主键，记录多源归属与分歧</td><td>归属表</td><td>同一事件不重复计数</td></tr><tr><td>3</td><td>为每条关联标注等级（表象/战术/工具链/归属）</td><td>关联列</td><td>报告中的每一句&quot;同源&quot;都能对应一个等级</td></tr><tr><td>4</td><td>固定统计窗口与分组规则</td><td>口径说明文档</td><td>任何人按此文档能复算</td></tr><tr><td>5</td><td>记录&quot;已知未知&quot;</td><td>未知列</td><td>评审时先读这一列</td></tr><tr><td>6</td><td>指标列带有效期并定期复核（#161）</td><td>指标台账</td><td>过期指标自动标记</td></tr><tr><td>7</td><td>每季度检查一次&quot;归因漂移&quot;</td><td>分歧清单</td><td>同一事件的归属变化有记录</td></tr><tr><td>8</td><td>对外引用时附口径与局限</td><td>引用模板</td><td>任何数字都带着它的分母</td></tr></tbody></table>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;基础设施重合就是同一批人。&quot;</strong> 同一家服务商可以服务多个客户；重合首先指向供给市场。</li><li><strong>&quot;载荷一样就是同源。&quot;</strong> 工具会流转、会被转卖、会被复用；同样指向的是工具链。</li><li><strong>&quot;公开案例多了，说明攻击变多了。&quot;</strong> 也可能只是披露变多了；必须固定窗口并看同比。</li><li><strong>&quot;我们的统计覆盖了所有已知案例，所以是全面的。&quot;</strong> &quot;已知&quot;本身就是筛选结果，且筛选与严重程度相关。</li><li><strong>&quot;案例数越多，结论越可靠。&quot;</strong> 若口径不一致，案例越多，错误越被放大。</li><li><strong>&quot;归因不确定，就没有价值。&quot;</strong> 指标与形态的统计不需要归因即可指导防御（第 9 节）。</li><li><strong>&quot;不同来源的结论可以取多数。&quot;</strong> 归因不是投票；分歧本身是最重要的信息，应当被记录而不是被抹平。</li><li><strong>&quot;跨年比较可以看趋势。&quot;</strong> 跨年时工具链、防护基线与披露习惯都变了；跨年只能比较&quot;形态&quot;，不能比较&quot;成功率&quot;。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#77 漏洞供应链与商业采购</td><td>工具为什么会被多个客户使用</td><td>解释&quot;工具链同源 ≠ 同一操作方&quot;</td></tr><tr><td>#78 归因方法论</td><td>如何推定行为体</td><td>本篇把归因作为三层中的最高一层</td></tr><tr><td>#81 缺陷类别分类</td><td>技术分类的最小单位</td><td>案例库第 7 列</td></tr><tr><td>#90 攻击者起始位置</td><td>P0–P5 坐标</td><td>案例库第 5、6 列</td></tr><tr><td>#91 后果分类 C1–C7</td><td>后果分级</td><td>案例库第 11 列，禁止求平均</td></tr><tr><td>#94 暴露画像</td><td>读者画像与自测</td><td>案例库第 3、4 列的目标侧</td></tr><tr><td>#157 名单治理</td><td>谁被单独保护</td><td>统计结论进入名单排序的依据</td></tr><tr><td>#160 管控栈可见性</td><td>能看见什么</td><td>检测窗口（第 13 列）的证据来源</td></tr><tr><td>#161 指标生命周期</td><td>指标的寿命</td><td>案例库第 16 列必须带有效期</td></tr><tr><td>#162 链路服务商协作</td><td>基础设施的层与层</td><td>解释&quot;共享供应商&quot;这一混淆源</td></tr><tr><td>#169 报送与共享</td><td>去标识化与 TLP</td><td>案例库第 17 列的来源约束</td></tr><tr><td>#171 董事会治理</td><td>结论如何进入决策</td><td>结论强度必须与证据等级匹配</td></tr></tbody></table>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>&quot;同源&quot;要证明几层</td><td>三层：事件关联、工具链、行为体；证据不可跨层</td></tr><tr><td>两起事件能比吗</td><td>先声明比的是哪一个量；五个维度分别判可比性</td></tr><tr><td>统计为什么总会偏</td><td>分母缺失、幸存者偏差、归因漂移、时间窗口</td></tr><tr><td>案例库怎么建</td><td>20 列、事件为主键、允许&quot;未知&quot;、关联标等级</td></tr><tr><td>不归因能得出什么</td><td>窗口类、形态类、指标类结论足够指导防御</td></tr><tr><td>怎么让结论可信</td><td>写上口径、附上局限、写明反证条件</td></tr></tbody></table>
+<blockquote><p>把&quot;和之前那起一样&quot;拆成三个问题：哪一层一样、证据够不够、如果不是同源结论还站得住吗。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇是<strong>分析方法</strong>讨论，不对任何具体事件、组织或国家作出归因判断；文中所有&quot;同源&quot;讨论均为方法论层面的举例。</li><li>案例库字段中的基础设施与指标信息应按 #169 的去标识化与 TLP 约束处理；本篇不提供任何可用于扩大攻击面或反溯个人的做法。</li><li>统计方法的建议仅为通用实践，具体研究结论<strong>应结合数据来源与局限自行验证</strong>。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（TTP 级比较的通用框架）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/150/final" rel="nofollow noopener" target="_blank">NIST SP 800-150：网络威胁信息共享指南</a>（共享数据的一致性与可用性要求）</li><li><a href="https://www.first.org/tlp/" rel="nofollow noopener" target="_blank">FIRST：TLP 流量灯协议</a>（共享材料的再分发约束）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：威胁信息与案例公开材料</a>（案例披露与共享的公开实践）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：威胁态势报告的统计方法讨论</a>（口径与偏差的公开讨论）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（技术事实的可核验来源）</li><li>本系列 #77、#78、#81、#90、#91、#94、#157、#160、#161、#162、#169、#171（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a173.html">← 第 173 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a175.html">第 175 篇 →</a></nav></article>
+</main></body></html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下业务连续性与降级运行 | iOS 安全研究文章库</title>
+<meta name="description" content="「停机」不是二元选择而是**六种降级形态**（只读／单通道／人工替代／白名单／脱敏／离线），把问题从「停不停」改写成「降到哪一档」；降级的本质是**换一套信任假设**（身份可信／通道可用／自动化可依赖三条至少推翻一条）、隔离与恢复**分层**（隔离不破坏证据、恢复才写状态，把两层合并是最常见的错误）、恢复排序">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a172.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下业务连续性与降级运行">
+<meta property="og:description" content="「停机」不是二元选择而是**六种降级形态**（只读／单通道／人工替代／白名单／脱敏／离线），把问题从「停不停」改写成「降到哪一档」；降级的本质是**换一套信任假设**（身份可信／通道可用／自动化可依赖三条至少推翻一条）、隔离与恢复**分层**（隔离不破坏证据、恢复才写状态，把两层合并是最常见的错误）、恢复排序">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a172.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 172 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的业务连续性与降级运行：停机取证与不停机交付如何同时成立</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>本族事件里最容易被忽略的一条矛盾是：<strong>取证要求&quot;什么都别动&quot;，业务要求&quot;什么都别停&quot;。</strong> 前二十篇把这两侧分别写透了——#166 写了清除与复机验收、#116 写了证据衰减与&quot;先别重启&quot;、#92 写了可用性与破坏类后果；但<strong>没有一篇处理那个居中决策：当两者冲突时，组织用什么样的运行形态撑过这几周。</strong> 而这个形态一旦选错，代价不是&quot;慢一点&quot;，而是<strong>要么取证被污染，要么业务被停摆</strong>。</li><li>核心命题一：<strong>&quot;停机&quot;不是二元选择，它至少有六种降级形态。</strong> 只读、单通道、人工替代、白名单、脱敏、离线——每一种都保留了一部分能力、放弃了一部分假设。<strong>把问题从&quot;停不停&quot;改写成&quot;降级到哪一档&quot;，是本篇最重要的一个转换</strong>，因为它把一场不可谈判的冲突变成了一次可谈判的取舍。</li><li>核心命题二：<strong>降级运行的本质不是&quot;少一点功能&quot;，而是&quot;换一套信任假设&quot;。</strong> 正常运行时，组织假设&quot;身份可信、通道可用、自动流程可依赖&quot;；降级运行时，这三条至少有一条必须被推翻。<strong>不换假设的降级只是慢速的正常运行</strong>，它既不更安全，也不可持续。</li><li>核心命题三：<strong>恢复顺序不能按业务重要性排。</strong> 直觉上先恢复核心系统，但本族事件的攻击链<strong>正是沿着核心系统铺开的</strong>（#147 的名单、#148 的供给方、#160 的管控栈）：最先恢复核心身份与核心通道，等于最先重建攻击者最熟悉的路径。<strong>正确的排序依据是&quot;独立性与信任度&quot;</strong>：恢复的东西不能依赖尚未恢复的东西，且每一项在恢复前都必须过四道闸门（第 7 节）。</li><li>核心命题四：<strong>降级是有寿命的，而且它的寿命短于调查。</strong> 人工替代在两周内会开始出错，白名单会开始堆积例外，只读会开始被绕过（#142 反面清单的同一条律）。因此降级方案必须<strong>自带退出条件与到期日</strong>，否则它会从应急形态变成新的常态风险。</li><li>核心命题五：<strong>对外的连续性表述必须与内部的实际形态一致。</strong> 声称&quot;服务正常&quot;而实际是人工替代，会把一次技术事件升级为一次诚信事件（#173 的 SLA 口径在此收口）。<strong>说&quot;部分功能受限、恢复时间待定&quot;永远比说&quot;一切正常&quot;更安全</strong>，因为前者可以被更新，后者必须被收回。</li><li>一句正向结论：<strong>先定义&quot;最小可交付&quot;，再定义&quot;最小可取证&quot;，然后找两者的交集</strong>；交集就是你要撑过的那几周。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#92 处理的是<strong>可用性与破坏类后果的分类</strong>：十种失效形态、哪些不可逆、停机与取证孰先。那一篇回答的是&quot;会坏成什么样&quot;。</p>
+<p>本篇回答的是&quot;<strong>坏了之后怎么继续跑</strong>&quot;：运行形态、降级档位、恢复排序、退出条件。前者是损失分类学，后者是运营设计学。</p>
+<p>#166 处理的是<strong>清除与复机的验收标准</strong>：什么条件下可以宣布一台设备&quot;已干净&quot;。那是<strong>单设备</strong>视角；本篇是<strong>业务单元</strong>视角，且关注的是&quot;在设备还没干净之前，业务怎么活&quot;。</p>
+<p>#116 处理<strong>时间轴与证据衰减</strong>，其中&quot;先别重启&quot;的硬规则在业务侧的直接后果就是&quot;那这几台机器上的业务怎么办&quot;——本篇正是对这一问的回答。</p>
+<p>#150 处理<strong>受影响人的处置动作</strong>——个人视角；本篇是组织视角。二者的连接点是：<strong>组织的降级方案必须能翻译成个人能执行的指令</strong>，否则受影响人会用&quot;重启试试&quot;来自行降级。</p>
+<hr>
+<h2>3. 停机的三种形态与各自的真实代价</h2>
+<p>&quot;停机&quot;这个词掩盖了三种完全不同的东西。</p>
+<table><thead><tr><th>形态</th><th>含义</th><th>直接代价</th><th>隐性代价</th><th>何时该选</th></tr></thead><tbody><tr><td><strong>全停</strong></td><td>相关业务整体暂停</td><td>收入、SLA 赔付（#173）</td><td>客户迁移、恢复后信任折价</td><td>攻击路径不可界定、且业务本身可暂停</td></tr><tr><td><strong>部分停</strong></td><td>关闭特定通道/功能/人群</td><td>局部业务受损</td><td>绕过（用户找替代路径）、例外堆积</td><td>攻击面可定位、其余部分独立</td></tr><tr><td><strong>降级运行</strong></td><td>换一套信任假设继续交付</td><td>效率下降、错误率上升</td><td>人工替代的疲劳、长期化风险</td><td>大多数情形；本族事件的常态</td></tr></tbody></table>
+<p>三条判断规则：</p>
+<ol><li><strong>先问&quot;攻击路径能不能被界定&quot;。</strong> 如果不能，全停或大面积降级是唯一诚实的选择；&quot;边查边全速跑&quot;会把事件从一次扩散变成多次扩散。</li><li><strong>再问&quot;业务本身能不能暂停&quot;。</strong> 有些业务（支付清算、医疗、生产控制）不能暂停，那么问题就不是&quot;停不停&quot;，而是&quot;降到哪一档&quot;。</li><li><strong>最后问&quot;谁承担降级的成本&quot;。</strong> 降级的代价不会消失，只会转移——转移给员工（人工替代）、转移给客户（功能受限）、或转移给未来（技术债）。<strong>明确写出它转移给谁</strong>，是治理层的责任（#171）。</li></ol>
+<hr>
+<h2>4. 为什么&quot;停机取证&quot;与&quot;不停机交付&quot;不是对立面</h2>
+<p>直觉上二者对立，实际上它们的交集比想象中大，因为<strong>取证需要的是&quot;状态不被改动&quot;，而不是&quot;业务不运转&quot;</strong>。</p>
+<table><thead><tr><th>取证需要</th><th>业务需要</th><th>交集里的做法</th></tr></thead><tbody><tr><td>内存与进程状态保持</td><td>业务继续响应请求</td><td>保持开机、不重启、只隔离网络出口（#116）</td></tr><tr><td>日志不被覆盖</td><td>业务继续产生日志</td><td>实时转存到独立介质，原系统照常写</td></tr><tr><td>账号与会话可被观察</td><td>用户继续登录</td><td>不重置密码、不注销会话，改为加监控与限制范围</td></tr><tr><td>原始载体完整</td><td>数据仍可读</td><td>只读挂载 / 快照，不做&quot;导出再整理&quot;</td></tr><tr><td>时间线可拼接</td><td>系统时钟继续走</td><td>记录各源时钟偏差，不强行统一</td></tr></tbody></table>
+<p>由此得到一条实践规则：<strong>把&quot;隔离&quot;与&quot;恢复&quot;分层</strong>——</p>
+<ul><li><strong>隔离层</strong>可以立刻做（断网段、撤权限、限制出口），它不破坏证据；</li><li><strong>恢复层</strong>要按第 7 节的闸门逐项放开，它才是会写状态的动作。</li></ul>
+<p><strong>最常见的错误是把两层合并</strong>：为了&quot;赶快恢复&quot;，直接重装重配，于是隔离层与恢复层同时发生，证据与业务一起没了。</p>
+<hr>
+<h2>5. 降级运行的六种形态</h2>
+<table><thead><tr><th>形态</th><th>具体做法</th><th>保留了什么</th><th>放弃了什么假设</th><th>适用与失效信号</th></tr></thead><tbody><tr><td><strong>只读</strong></td><td>系统接受查询、拒绝写入/变更</td><td>可见性、部分交付</td><td>&quot;用户会按流程写入&quot;</td><td>适合台账/审批类；失效信号：用户开始用离线表格并行</td></tr><tr><td><strong>单通道</strong></td><td>只保留一条受控通道（如仅内网、仅白名单终端）</td><td>核心交付</td><td>&quot;多入口都可信&quot;</td><td>适合远程接入类；失效信号：例外申请激增</td></tr><tr><td><strong>人工替代</strong></td><td>关键步骤改由人复核/手工执行</td><td>业务连续性</td><td>&quot;自动化可信&quot;</td><td>适合审批/发布类；失效信号：错误率上升、加班记录陡增</td></tr><tr><td><strong>白名单</strong></td><td>只允许已知的账号/终端/域名</td><td>极高的收敛度</td><td>&quot;长尾用户可自助&quot;</td><td>适合短窗口；失效信号：白名单条目两周内翻倍</td></tr><tr><td><strong>脱敏运行</strong></td><td>用副本/遮蔽数据跑流程，真实数据暂不流转</td><td>流程验证</td><td>&quot;数据必须实时真实&quot;</td><td>适合回归验证；失效信号：有人开始把真实数据&quot;临时&quot;塞进去</td></tr><tr><td><strong>离线运行</strong></td><td>关键动作回到离线/隔离环境</td><td>最高隔离度</td><td>&quot;网络化协作可暂停&quot;</td><td>适合签发/审批类；失效信号：为了效率私接网络</td></tr></tbody></table>
+<p>选择步骤：</p>
+<ol><li><strong>列出不能停的三件事</strong>（通常是&quot;资金出口、对外承诺、人身安全相关&quot;）。这三件事决定你至少需要哪一档。</li><li><strong>对每一件事，问&quot;哪一条信任假设可以被推翻而不影响它&quot;</strong>——这就是你该用的降级档。</li><li><strong>给每一档写两个日期</strong>：<strong>评估日</strong>（何时复核是否还需要）与<strong>到期日</strong>（何时必须升级或退出）。没有日期的降级会变成常态。</li></ol>
+<hr>
+<h2>6. 恢复顺序：按信任度排，不按重要性排</h2>
+<table><thead><tr><th>排序依据</th><th>直觉做法</th><th>后果</th><th>正确做法</th></tr></thead><tbody><tr><td><strong>业务重要性</strong></td><td>先恢复核心系统</td><td>核心身份/核心通道最先暴露给尚未验证的攻击者</td><td>作为<strong>约束</strong>而非排序：核心系统的&quot;恢复包&quot;必须最严格</td></tr><tr><td><strong>依赖关系</strong></td><td>先恢复被依赖的</td><td>方向正确但不完整</td><td>恢复对象必须<strong>不依赖</strong>未恢复对象，形成拓扑序</td></tr><tr><td><strong>信任度</strong></td><td>通常被忽略</td><td>一个&quot;看起来能用&quot;的旧配置把攻击路径带回来</td><td>只有通过第 7 节四道闸门的对象才能恢复</td></tr></tbody></table>
+<p>具体的三条排序规则：</p>
+<ol><li><strong>先恢复&quot;验证能力&quot;，再恢复&quot;业务能力&quot;。</strong> 日志、监控、时钟、配置基线、MDM 的可见性——这些不产生收入，但没有它们，后面每一项恢复都是盲的（#160）。</li><li><strong>先恢复&quot;独立的小系统&quot;，最后恢复&quot;枢纽&quot;。</strong> 身份提供者、单点登录、核心目录是枢纽：它们一旦恢复，所有依赖它们的系统同时&quot;活&quot;了，也就同时暴露了。<strong>枢纽的恢复应当发生在它能被充分观测之后。</strong></li><li><strong>同一批恢复的对象，必须能一起回滚。</strong> 分批恢复时，若第一批与第二批共享同一份未验证的配置，那么&quot;分批&quot;只是形式。</li></ol>
+<hr>
+<h2>7. 恢复的四道闸门</h2>
+<p>每一项恢复（系统、账号、通道、配置）在放开之前应当依次通过四道闸门。</p>
+<table><thead><tr><th>闸门</th><th>问题</th><th>证据</th><th>未通过的典型表现</th></tr></thead><tbody><tr><td><strong>G1 干净</strong></td><td>这条路径上是否还留有已知的未处置对象？</td><td>已处置清单 + 复查记录（#166）</td><td>&quot;应该没有了&quot;</td></tr><tr><td><strong>G2 可验证</strong></td><td>放开后能否证明它在按预期工作？</td><td>观测点、基线、采样验证</td><td>只有&quot;能用&quot;的体感</td></tr><tr><td><strong>G3 可回滚</strong></td><td>如果放开后情况恶化，多久能收回？</td><td>回滚步骤与责任人、时间上限</td><td>回滚方案写在某人脑子里</td></tr><tr><td><strong>G4 可观测</strong></td><td>放开后异常能否被发现、多久能发现？</td><td>检测规则、告警阈值、值守安排</td><td>只能靠用户投诉发现</td></tr></tbody></table>
+<p>四道闸门的价值在于<strong>它们可以被记录</strong>（#171 第 7 节的决策留痕）：每一次放开都对应一条&quot;通过了哪四道闸门、依据是什么&quot;的记录。事后复盘时，这一条记录决定了&quot;当时的恢复是不是草率&quot;能不能被回答。</p>
+<p><strong>G3 是最常被跳过的一道。</strong> 因为&quot;能回滚&quot;听起来像是承认可能失败；而没有回滚的恢复，等于把每一个恢复动作都变成一次不可逆的下注。</p>
+<hr>
+<h2>8. 三个不可逆动作</h2>
+<table><thead><tr><th>动作</th><th>为什么诱人</th><th>不可逆在哪</th><th>替代做法</th></tr></thead><tbody><tr><td><strong>用旧备份整体回滚到事发前</strong></td><td>一键回到&quot;正常&quot;</td><td>回滚会覆盖取证对象，且旧备份往往正含着攻击者的初始落脚点</td><td>只回滚已验证的配置项；数据类恢复走增量并保留原卷（#99 的同一条律）</td></tr><tr><td><strong>直接重装/重建受影响的终端与服务器</strong></td><td>干净、彻底、省事</td><td>内存态、临时文件、本地日志、崩溃记录全部消失</td><td>先做只读快照与必要导出，再重建；重建前完成第 7 节 G1</td></tr><tr><td><strong>一次性重置所有凭据</strong></td><td>一次解决&quot;他还在不在&quot;</td><td>破坏了&quot;会话与令牌&quot;这条最有价值的观测线；且会让所有系统的异常基线同时归零</td><td>先记录后撤销，按危害排序分批（#99）</td></tr></tbody></table>
+<p>三者的共同结构：<strong>它们都是&quot;用一次大动作换取心理上的了结&quot;</strong>。在业务压力下这种冲动极强，因此需要<strong>事前写好的替代路径</strong>，而不是事中的自制力。</p>
+<hr>
+<h2>9. 对客户的表述：连续性口径</h2>
+<table><thead><tr><th>情形</th><th>不该说</th><th>该说</th></tr></thead><tbody><tr><td>部分功能受限</td><td>&quot;服务一切正常&quot;</td><td>&quot;以下功能受限：…；预计评估时间：…；替代路径：…&quot;</td></tr><tr><td>已降级为人工处理</td><td>&quot;系统已恢复&quot;</td><td>&quot;当前由人工流程承接，处理时长约为平常的 N 倍&quot;</td></tr><tr><td>恢复时间未知</td><td>&quot;很快恢复&quot;</td><td>&quot;下一次更新时间为…；届时给出新的评估&quot;</td></tr><tr><td>有 SLA 义务</td><td>沉默</td><td>按合同（#173）主动说明是否触发、如何计算</td></tr></tbody></table>
+<p>三条纪律：</p>
+<ul><li><strong>口径与实际形态一致</strong>（第 1 节核心命题五）。内部的降级档位必须能翻译成对外的能力描述。</li><li><strong>每次更新附&quot;变化了什么&quot;。</strong> 与 #171 第 8 节的上报格式同构：只说变化，不重复渲染。</li><li><strong>不承诺不可控的日期。</strong> 恢复时间取决于闸门通过情况，而闸门取决于调查；给出&quot;下次更新时刻&quot;而不是&quot;恢复时刻&quot;。</li></ul>
+<hr>
+<h2>10. 六个失败模式</h2>
+<table><thead><tr><th>#</th><th>失败模式</th><th>表现</th><th>根因</th><th>纠正</th></tr></thead><tbody><tr><td>1</td><td><strong>降级一档到底</strong></td><td>一次性关掉一半功能，然后再也没打开</td><td>没有评估日与到期日</td><td>每档写两个日期，到期必须明示决定</td></tr><tr><td>2</td><td><strong>恢复靠推动而非闸门</strong></td><td>谁催得急谁的系统先上</td><td>恢复顺序由业务压力决定</td><td>用第 6、7 节替换&quot;谁催&quot;</td></tr><tr><td>3</td><td><strong>白名单腐化</strong></td><td>两周后例外比正常条目还多</td><td>没有退出规则</td><td>进入白名单必须带到期日与责任人</td></tr><tr><td>4</td><td><strong>人工替代疲劳</strong></td><td>第 10 天开始大量出错、跳步</td><td>没有把人工步骤当作需要设计的流程</td><td>限定时长、双人复核、定时轮换</td></tr><tr><td>5</td><td><strong>备份回滚毁证</strong></td><td>回滚后发现&quot;没法说清当时是什么样&quot;</td><td>把回滚当恢复的默认手段</td><td>回滚前先快照，只回滚验证过的项</td></tr><tr><td>6</td><td><strong>口径与形态脱节</strong></td><td>对外说正常，内部在手工跑</td><td>沟通与运营两套人</td><td>单一事实表：档位 → 能力描述 → 对外措辞</td></tr></tbody></table>
+<hr>
+<h2>11. 加固清单（平静期完成）</h2>
+<table><thead><tr><th>#</th><th>事项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>列出&quot;不能停的三件事&quot;</td><td>一页清单</td><td>高管签字确认（#171）</td></tr><tr><td>2</td><td>为每件事定义可用的降级档位</td><td>三件事 × 至多三档</td><td>每档都有&quot;保留什么/放弃什么假设&quot;</td></tr><tr><td>3</td><td>为每一档写评估日与到期日</td><td>日历条目 + 责任人</td><td>到期自动提醒</td></tr><tr><td>4</td><td>定义恢复的四道闸门与证据形式</td><td>一张闸门表</td><td>每次放开都有对应记录模板</td></tr><tr><td>5</td><td>画出枢纽系统清单（身份、目录、单点登录）</td><td>拓扑图</td><td>枢纽的恢复排在可观测之后</td></tr><tr><td>6</td><td>准备&quot;只读/单通道&quot;的技术开关</td><td>可一键执行的配置</td><td>演练中能在 30 分钟内切到该档</td></tr><tr><td>7</td><td>准备对外口径映射表（档位 → 措辞）</td><td>一张表</td><td>与 #173 的 SLA 口径一致</td></tr><tr><td>8</td><td>每年演练一次&quot;降级 → 恢复&quot;</td><td>演练记录</td><td>全程有 G1–G4 记录，且有一次主动回滚演练</td></tr></tbody></table>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;降级就是关掉一些功能。&quot;</strong> 降级是换信任假设；只关功能的降级既不安全也不可持续。</li><li><strong>&quot;恢复越快越好。&quot;</strong> 恢复速度只有在闸门之后才有意义；越过闸门的速度就是在重建攻击路径。</li><li><strong>&quot;核心系统最重要，所以第一个恢复。&quot;</strong> 枢纽系统最先恢复会使所有依赖它的系统同时暴露；应先恢复观测能力。</li><li><strong>&quot;人工替代可以一直撑。&quot;</strong> 人工替代的可靠性在两周内显著下降，且错误往往发生在低关注时段。</li><li><strong>&quot;白名单最安全，越久越好。&quot;</strong> 白名单会腐化；必须带到期日，且定期清空重建。</li><li><strong>&quot;回滚到事发前最保险。&quot;</strong> 它会覆盖取证对象，且旧备份常包含初始落脚点。</li><li><strong>&quot;取证和业务不可能兼顾。&quot;</strong> 隔离与恢复分层之后，大部分情形存在交集（第 4 节）。</li><li><strong>&quot;对客户说'正常'可以稳住情绪。&quot;</strong> 与事实不符的&quot;正常&quot;会在下一次更新时被迫收回，代价高于一次如实的&quot;受限说明&quot;。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#92 可用性与破坏类后果</td><td>会坏成什么样、哪些不可逆</td><td>本篇在&quot;坏&quot;与&quot;修&quot;之间补上运行形态</td></tr><tr><td>#99 同居者与凭据滥用</td><td>先记录后撤销、按危害排序</td><td>本篇第 8 节沿用同一条律处理凭据重置</td></tr><tr><td>#116 时间轴与证据衰减</td><td>证据窗口与&quot;先别重启&quot;</td><td>本篇回答&quot;不重启期间业务怎么办&quot;</td></tr><tr><td>#142 反面清单（清单失效规律）</td><td>清单会被绕过与腐化</td><td>本篇的白名单/只读失效信号即其复现</td></tr><tr><td>#150 受影响人的处置动作</td><td>个人侧该做什么</td><td>本篇要求组织侧给出可翻译成个人指令的降级方案</td></tr><tr><td>#160 管控栈可见性与阻断</td><td>能看见什么、能阻断什么</td><td>本篇要求先恢复&quot;验证能力&quot;再恢复业务</td></tr><tr><td>#166 清除判定与复机验收</td><td>单设备的干净判定</td><td>本篇把该判定作为恢复闸门 G1</td></tr><tr><td>#171 董事会与高管层治理</td><td>谁签字、预算从哪来</td><td>停机的取舍与降级成本转移由该层批准</td></tr><tr><td>#173 客户与合同相对方责任</td><td>SLA 与赔付</td><td>本篇的对外口径必须与该篇的赔付规则一致</td></tr><tr><td>#169 报送与共享边界</td><td>出口通道</td><td>重大业务中断的报送口径由本篇的形态描述支撑</td></tr></tbody></table>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>停机还是不停止</td><td>先问攻击路径能否界定，再问业务能否暂停，最后问降级成本转移给谁</td></tr><tr><td>怎么降级</td><td>六种形态，选&quot;推翻哪条信任假设&quot;的那一档</td></tr><tr><td>恢复按什么排序</td><td>先验证能力、后业务能力；先独立系统、后枢纽</td></tr><tr><td>放开前检查什么</td><td>干净、可验证、可回滚、可观测（G1–G4）</td></tr><tr><td>绝对不能做</td><td>旧备份整体回滚、未快照就重装、一次性重置全部凭据</td></tr><tr><td>对客户怎么说</td><td>说档位与替代路径，说下次更新时刻，不承诺恢复时刻</td></tr></tbody></table>
+<blockquote><p>把&quot;停不停&quot;改写成&quot;降到哪一档&quot;，并在每一档上写下它的到期日。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论的是<strong>组织运行形态的设计</strong>，不涉及任何以&quot;停机&quot;为名掩盖或规避义务的做法；所有建议均指向&quot;保留可核验信息&quot;与&quot;如实对外说明&quot;。</li><li>关于业务连续性的具体标准、SLA 责任与赔付计算，<strong>以合同与当地法律意见为准</strong>（见 #173）；本篇只描述公开讨论中常见的运行形态与取舍逻辑。</li><li>文中不对任何具体组织的事件处置作出评价，也不涉及任何具体行业监管要求。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/34/r1/upd1/final" rel="nofollow noopener" target="_blank">NIST SP 800-34：信息系统应急计划指南</a>（业务影响分析与降级/恢复策略）</li><li><a href="https://www.iso.org/standard/75106.html" rel="nofollow noopener" target="_blank">ISO 22301：业务连续性管理体系</a>（连续性目标与恢复优先级的通用框架）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件中处置与恢复的衔接）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：业务连续性与事件响应资源</a>（事件中运行形态调整的公开材料）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术行为的通用表述框架）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（设备与平台能力的事实来源）</li><li>本系列 #92、#99、#116、#142、#150、#160、#166、#169、#171、#173（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a171.html">← 第 171 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a173.html">第 173 篇 →</a></nav></article>
+</main></body></html>

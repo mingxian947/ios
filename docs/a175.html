@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下公开叙事与第三方披露 | iOS 安全研究文章库</title>
+<meta name="description" content="**沉默不是中性的**，它只把叙事权交给别人；但早说也有代价（口径反复、对手适应更快，见 #161 指标寿命），故本篇把两者放在同一张表上；四类披露主体（媒体／独立研究者／受影响第三方／内部泄露）、叙事权三来源 **时间／证据／一致性**且一致性是乘法项（一次更正抵消前两项）、第三方先披露的四种情形与处置（与">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a175.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下公开叙事与第三方披露">
+<meta property="og:description" content="**沉默不是中性的**，它只把叙事权交给别人；但早说也有代价（口径反复、对手适应更快，见 #161 指标寿命），故本篇把两者放在同一张表上；四类披露主体（媒体／独立研究者／受影响第三方／内部泄露）、叙事权三来源 **时间／证据／一致性**且一致性是乘法项（一次更正抵消前两项）、第三方先披露的四种情形与处置（与">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a175.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 175 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的公开叙事与第三方披露：沉默的代价、发声的代价、以及谁在替你讲故事</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>本族事件的第三条出口是<strong>公开</strong>。前二十篇里 #151 处理&quot;对谁说&quot;的分级，#169 处理向监管的报送与向同业的共享，#175 处理的是最能失控的那一条：<strong>媒体、独立研究者、受影响的第三方、以及不请自来的披露者</strong>。这条通道的特点是——<strong>你没有开关</strong>。你不能决定它是否发生，只能决定它发生时手里有什么。</li><li>核心命题一：<strong>沉默不是中性的，它只是把叙事权交给别人。</strong> 一起有外部可见痕迹的事件（域名、样本、受害者公告、供应链波动）迟早会被注意到；区别只在于<strong>第一次公开的描述里有没有你的可核验事实</strong>。空白不会保持空白，它会被推测填满。</li><li>核心命题二：<strong>但&quot;早说&quot;同样有代价，而且代价形态不同。</strong> 沉默的代价是<strong>叙事失控</strong>；早说的代价是<strong>口径反复</strong>与<strong>对手适应</strong>（#161 的指标寿命：公开越早，对手调整越快）。两者都不是免费的，本篇的任务是把它们放在同一张表上，让取舍可以被陈述。</li><li>核心命题三：<strong>事件中你能控制的不是&quot;是否被报道&quot;，而是&quot;被报道时能引用什么&quot;。</strong> 一份事先准备好的<strong>可引用事实清单</strong>（时间、范围、已采取动作、下次更新时刻）比任何公关策略都有效——因为它让记者、研究者和客户都能引用同一组事实，而不是各自推测。</li><li>核心命题四：<strong>叙事权来自三样东西：时间、证据、一致性。</strong> 先说的人获得时间优势；能出示可核验材料的人获得证据优势；<strong>前后不矛盾的人获得全部优势</strong>——因为一次更正会抵消前两项。因此&quot;少说但每句都算数&quot;几乎总是优于&quot;多说以求占位&quot;。</li><li>核心命题五：<strong>披露会二次伤害受害者。</strong> 受影响人的身份、岗位、行程一旦进入公开报道，就再也收不回来（#157 的名单在公开面的复现）。<strong>在公开材料里对受影响人做最小化处理，是披露纪律中唯一一条不可让步的伦理要求。</strong></li><li>一句正向结论：<strong>在平静期准备一张&quot;可公开的事实清单&quot;，并约定它在什么条件下会被使用</strong>；事件中只做判断题，不做作文题。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#151 处理<strong>沟通的方向与分级</strong>：对内、对受影响人、对外（含监管）三向，B1/B2/B3 三级触发，W1/W2/W3 三类内容不得混写。那一篇的对象是<strong>你已经决定要沟通的人</strong>。</p>
+<p>本篇处理的是<strong>你没有邀请、也无法控制的受众</strong>：媒体、独立研究者、竞争对手的供应链、以及&quot;看到异常就想发一条&quot;的任何人。它们的共同点是——<strong>不遵守你的节奏</strong>。</p>
+<p>#169 处理<strong>报送与共享</strong>：义务驱动与自愿驱动两条管道，去标识化 L0–L3。那是<strong>点对点</strong>；本篇是<strong>广播</strong>，且一旦播出就无法回收。</p>
+<p>#174 处理<strong>跨案对比的口径</strong>——本篇大量依赖它：公开材料里最常被追问的正是&quot;这和之前那起是不是同一个&quot;，而回答这个问题的证据等级（S1/S2/S3）决定了你能否在公开场合使用&quot;同源&quot;这个词。</p>
+<p>#171 处理<strong>董事会层面的口径授权</strong>——本篇的所有对外表述都必须在该授权范围内（预授权第 4 项）。</p>
+<hr>
+<h2>3. 第三方披露的四种主体</h2>
+<table><thead><tr><th>主体</th><th>动机</th><th>通常掌握什么</th><th>对你的主要风险</th></tr></thead><tbody><tr><td><strong>媒体</strong></td><td>报道价值、时效</td><td>二手信息、部分一手线索</td><td>叙事被简化、时间线被压缩</td></tr><tr><td><strong>独立研究者</strong></td><td>技术发现、声誉</td><td>样本、基础设施线索、技术细节</td><td>技术细节公开 → 对手调整（#161）</td></tr><tr><td><strong>受影响的第三方</strong></td><td>自保、免责、转移压力</td><td>其自身侧的证据</td><td>其口径与你不同，且可能互指</td></tr><tr><td><strong>内部或关联方泄露</strong></td><td>举报、不满、失误</td><td>你的内部材料（含 #157 的名单）</td><td>最不可控，且伤害最大</td></tr></tbody></table>
+<p>四者的处置逻辑完全不同：</p>
+<ul><li><strong>媒体</strong>需要的是<strong>可引用的句子</strong>；给它句子，它就不需要推测。</li><li><strong>研究者</strong>需要的是<strong>可验证的技术事实</strong>；与它协作的正确方式是<strong>约定披露节奏</strong>，而不是要求沉默。</li><li><strong>受影响的第三方</strong>需要的是<strong>不被指责</strong>；与它对齐口径的最佳时机是<strong>在它发布之前</strong>（第 6 节）。</li><li><strong>内部泄露</strong>是唯一无法通过沟通解决的，只能靠<strong>事前的最小化原则</strong>：不在不必要的地方放名单（#157 第 7 节）。</li></ul>
+<hr>
+<h2>4. 沉默与发声：把代价放在同一张表上</h2>
+<table><thead><tr><th>维度</th><th>沉默</th><th>早说</th><th>晚说（事件收敛后）</th></tr></thead><tbody><tr><td>叙事控制</td><td>低（别人定义事件）</td><td>中高</td><td>中（细节已流出）</td></tr><tr><td>口径风险</td><td>低</td><td><strong>高</strong>（事实在变）</td><td>低</td></tr><tr><td>对手适应</td><td>慢</td><td><strong>快</strong></td><td>慢</td></tr><tr><td>客户信任</td><td>下降（&quot;为什么不说&quot;）</td><td>视表述质量</td><td>常被视为被动</td></tr><tr><td>法律/合规风险</td><td>可能违反通知义务（#151/#169/#173）</td><td>需严格限定范围</td><td>仍需满足时限</td></tr><tr><td>二次伤害</td><td>由他人披露，更难控制</td><td>可主动做最小化</td><td>部分已发生</td></tr></tbody></table>
+<p>三条判断规则：</p>
+<ol><li><strong>先区分&quot;是否被观察&quot;与&quot;是否被报道&quot;。</strong> 如果外部已经有可见痕迹（域名、样本、受害者侧公告），沉默的收益会迅速趋零。</li><li><strong>再看&quot;事实是否稳定&quot;。</strong> 事实仍在快速变化时，正确做法不是沉默，而是<strong>发布一个明确标注&quot;待更新&quot;的初步说明</strong>——它既占住叙事，又不承诺后续不变。</li><li><strong>最后看&quot;义务&quot;。</strong> 通知义务与报送义务与公关策略无关；它们有各自的时限（#169/#173），不会被&quot;我们还在评估是否公开&quot;所覆盖。</li></ol>
+<hr>
+<h2>5. 叙事权的三个来源</h2>
+<table><thead><tr><th>来源</th><th>如何获得</th><th>如何失去</th><th>可操作准备</th></tr></thead><tbody><tr><td><strong>时间</strong></td><td>比别人更早给出可引用的句子</td><td>迟迟不发声，让别人先定义</td><td>预备&quot;初步说明&quot;模板</td></tr><tr><td><strong>证据</strong></td><td>出示可核验的材料（时间、影响范围、已采取动作）</td><td>说得多而无法证明</td><td>维护一份&quot;可公开的事实清单&quot;（第 8 节）</td></tr><tr><td><strong>一致性</strong></td><td>每次更新都与上次衔接</td><td>一次更正、一次口径反转</td><td>每次更新附&quot;变化了什么&quot;</td></tr></tbody></table>
+<p><strong>一致性的权重最高。</strong> 前两项是加分项，第三项是<strong>乘法项</strong>：一旦出现&quot;上次说没有泄露、这次说泄露了&quot;这类反转，前面所有建立可信度的努力会被一次性归零。这就是为什么#151 要求 W1/W2/W3 三类内容不得混写——<strong>混写的直接后果就是一致性崩塌</strong>。</p>
+<hr>
+<h2>6. 当第三方先于你披露</h2>
+<p>四种情形，四种处置。</p>
+<table><thead><tr><th>情形</th><th>特征</th><th>处置</th><th>禁忌</th></tr></thead><tbody><tr><td><strong>研究者预告</strong></td><td>技术博客/会议演讲预告，且已与你联系</td><td>与其约定披露时间与技术边界；确认它掌握的事实</td><td>要求撤稿、施压、威胁</td></tr><tr><td><strong>研究者直接发布</strong></td><td>未事先联系</td><td>24 小时内发布你的事实说明，明确&quot;已知悉并正在处置&quot;</td><td>逐条反驳技术细节（会引发第二轮）</td></tr><tr><td><strong>媒体抢先报道</strong></td><td>报道基于二手信息，细节有误</td><td>提供可核验事实，要求更正<strong>具体错误</strong>而非整体</td><td>全面否认（会把错误变成对抗）</td></tr><tr><td><strong>第三方受害者公告</strong></td><td>对方先披露且可能指涉你</td><td>立即与其对齐口径，避免互指</td><td>公开指责对方（会把双方都拖入长期争议）</td></tr></tbody></table>
+<p>一条贯穿的原则：<strong>与研究者协作的最优解是&quot;约定节奏&quot;，而不是&quot;阻止发布&quot;。</strong> 研究者通常愿意配合真正在做处置的组织；他们要的是准确，不是独家。相反，施压往往会把一次技术披露升级为一场关于&quot;隐瞒&quot;的报道。</p>
+<hr>
+<h2>7. 与媒体接触的纪律</h2>
+<table><thead><tr><th>纪律</th><th>具体做法</th><th>为什么会犯</th></tr></thead><tbody><tr><td><strong>不&quot;不评论&quot;到底</strong></td><td>至少给出&quot;我们知道、我们在处置、下次更新时刻&quot;</td><td>法务本能地要求沉默</td></tr><tr><td><strong>不猜测</strong></td><td>未知就写未知；不用&quot;可能&quot;&quot;据信&quot;</td><td>想显得掌握全局</td></tr><tr><td><strong>不承诺独家</strong></td><td>独家会让其他媒体从别的渠道找料</td><td>想控制节奏</td></tr><tr><td><strong>不谈判撤稿</strong></td><td>无法执行，且会被记录</td><td>恐慌</td></tr><tr><td><strong>不点评第三方</strong></td><td>不评价其他受害者、研究者或报道</td><td>情绪与竞争</td></tr><tr><td><strong>不提供技术细节</strong></td><td>只给结论与影响，不给可复现的细节（#161）</td><td>想证明&quot;我们很懂&quot;</td></tr></tbody></table>
+<p>三条操作建议：</p>
+<ul><li><strong>所有回复走一个出口。</strong> 与 #171 的预授权第 4 项一致；多人分别表态是最常见的自伤。</li><li><strong>口头之后补书面。</strong> 只写&quot;我们谈了什么&quot;，不写&quot;我们承诺了什么&quot;。</li><li><strong>把&quot;我们不会评论的事&quot;列成清单。</strong> 事件中临时判断&quot;这个能不能说&quot;很容易出错；清单让判断变成查表。</li></ul>
+<hr>
+<h2>8. 公开材料的三个层次与各自的门槛</h2>
+<table><thead><tr><th>层次</th><th>内容</th><th>证据门槛</th><th>例</th></tr></thead><tbody><tr><td><strong>事实层</strong></td><td>时间、范围、已采取动作、下次更新</td><td>内部可核验（L1 即可）</td><td>&quot;X 时至 Y 时部分功能受限&quot;</td></tr><tr><td><strong>解释层</strong></td><td>为什么会发生、影响如何传导</td><td>L2（可追溯、有基准）</td><td>&quot;源于第三方组件的配置缺陷&quot;</td></tr><tr><td><strong>归因层</strong></td><td>谁做的、属于哪一类行动</td><td>S1（#174 第 7 节）</td><td>&quot;与某已公开行动共享工具链特征&quot;</td></tr></tbody></table>
+<p><strong>规则：每一层只使用该层门槛允许的措辞。</strong></p>
+<ul><li>事实层可以每天更新；</li><li>解释层需要证据支撑，且应当标注&quot;初步&quot;；</li><li>归因层<strong>几乎不应由受害组织单独发布</strong>——它需要多源独立证据，且一旦说错，代价由你承担（#78 的归因边界）。</li></ul>
+<p><strong>&quot;可公开的事实清单&quot;就是事实层的固化产物</strong>，建议包含五行：发生了什么（现象）、影响谁（范围，最小化）、何时（起止与发现时刻）、我们在做什么（动作）、下次更新（时刻）。</p>
+<hr>
+<h2>9. 二次伤害：披露如何反过来暴露受害者</h2>
+<p>公开材料会以三种方式伤害受影响人：</p>
+<table><thead><tr><th>方式</th><th>机制</th><th>例子（结构性描述）</th></tr></thead><tbody><tr><td><strong>身份暴露</strong></td><td>报道中出现岗位、行业、地区等可组合特征</td><td>&quot;某国某行业的数名高管&quot;在小范围内可直接定位</td></tr><tr><td><strong>行为暴露</strong></td><td>描述受影响人的操作（点击了什么、访问了什么）</td><td>会让本人的社交与职业关系受损</td></tr><tr><td><strong>关系暴露</strong></td><td>描述受影响人之间的关系（#99、#157 的名单结构）</td><td>一次披露同时暴露&quot;他们之间存在联系&quot;</td></tr></tbody></table>
+<p>三条最小化纪律：</p>
+<ol><li><strong>只给量级，不给个体。</strong> &quot;数名员工&quot;优于&quot;三名高管&quot;；&quot;某部门&quot;优于具体职能。</li><li><strong>去掉可组合的特征。</strong> 时间、地点、岗位、规模四个维度中，任取三个往往足以唯一指向个人（#169 的&quot;再接合&quot;在本篇的复现）。</li><li><strong>发布前做一次&quot;如果我是当事人&quot;的通读。</strong> 这不是流程，是唯一有效的检验。</li></ol>
+<hr>
+<h2>10. 与第三方研究者的协作边界</h2>
+<table><thead><tr><th>可以给</th><th>可以谈</th><th>不应给</th></tr></thead><tbody><tr><td>已确认的时间线与影响范围</td><td>披露的时间点与顺序</td><td>受影响人身份（任何时候）</td></tr><tr><td>脱敏后的基础设施线索（#169 的 L2/L3）</td><td>技术细节的抽象程度</td><td>可复现的利用细节</td></tr><tr><td>你已采取的动作</td><td>联合署名的可能性</td><td>内部调查材料原文</td></tr><tr><td>你的检测结论（带口径）</td><td>相互引用的措辞</td><td>未确认的推测（会被当事实引用）</td></tr></tbody></table>
+<p><strong>协作的目标不是&quot;换取沉默&quot;，而是&quot;换取准确&quot;。</strong> 研究者最怕的是被指为&quot;不实&quot;，因此他们通常愿意核对；而一旦你把协作当成交易，关系就会在下一次事件中消失。</p>
+<hr>
+<h2>11. 六个失败模式</h2>
+<table><thead><tr><th>#</th><th>失败模式</th><th>表现</th><th>后果</th></tr></thead><tbody><tr><td>1</td><td><strong>全面沉默</strong></td><td>只说&quot;不予置评&quot;</td><td>叙事被推测填满，客户先信了推测</td></tr><tr><td>2</td><td><strong>过度承诺</strong></td><td>&quot;已完全控制&quot;&quot;数据未泄露&quot;</td><td>后续必须以更正收场</td></tr><tr><td>3</td><td><strong>多出口表态</strong></td><td>市场部、技术、法务各说一套</td><td>一致性崩塌</td></tr><tr><td>4</td><td><strong>与研究者对抗</strong></td><td>要求撤稿、发律师函</td><td>升级为&quot;隐瞒&quot;叙事</td></tr><tr><td>5</td><td><strong>曝光受害细节</strong></td><td>报道中出现可定位的岗位与时间</td><td>二次伤害，且不可撤回</td></tr><tr><td>6</td><td><strong>归因越级</strong></td><td>在事实层证据上使用归因措辞</td><td>被反驳后整份材料失去可信度</td></tr></tbody></table>
+<hr>
+<h2>12. 加固清单（平静期完成）</h2>
+<table><thead><tr><th>#</th><th>事项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>建立&quot;可公开的事实清单&quot;模板（五行）</td><td>模板文档</td><td>任何人 30 分钟内可填完</td></tr><tr><td>2</td><td>定义三个层次的措辞边界（事实/解释/归因）</td><td>措辞对照表</td><td>与 #151 的 W1/W2/W3 对齐</td></tr><tr><td>3</td><td>指定唯一对外出口与代行规则</td><td>名单</td><td>与 #171 预授权第 4 项一致</td></tr><tr><td>4</td><td>建立研究者联系清单（含既往合作）</td><td>联系方式与偏好</td><td>至少两名可在 24 小时内联系到</td></tr><tr><td>5</td><td>制定受害者信息最小化规则</td><td>一页规则</td><td>发布前检查表含三项最小化检验</td></tr><tr><td>6</td><td>准备&quot;不评论清单&quot;</td><td>一页清单</td><td>事件中判断变为查表</td></tr><tr><td>7</td><td>把&quot;变化了什么&quot;写进每次更新模板</td><td>模板</td><td>每次更新均有此节</td></tr><tr><td>8</td><td>每年做一次&quot;报道模拟&quot;演练</td><td>演练记录</td><td>演练中出现多出口或过度承诺即为不合格</td></tr></tbody></table>
+<hr>
+<h2>13. 八条常见误解</h2>
+<ol><li><strong>&quot;不回应就等于没有发生。&quot;</strong> 外部痕迹不会因为你不说而消失；空白只会被别人填满。</li><li><strong>&quot;越早说越好。&quot;</strong> 早说的价值取决于事实是否稳定；过早的定性会在更新时反噬。</li><li><strong>&quot;公关部可以独立决定口径。&quot;</strong> 口径必须与 #171 的授权、#173 的合同、#169 的报送一致；否则三条线互相打脸。</li><li><strong>&quot;给媒体更多细节，报道会更准确。&quot;</strong> 更多细节往往被压缩成更有冲击力的句子；准确来自<strong>可核验</strong>，不来自数量。</li><li><strong>&quot;要求研究者撤稿是保护客户。&quot;</strong> 通常适得其反，且会留下书面记录。</li><li><strong>&quot;归因是技术团队能决定的。&quot;</strong> 归因需要多源独立证据（S1），且应由具备该证据的主体发布。</li><li><strong>&quot;不点名受影响人就没有二次伤害。&quot;</strong> 可组合特征（时间+岗位+规模）足以定位。</li><li><strong>&quot;一次更正没什么。&quot;</strong> 更正会抵消时间与证据两项优势；一致性是最难重建的资产。</li></ol>
+<hr>
+<h2>14. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#78 归因方法论</td><td>行为体归因的证据要求</td><td>本篇第 8 节把归因列为最高门槛层</td></tr><tr><td>#151 对外沟通与通报义务</td><td>分级、三类内容不得混写</td><td>本篇把 W1/W2/W3 映射到公开材料的三个层次</td></tr><tr><td>#157 名单治理</td><td>名单的保密与可见范围</td><td>内部泄露是名单最大的外部风险</td></tr><tr><td>#161 指标生命周期</td><td>公开越早、对手调整越快</td><td>解释&quot;早说&quot;的代价</td></tr><tr><td>#169 报送与共享边界</td><td>去标识化 L0–L3、TLP</td><td>第三方共享材料同样受此约束</td></tr><tr><td>#171 董事会与高管层治理</td><td>口径授权</td><td>本篇所有表述必须在该授权内</td></tr><tr><td>#173 对客户与合同相对方的责任</td><td>合同通知与措辞</td><td>客户口径与公开口径必须一致</td></tr><tr><td>#174 跨案对比方法与统计口径</td><td>S1/S2/S3 证据分级</td><td>决定&quot;同源&quot;能否在公开场合使用</td></tr></tbody></table>
+<hr>
+<h2>15. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>沉默能保护我们吗</td><td>不能；它只把叙事权交给别人</td></tr><tr><td>什么时候说</td><td>事实一旦外部可见，就发布标注&quot;待更新&quot;的初步说明</td></tr><tr><td>说什么</td><td>只讲事实层（现象/范围/时间/动作/下次更新）</td></tr><tr><td>不说什么</td><td>不猜测、不承诺、不点评第三方、不给可复现细节</td></tr><tr><td>第三方先说了怎么办</td><td>24 小时内给可核验事实；与研究者约定节奏而非要求撤稿</td></tr><tr><td>怎么不伤害受害者</td><td>只给量级、去掉可组合特征、发布前通读</td></tr></tbody></table>
+<blockquote><p>沉默与发声都有代价，唯一定价方式是：你手里有没有一份可引用、可核验、前后一致的事实清单。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>公开沟通的方法与边界</strong>，不提供任何操纵舆论、误导公众或规避披露义务的做法；所有建议均指向&quot;如实、最小化、可核验&quot;。</li><li>关于信息披露义务、媒体报道的法律边界与研究者披露的规范，<strong>以当地法律与行业惯例为准</strong>；本篇不构成法律意见。</li><li>文中不涉及任何具体媒体、研究机构或事件的评价，也不对任何主体作出指控。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：事件沟通与公开报告资源</a>（事件公开沟通的公开指引）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：威胁披露与协作相关材料</a>（协调披露的欧洲实践讨论）</li><li><a href="https://www.first.org/standards/frameworks/cvss-supplement" rel="nofollow noopener" target="_blank">FIRST：漏洞协调披露指南</a>（协调披露的时间与边界）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（沟通在事件流程中的位置）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术描述的通用框架）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（技术事实的可核验来源）</li><li>本系列 #78、#151、#157、#161、#169、#171、#173、#174（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a174.html">← 第 174 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a176.html">第 176 篇 →</a></nav></article>
+</main></body></html>

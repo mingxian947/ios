@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下网络保险的承保问询与报案纪律 | iOS 安全研究文章库</title>
+<meta name="description" content="保险**转换现金后果而不降低事件概率**，而投保单上的每个回答日后都是**可被引用的陈述**；必须读懂五个数字（总限额／分项限额／免赔或 SIR／共保比例／追溯日）、报案从**知悉**起算且 **72 小时是实务线**、0–24 小时／24–72 小时／72 小时之后三段时间各自的动作、面板律师与取证方带来的">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a168.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下网络保险的承保问询与报案纪律">
+<meta property="og:description" content="保险**转换现金后果而不降低事件概率**，而投保单上的每个回答日后都是**可被引用的陈述**；必须读懂五个数字（总限额／分项限额／免赔或 SIR／共保比例／追溯日）、报案从**知悉**起算且 **72 小时是实务线**、0–24 小时／24–72 小时／72 小时之后三段时间各自的动作、面板律师与取证方带来的">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a168.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 168 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的网络保险：承保问询单在问什么、报案晚了会怎样、以及拒赔是怎么发生的</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这一篇处理案例线里唯一一个<strong>用钱而不是用技术来承接后果</strong>的环节。前二十篇把事件当天的技术动作写遍了，但本族事件有一个绕不开的性质：<strong>它的成本结构是&quot;高方差、低频率、单次很大&quot;</strong>（#156 的 C0–C6 阶梯、#148 的供给者价格、#162 的服务商协查费用），而这种形状恰好是保险设计出来要承接的。可惜多数组织买的是<strong>一份没读过的保单</strong>，然后在最需要它的那一周才发现三个词：<strong>子限额、陈述义务、报案时限</strong>。</li><li>核心命题一：<strong>保险不是把风险买走，是把一部分现金后果换成一份可预期的支出。</strong> 它不降低被攻击的概率，也不缩短调查时间（那是 #165 演练与 #148 供给者能做的事），它只改变&quot;谁付钱&quot;。因此<strong>不能把它当作安全措施的替代品</strong>，只能把它当作安全措施失败之后的一层财务垫。</li><li>核心命题二：<strong>承保问询单（application）上的每一句话都是可被事后引用的陈述。</strong> 保险的逻辑是&quot;你描述的风险，我按这个价格承保&quot;；如果事件之后证明你的描述<strong>重大不实</strong>，对方可以据此拒赔或解除合同——而&quot;重大不实&quot;的门槛比多数人想象的松，因为问询单里常常是<strong>是非题</strong>（&quot;是否启用多因素认证&quot;&quot;是否对全部端点部署 EDR&quot;），而&quot;部分启用&quot;在是非题上没有中间答案。</li><li>核心命题三：<strong>报案时限从&quot;知悉&quot;起算，不从&quot;确认&quot;起算。</strong> 这与 #149 的告知窗口、#167 的通知条款是同一条时间律，但后果方向相反：对供应商你必须<strong>催它早点说</strong>，对保险公司你必须<strong>自己早点说</strong>。多数保单要求&quot;知悉后尽快&quot;，而实务中的分水岭是 <strong>72 小时</strong>：超过这个窗口，前期响应费用（取证、法务、通知）常常会被单独审视。</li><li>核心命题四：<strong>保单的&quot;子限额&quot;决定了它能不能覆盖本族事件的真实开支。</strong> 一份保额五千万的保单，可能在&quot;事件响应与取证费用&quot;这一栏只有两百万的子限额，而本族一次代价最高的调查（#156 的 C5 机制级）恰好落在这个栏目里。<strong>保额不等于保额可用。</strong></li><li>一句正向结论：<strong>保险的正确用法是&quot;提前把三条线写进流程&quot;</strong>——承保前把问询单填成可核验的事实清单，事故当天在 72 小时内报案并把处置权交给保单指定的路径，事后让索赔材料与 #147 的记录表、#158 的清除凭据、#166 的结案包对齐。这三条都不需要买更多保额，只需要读一遍保单。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>案例线此前只在保险方向上出现过一次：#117 写的是<strong>保险公司作为索取方</strong>——理赔调查、核赔问询、S3 索取档位、以及&quot;不给会怎样&quot;。那一篇的立场是<strong>被保险公司调查的人</strong>。</p>
+<p>本篇的立场相反：<strong>你是投保人，你要在被攻击的那一周用上这份保单。</strong> 两者共享同一批事实（同一个案件、同一份记录），但动作完全不同：#117 回答&quot;它来问我要什么、我给到哪一档&quot;，本篇回答&quot;我该怎么填它的问询单、我什么时候告诉它、我说什么才能拿到钱&quot;。</p>
+<p>同时要把它与 #167 分清：<strong>#167 管的是&quot;供应商欠你什么&quot;，本篇管的是&quot;保险人替你垫什么&quot;。</strong> 两者在理赔时会发生交叉——保单通常要求你向责任方追偿（代位），而供应商合同的责任上限决定了这条路能不能走通（#167 第 8 节）。<strong>合同与保单是一套，不是两个部门各自的事。</strong></p>
+<hr>
+<h2>3. 承保前：问询单上真正被评估的四件事</h2>
+<table><thead><tr><th>被评估的维度</th><th>问询单的典型问法</th><th>它真正在判断什么</th></tr></thead><tbody><tr><td><strong>边界</strong></td><td>你有多少台设备、多少云资产、多少个暴露在公网的入口</td><td>它要估的是<strong>受攻击面的大小</strong>，而这个数字一旦报小，事故后会被当作低估风险</td></tr><tr><td><strong>控制</strong></td><td>MFA 覆盖率、补丁周期、端点检测、备份与恢复演练</td><td>它要估的是<strong>同一次攻击在你这里会走多远</strong>（本质是 #154 的 S0–S5 概率分布）</td></tr><tr><td><strong>响应能力</strong></td><td>有没有事件响应流程、上次演练时间、有没有外部顾问</td><td>它要估的是<strong>你能否把损失截断</strong>，而不是&quot;你有没有安全团队&quot;</td></tr><tr><td><strong>历史</strong></td><td>过去三年是否发生过事件、是否被索赔过</td><td>它要估的是<strong>复发概率</strong>，而这一栏的留空几乎总会被追问</td></tr></tbody></table>
+<p>填表的三条纪律：</p>
+<ol><li><strong>只写可核验的事实，写清楚时间与依据。</strong> &quot;我们已于 2026 年 9 月完成全部员工账户的 MFA 强制&quot;优于&quot;我们全面启用了多因素认证&quot;——前者可核验，后者在覆盖不全时是重大不实的典型句式。</li><li><strong>&quot;部分&quot;必须写&quot;部分多少&quot;。</strong> 是非题里没有中间答案，但你可以自己加一栏说明：<code>是（覆盖 92% 的账户；剩余 8% 为服务账号，计划 Q2 完成）</code>。这不削弱你的议价，反而降低拒赔风险。</li><li><strong>不确定就写&quot;未知，正在评估&quot;，并给出补交日期。</strong> 未知不是重大不实，&quot;确定地说了一个错的数&quot;才是。</li></ol>
+<p>一句话：<strong>问询单不是在考试，它是在定义&quot;事件发生时你声称自己有什么&quot;。</strong> 事件之后，保险公司的第一件事就是把这份声称与实际配置对照（#158 的验收逻辑在这里被反向使用）。</p>
+<hr>
+<h2>4. 保单要读的五个数字，而不是一个</h2>
+<table><thead><tr><th>数字</th><th>它在保单里叫什么</th><th>对本族事件的意义</th></tr></thead><tbody><tr><td><strong>总保额</strong></td><td>limit of liability</td><td>决定极端情况下的上限，但<strong>几乎不会被用满</strong></td></tr><tr><td><strong>子限额</strong></td><td>sub-limit</td><td>决定<strong>具体某一类费用</strong>的上限；事件响应、取证、通知、法律、监管罚款常被分列</td></tr><tr><td><strong>免赔额 / 自留额</strong></td><td>deductible / SIR</td><td>每一次事件你自己先付的那一段；多次并发时（#163）<strong>每一件都要再付一次</strong></td></tr><tr><td><strong>共同保险</strong></td><td>co-insurance</td><td>按比例分摊，20% 的共同保险在千万级的案子上就是两百万的差额</td></tr><tr><td><strong>等待期 / 追溯日</strong></td><td>waiting period / retroactive date</td><td>追溯日之前发生的入侵不保；本族事件的隐蔽期常常以月计</td></tr></tbody></table>
+<p><strong>第五条最容易被忽略，而它对本族最致命。</strong> 定向攻击的驻留期经常长于保单追溯日与发现日之间的间隔（#116 的四窗口、#154 的失败与驻留），因此&quot;这次入侵其实三个月前就开始了&quot;可能直接触发追溯日排除。<strong>承保时把追溯日往前推，比把总保额抬高更有价值。</strong></p>
+<hr>
+<h2>5. 事故当天：报案的三段动作与一条禁令</h2>
+<p><strong>0–24 小时</strong></p>
+<ul><li>报案（电话 + 书面），只报<strong>已知事实</strong>：何时知悉、如何知悉、涉及哪套系统、当前动作；</li><li>索取并记录<strong>理赔编号与对接人</strong>；</li><li><strong>不要在第一条消息里给结论</strong>——&quot;我们被入侵了&quot;与&quot;我们发现一起未授权访问，正在确认范围&quot;在后续理赔中是两种不同的起点。</li></ul>
+<p><strong>24–72 小时</strong></p>
+<ul><li>向保险公司提交<strong>初步损失估计的三个区间</strong>（不是精确值）：响应费用、业务中断、可能的第三方索赔；</li><li>确认保单是否要求使用<strong>指定供应商</strong>（见 §6）；</li><li>把 #147 的十项记录表的副本同步给对方——这是证明&quot;损失与响应都是真实发生&quot;的最省事材料。</li></ul>
+<p><strong>72 小时之后</strong></p>
+<ul><li>每个重大节点（范围确认、清除、结案）发一次简短更新，<strong>保持时间线连续</strong>；</li><li>所有对外支出（取证、律师、通知、信用监控）在发生前确认是否在保，<strong>不要先花钱再问</strong>。</li></ul>
+<p><strong>一条禁令：不要在未通知保险人的情况下，与攻击方或在公开渠道作出任何</strong>承诺、付款或和解表示**。多数保单对&quot;自愿付款&quot;与&quot;未经同意的和解&quot;有明文排除，而勒索类与威胁类情形里，这一步一次就能让整份保单失效。</p>
+<hr>
+<h2>6. 指定供应商：谁来取证，可能不由你决定</h2>
+<p>保单常附带 <code>panel</code>：一份律师与取证公司的名单，使用名单内的机构，相关费用才全额在保。这带来两个后果：</p>
+<ol><li><strong>你的 #148 采购决定被保单约束。</strong> 你挑的检测方可能不在名单内，而名单内的机构能力差异很大（#148 的 A 类供给者与 B 类之间存在明确的能力差）。</li><li><strong>利益冲突。</strong> 如果同一家机构同时承担&quot;取证&quot;与&quot;抗辩支持&quot;，它给出的结论会不自觉地服务于抗辩方向；#156 已经指出，<strong>结论上限必须在委托时写死</strong>，而这在本族事件里是最容易被牺牲的一步。</li></ol>
+<p>可执行的做法：<strong>承保时争取&quot;名单内可提名&quot;条款</strong>，即允许你在名单内指定，或在使用名单外机构时按比例报销；并在事故前就与名单内的两三家做过一次小规模接触（不是演练，只是确认对接人与响应时间）。</p>
+<hr>
+<h2>7. 保单不覆盖什么：四条固定排除与三个常见误解</h2>
+<p><strong>固定排除</strong></p>
+<ul><li><strong>已知事件</strong>（prior known acts）：投保前已经发生或已被知悉的事件；</li><li><strong>自愿付款与未同意的和解</strong>；</li><li><strong>未采取保单要求的基本措施</strong>所造成的损失（这是问询单与理赔之间的桥：你在单上说自己有 MFA，事实上没有，损失可能被按比例扣减）；</li><li><strong>罚款与罚金</strong>（在多数法域不可保，是否可补充取决于当地法律）。</li></ul>
+<p><strong>常见误解</strong></p>
+<ul><li>误以为&quot;业务中断&quot;覆盖声誉损失——绝大多数不覆盖；</li><li>误以为&quot;通知费用&quot;包含在总保额里——它通常是一个独立的小子限额；</li><li>误以为&quot;先自己处理完再报&quot;能省事——它几乎总是削弱可保性。</li></ul>
+<hr>
+<h2>8. 与供应商合同（#167）的交汇：追偿与责任上限</h2>
+<p>保单通常保留<strong>代位求偿权</strong>：它赔给你之后，有权向责任方追偿。这直接取决于 #167 的谈判结果：</p>
+<table><thead><tr><th>#167 的条款</th><th>对理赔的影响</th></tr></thead><tbody><tr><td>责任上限 = 12 个月服务费</td><td>代位能拿回的钱很少，保险人会更仔细地审查你自己的过失比例</td></tr><tr><td>通知与协查义务明确</td><td>你能更快证明损失范围，索赔金额更完整</td></tr><tr><td>供应商被攻破不属不可抗力</td><td>追偿路径成立</td></tr><tr><td>留证义务写死</td><td>追偿所需的时间线在你手里，而不是在对方的轮转日志里</td></tr></tbody></table>
+<p><strong>这张表的本意是：合同谈判的收益，会以保费与赔付率的形式回到财务上。</strong> 很多组织把这两件事放在两个部门，结果两边都以为自己已经做了。</p>
+<hr>
+<h2>9. 六类失败模式</h2>
+<ol><li><strong>把保单当安全措施</strong>：保费降不下来、问询单越填越松、事件照样发生。</li><li><strong>问询单由不掌握实际配置的人填</strong>：销售或采购按&quot;应该有的样子&quot;填，事件后被逐条对照。</li><li><strong>报案晚于 72 小时</strong>：不是因为拖延，而是因为&quot;想先搞清楚&quot;。搞清楚是取证的事，报案是时限的事，两者不冲突。</li><li><strong>先花钱后报案</strong>：一大笔取证费用被判定为&quot;未经同意的支出&quot;。</li><li><strong>忽略子限额</strong>：总保额看起来足够，恰好用上的那一栏只有零头。</li><li><strong>追溯日与驻留期打架</strong>：事件真实起点早于追溯日，整案被排除。</li></ol>
+<hr>
+<h2>10. 加固清单</h2>
+<p><strong>任何组织</strong></p>
+<ul><li>找到保单原文，把 §4 的五个数字抄成一页纸，放进事件手册的第一页；</li><li>确认报案通道（电话、邮箱、值班时间）与理赔编号的申请方式，写进 #147 的记录表；</li><li>核对追溯日与已知驻留期（#116）的关系，必要时在续保时调整；</li><li>让填过问询单的人与做实际配置的人<strong>当面核对一遍</strong>。</li></ul>
+<p><strong>有外部顾问的组织</strong></p>
+<ul><li>确认名单内机构、确认提名条款、确认取证与抗辩之间是否存在利益冲突；</li><li>在委托书里写死 #156 的&quot;结论上限&quot;，并在委托前告知保险人。</li></ul>
+<p><strong>个人与小团队</strong></p>
+<ul><li>本族事件对个人的主要财务后果通常是<strong>账户与身份被盗用后的追偿成本</strong>（#129、#132），多数个人保单（家庭财产、信用卡附加保障）对&quot;网络欺诈&quot;有独立子限额，值得单独查一次；</li><li>保留一份你自己的记录（#147 十项表 + #159 的存续项清单），这是任何索赔的起点。</li></ul>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;买了保险就可以少做防护&quot;</strong>——问询单的每一句都会在理赔时被反过来使用。</li><li><strong>&quot;保额足够大就行&quot;</strong>——子限额决定你能不能拿到钱。</li><li><strong>&quot;保险公司会告诉我怎么做&quot;</strong>——它提供路径与名单，不提供判断；判断仍然是你的（或你的顾问的）。</li><li><strong>&quot;先自己处理，省得被插手&quot;</strong>——未经同意的支出与和解，是最常见的拒赔理由之一。</li><li><strong>&quot;时间线可以事后整理&quot;</strong>——保单要的是&quot;知悉时&quot;的事实，事后整理出的时间线无法替代它。</li><li><strong>&quot;供应商赔不赔与保险无关&quot;</strong>——代位求偿把它变成了同一个问题（见 §8）。</li><li><strong>&quot;罚款也能保&quot;</strong>——多数法域不可保，别把它算进预算。</li><li><strong>&quot;保单是财务的事&quot;</strong>——它同时是事件响应流程的一部分，而流程的输入是 #147 的记录与 #158 的凭据。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>关系</th></tr></thead><tbody><tr><td>#117</td><td>立场相反：那里你是被调查方，这里你是投保方；共享同一批案件事实</td></tr><tr><td>#147</td><td>十项记录表是报案与索赔的第一手材料</td></tr><tr><td>#148</td><td>保单指定名单会约束你的供给者选择，能力差异见该篇</td></tr><tr><td>#149</td><td>&quot;知悉&quot;与&quot;确认&quot;的区分在这里直接决定报案时限</td></tr><tr><td>#156</td><td>结论上限必须在委托时写死，保险不改变这一点</td></tr><tr><td>#158</td><td>清除凭据既是技术要求，也是索赔材料</td></tr><tr><td>#163</td><td>并发事件会让免赔额按事件次数重复扣除</td></tr><tr><td>#166</td><td>结案包是索赔与续保的共同输入</td></tr><tr><td>#167</td><td>责任上限决定代位求偿能否成立</td></tr></tbody></table>
+<hr>
+<h2>13. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>保险改变的是&quot;谁付钱&quot;，不改变&quot;会不会发生&quot;，也不缩短调查时间</td></tr><tr><td><strong>2</strong></td><td>问询单是可被事后引用的陈述；写可核验的事实、&quot;部分&quot;写比例、不确定写未知</td></tr><tr><td><strong>3</strong></td><td>报案从&quot;知悉&quot;起算，72 小时是实务分水岭；搞清楚与报案不冲突</td></tr><tr><td><strong>4</strong></td><td>读五个数字：总保额、子限额、免赔额、共同保险、追溯日；第五条对本族最致命</td></tr><tr><td><strong>5</strong></td><td>未经同意的付款与和解，一次就能让整份保单失效</td></tr><tr><td><strong>6</strong></td><td>指定名单可能限制你选谁取证，而取证与抗辩同源会产生利益冲突</td></tr><tr><td><strong>7</strong></td><td>罚款多数不可保；业务中断几乎不覆盖声誉</td></tr><tr><td><strong>8</strong></td><td>合同谈判（#167）的收益会通过追偿回到赔付率上，两者必须一起做</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>保单不是一张&quot;出事有人赔&quot;的纸，它是一份<strong>提前写好的分工</strong>：你负责在知悉后 72 小时内说清楚，它负责在子限额内垫付，供应商负责（在合同允许的范围内）被追偿。 这三件事任何一件没写清，保险就只会在事后提供一份写得很工整的拒赔说明。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的风险转移与流程治理分析，不提供任何下列内容：虚构、夸大或隐瞒承保问询事实以获取承保或赔付的做法；骗保、伪造损失材料、销毁或篡改事故记录的方法；就任何具体保险产品、条款优劣或承保结论的评价与推荐；对任何司法辖区保险法或监管规则的解释与适用意见。文中的时限、栏目与结构为通用方法描述，实际保单以合同文本为准；具体承保、理赔与追偿事宜须由具备相应资质的保险经纪与律师审核，本文不构成保险或法律意见。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：计算机安全事件处理指南</a>（事件响应流程与记录要求，索赔材料的上游）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：网络安全风险管理与事件报告公开材料</a>（事件报告与组织韧性的一般框架）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：网络风险与保险相关公开研究</a>（风险量化与风险转移的行业讨论）</li><li><a href="https://www.genevaassociation.org/" rel="nofollow noopener" target="_blank">The Geneva Association：网络风险与保险研究</a>（network risk 的承保结构与累计风险问题）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（本族攻击的行为分类，用于说明损失形态）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（账户与设备侧的可核验配置项，承保问询的事实来源）</li><li>本系列 #117、#147、#148、#149、#156、#158、#163、#166、#167（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a167.html">← 第 167 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a169.html">第 169 篇 →</a></nav></article>
+</main></body></html>

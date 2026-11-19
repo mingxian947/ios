@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下供应商与外包合同中的安全条款 | iOS 安全研究文章库</title>
+<meta name="description" content="采购真正买到的是**出事之后对方的行为**，而事件中最贵的四件事全是「等」（人等数据等权限等回音）；三项不可让义务 **通知／留证／协查**、事件定义 D1 疑似…D3 确认且**一律从「知悉」起算、不得以法务审查为由延迟**、时限量表 4 小时初报／72 小时报告／5 个工作日滚动更新、日志留存 90–18">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a167.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下供应商与外包合同中的安全条款">
+<meta property="og:description" content="采购真正买到的是**出事之后对方的行为**，而事件中最贵的四件事全是「等」（人等数据等权限等回音）；三项不可让义务 **通知／留证／协查**、事件定义 D1 疑似…D3 确认且**一律从「知悉」起算、不得以法务审查为由延迟**、时限量表 4 小时初报／72 小时报告／5 个工作日滚动更新、日志留存 90–18">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a167.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 167 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的供应商与外包合同：出事之后你要等的每一件事，其实在签约那天就定好了</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>这一篇处理案例线里唯一一个<strong>在事件发生之前就已经写完、之后就再也改不动</strong>的东西：合同。前二十篇把事件当天的动作写遍了——#147 记录、#148 选检查方、#149 等通知、#150 选宿主、#159 处置服务端、#162 找托管与 CDN、#164 访谈、#166 随访——但<strong>这些动作大部分不是由你的团队完成的，而是由别人在你的时间表上完成的</strong>。别人会不会做、多快做、做完给你什么，在你按下签名的那一刻就已经确定。</li><li>核心命题一：<strong>你买的不只是服务，还有「出事之后的行为」。</strong> 服务的功能写在 SLA 里，出事之后的行为写在事件条款里，而绝大多数合同的事件条款只有一句话：<code>发生安全事件时，供应商应及时通知客户</code>。&quot;及时&quot;没有时限，&quot;安全事件&quot;没有定义，&quot;通知&quot;没有内容要求。这一句话在事件当天等于零。</li><li>核心命题二：<strong>事件中最贵的四件事是等</strong>——等人（谁对接）、等数据（日志还在不在）、等权限（谁能给我导出）、等回音（工单排队）。这四件事<strong>全部是合同问题，不是技术问题</strong>，而它们加起来往往超过技术调查本身的成本（对照 #156 的成本阶梯：C2 时间锚定这一级的费用，一半花在等别人）。</li><li>核心命题三：<strong>要写进去的不是&quot;安全承诺&quot;，是三个可执行的义务</strong>：<strong>通知</strong>（多久、报什么、后续怎么更新）、<strong>留证</strong>（保留什么、保留多久、不得自行清理）、<strong>协查</strong>（谁对接、走什么通道、几个工作日内回音）。这三条之外的所有条款，在事件当天都只能提供情绪价值。</li><li>核心命题四：<strong>合同里默认的写法对你最不利，而且不是恶意。</strong> 供应商的标准事件条款是给自己写的：只报&quot;已确认的数据泄露&quot;，从&quot;确认&quot;起算，报给自己法务初筛后认为能说的部分。你要的是从&quot;知悉&quot;起算、报&quot;与你的实例相关的任何未授权访问&quot;、并且<strong>跳过初筛直接给你原始事实</strong>。这三处差别不是措辞偏好，而是#149 那张&quot;含与不含&quot;字段表的合同版本。</li><li>一句正向结论：<strong>把事件当作一种可采购的能力来签，而不是当作一种可期待的善意来指望。</strong> 一份写明&quot;四小时内告知、三十天内不得清理日志、一个工作日回音、附日志清单样例&quot;的合同，价值高于任何一份&quot;已通过某某认证&quot;的资质复印件。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>案例线的组织侧已经写过：#157 名单（谁被保护）、#158 清除判定（谁能签&quot;干净了&quot;）、#159 服务端闭环（你自己的服务端与账户）、#160 管控栈（MDM 能看见什么）、#161 指标治理、#162 水坑链路服务商协作（<strong>事发后</strong>向与你无合同关系的第三方请求协助）、#163 并发分诊、#164 访谈纪律、#165 演练、#166 随访。</p>
+<p><strong>#162 与本篇最容易被混为一谈，必须分清：</strong> #162 处理的是<strong>事发之后</strong>向托管、DNS、证书、CDN 这些<strong>通常与你没有合同关系</strong>的第三方请求协助，核心是&quot;请求怎么写、回音多慢、能拿到什么&quot;；本篇处理的是<strong>事发之前</strong>与你<strong>有合同关系</strong>的供应商（SaaS、托管、外包开发、客服系统、邮件与短信通道、备份服务），核心是&quot;合同里有没有把这些请求变成义务&quot;。一个是求人办事，一个是买人事先答应办事。前者靠关系与流程，后者靠条款与价格。</p>
+<p>主库里最接近的是 #148（检测产品与第三方检查服务的采购），但那篇买的是<strong>结论</strong>；本篇买的是<strong>事件期间的行为</strong>。两者的采购问询单不同：买结论问&quot;你的检出率与误报率&quot;，买行为问&quot;你出事之后四个小时内给我什么&quot;。</p>
+<hr>
+<h2>3. 事件定义的三种写法，以及为什么默认那种最差</h2>
+<table><thead><tr><th>写法</th><th>触发条件</th><th>你实际会收到什么</th><th>问题</th></tr></thead><tbody><tr><td><strong>D1 影响面式</strong></td><td>&quot;任何未经授权访问、披露、修改或中断，<strong>无论是否涉及客户数据</strong>&quot;</td><td>供应商自身被入侵、子处理者被入侵、内部人员越权，都在范围内</td><td>通知量大，供应商通常不接受作为唯一标准</td></tr><tr><td><strong>D2 数据相关式</strong>（主流默认）</td><td>&quot;经确认的<strong>客户数据</strong>泄露&quot;</td><td>只在你作为数据主体被点名时才通知</td><td>&quot;经确认&quot;与&quot;客户数据&quot;两个词各自都能拖住两周：确认要走完内部流程，数据归属要先判定</td></tr><tr><td><strong>D3 实例相关式</strong>（本篇推荐的最低要求）</td><td>&quot;与<strong>客户实例</strong>有关的任何未授权访问、凭据泄露、配置暴露、子处理者事件&quot;</td><td>边界清晰且不需要先做数据归属判定</td><td>供应商会说&quot;范围太宽&quot;，但它其实只比 D2 多了一类：<strong>你的实例有人在看</strong></td></tr></tbody></table>
+<p><strong>三者真正的差别在于时间起点。</strong> D2 的时钟从&quot;确认&quot;开始，而&quot;确认&quot;是供应商的内部判断，你无法核验；D3 的时钟从&quot;知悉&quot;开始，而&quot;知悉&quot;是一个可以被记录的事实（工单时间、日志时间）。合同里要写的不是&quot;及时&quot;，而是：</p>
+<blockquote><p>供应商应在<strong>知悉</strong>任何与客户实例相关的未授权访问、凭据泄露、配置错误或子处理者事件后 <strong>N 小时</strong>内，以书面方式通知客户，且该通知<strong>不得以待完成内部法务审查为由延迟</strong>。</p></blockquote>
+<p>最后半句是整篇最重要的一句。它把 #149 讨论过的&quot;告知里有什么&quot;从研究机构的观察变成了<strong>你的合同权利</strong>。</p>
+<hr>
+<h2>4. 通知条款的四个要素</h2>
+<table><thead><tr><th>要素</th><th>写成什么</th><th>缺失时的后果</th></tr></thead><tbody><tr><td><strong>触发词</strong></td><td>&quot;知悉&quot;而非&quot;确认&quot;；并明确&quot;知悉包括任一员工的知悉&quot;</td><td>供应商可以用&quot;我们还在确认&quot;无限期推迟，而它的工程师早已经知道</td></tr><tr><td><strong>时限</strong></td><td>分段：<strong>4 小时初步通知</strong>（发生了什么、影响谁、正在做什么）、<strong>72 小时书面初步报告</strong>、<strong>每 5 个工作日更新一次</strong>直到关闭</td><td>没有分段，你会收到一份在事件结束后才写完的&quot;最终报告&quot;，它回答不了 #147 十项记录里的任何一项</td></tr><tr><td><strong>内容</strong></td><td>至少六项：时间线、涉及的系统与地域、涉及的数据类别（不必给值，要给类别）、已知的攻击面（#154 的 S0–S5 走到哪一段）、已采取的动作、<strong>下一次更新时间</strong></td><td>没有内容要求时，&quot;通知&quot;会退化为一封只有一句&quot;我们正在调查&quot;的邮件</td></tr><tr><td><strong>更新与更正义务</strong></td><td>明确&quot;初步通知可以不准，但必须在下一份通知中更正，并说明更正原因&quot;</td><td>供应商为了避免前后不一致而<strong>延迟</strong>发出第一份通知——这是最常见的一处，也是最贵的一处</td></tr></tbody></table>
+<p>第 4 条值得单独解释：多数供应商的法务会把&quot;说错&quot;看得比&quot;说晚&quot;更严重，而你的处境恰好相反——#149 的 0–24 小时动作序列里，<strong>每一条都要求你先知道，再判断</strong>。合同里写清&quot;允许不准、要求更正&quot;，等于替对方解开了这个结。</p>
+<hr>
+<h2>5. 留证义务：合同里最不显眼、回报最高的一条</h2>
+<p>事件里最快消失的东西不是数据，是<strong>日志</strong>。SaaS 默认保留 7 到 30 天，托管环境默认轮转，容器与函数计算默认不留。等到你想起要看的时候，那一段恰好已经被覆盖。</p>
+<p>合同里要写死四件事：</p>
+<ol><li><strong>保留窗口</strong>：与供应商相关的安全日志、访问日志、变更记录、认证日志，保留期不少于 <strong>90 天</strong>（涉及定向攻击事件的，不少于 180 天），且保留期从<strong>通知之日</strong>起自动延长至事件关闭后 90 天。</li><li><strong>不得自行清理</strong>：自通知之日起，供应商<strong>不得删除、轮转覆盖或修改</strong>与事件相关的日志，除非<strong>事先取得客户书面同意</strong>或法律强制要求（此时应在 48 小时内书面告知）。</li><li><strong>交付格式与时限</strong>：日志以<strong>可机器读取的格式</strong>（而非 PDF 截图）在客户请求后 <strong>5 个工作日</strong>内提供，包含原始时间戳与时区。</li><li><strong>证据完整性</strong>：提供时附<strong>校验值</strong>（哈希）与导出时间，便于后续引用（这与 #158 的&quot;清除判定需要可核验的凭据&quot;是同一条纪律）。</li></ol>
+<p>第 2 条经常被拒绝，理由是&quot;我们有自己的数据保留政策&quot;。可以接受的妥协是把范围收窄到<strong>与客户实例相关的日志</strong>，而不是全公司日志——<strong>范围可以谈，起算点不能谈</strong>。</p>
+<hr>
+<h2>6. 协查路径：五个必须在签约前问清的问题</h2>
+<ul><li>谁是<strong>对接人</strong>（姓名、职务、电话、邮件，以及该人休假时的替补）？</li><li>走什么<strong>通道</strong>（客户门户工单？专线？事件热线的号码是什么？工作日几点到几点有人？）</li><li><strong>多快</strong>回音（首次响应时间，而不是解决时间）？</li><li>能提供<strong>什么</strong>（原始日志、配置快照、变更历史、访问审计、网络流记录——逐项列出，哪些要额外付费）？</li><li><strong>额外成本</strong>怎么算（协查工时、日志导出、加急）？以及，<strong>这笔费用在供应商自身被攻破时由谁承担</strong>？</li></ul>
+<p>最后一问在合同里通常写反了：默认写法是&quot;客户承担协查费用&quot;，而供应商自身被攻破所引起的协查，其费用应当由<strong>供应商</strong>承担。这一条在谈判中的成功率比想象中高，因为它触及的是对方的责任逻辑而不是利润。</p>
+<hr>
+<h2>7. 子处理者、地域与变更告知</h2>
+<p>定向攻击者不挑最好的供应商，挑<strong>最容易的那一层</strong>（#162 的七层依赖表在合同侧的映射）。因此合同必须要求：</p>
+<table><thead><tr><th>义务</th><th>为什么</th></tr></thead><tbody><tr><td><strong>子处理者清单</strong>（含其所在地）在签约时提供，变更前 30 天书面告知，客户有异议权</td><td>你无法保护一个你不知道存在的第四方</td></tr><tr><td><strong>数据所在地</strong>明确到国家/区域，且迁移需告知</td><td>决定 #170 里&quot;谁能取、走什么程序&quot;</td></tr><tr><td><strong>子处理者事件视同供应商事件</strong></td><td>否则最弱的一环会自动退出通知义务</td></tr><tr><td><strong>跨境访问（含远程运维）需记录并可查</strong></td><td>这是事件调查里最常缺失的一类事实</td></tr></tbody></table>
+<hr>
+<h2>8. 费用与责任分配：哪些必须留在责任上限之外</h2>
+<p>供应商的标准合同会把责任上限设成&quot;12 个月服务费&quot;，并把这些都算进去。对本族事件，必须争取把以下四项列为<strong>上限除外</strong>：</p>
+<ol><li><strong>通知义务的履行</strong>（迟延通知的后果不能被打包进一个封顶数字里，否则通知就变成了&quot;付钱买沉默&quot;）；</li><li><strong>证据保全义务的履行</strong>（日志被清理造成的损失）；</li><li><strong>客户为履行自身法定义务而产生的合理费用</strong>（通知受影响人、必要的身份监控、监管报送）；</li><li><strong>供应商或其子处理者的故意或重大过失</strong>。</li></ol>
+<p>第 3 项需要提醒：它不是&quot;赔偿&quot;，而是&quot;<strong>代你履行义务的费用</strong>&quot;，因此在谈判中更容易被接受——对方会把它理解为一种保险，而不是一种惩罚。</p>
+<p><strong>不可抗力条款要单独看一眼</strong>：多数版本写的是&quot;自然灾害、战争、政府行为&quot;，但也常见把&quot;网络攻击&quot;写进去的版本。对本族事件，<strong>供应商自身遭受攻击不构成不可抗力</strong>——它是应当被管理、被披露、被分摊的商业风险。这一句话必须在签约时争到，事后没有讨论空间。</p>
+<hr>
+<h2>9. 退出与数据返还</h2>
+<p>事件之后最常见的第二种损失，是<strong>你决定换掉供应商时拿不走东西</strong>。合同要写：</p>
+<ul><li>终止后 <strong>30 天内</strong>提供完整数据导出（含附件与元数据），格式为开放格式；</li><li>提供一份<strong>与事件相关的取证副本</strong>（在终止后仍可请求，且不受常规删除政策影响）；</li><li>提供<strong>销毁证明</strong>，并注明销毁范围与时间；</li><li>迁移期内<strong>不得降低服务水平</strong>（这是最容易被忽略的一条：供应商在你宣布终止后的第二天就会把工单优先级调低）。</li></ul>
+<hr>
+<h2>10. 存量合同怎么办：四件不需要重签的事</h2>
+<p>多数组织在读完本篇时会说&quot;合同已经签了&quot;。以下四件事在一年内可做，且不需要重签主合同：</p>
+<ol><li><strong>签一份事件响应附件（Addendum）</strong>：只写 §4–§6 的三条义务，篇幅两页，法务接受度远高于&quot;改主合同&quot;；</li><li><strong>把留证与协查写进续约谈判的清单</strong>：续约是唯一对方有动力的时刻；</li><li><strong>建立一份&quot;关系人名单&quot;</strong>：每个关键供应商记录一个活人（不是工单队列），并每半年更新一次；</li><li><strong>做一次无成本的协查演练</strong>：向对方要一份&quot;日志清单样例&quot;和&quot;事件通知样例&quot;。两份样例都不涉及真实事件，但能在一周内暴露出对方是否真有这套流程——<strong>能给出样例的供应商，通常也能在四小时内发出通知。</strong></li></ol>
+<hr>
+<h2>11. 采购流程里的落点：十二问</h2>
+<table><thead><tr><th>#</th><th>问</th><th>好答案的样子</th></tr></thead><tbody><tr><td>1</td><td>你们的事件定义是什么？</td><td>能背出来，且包含&quot;实例相关&quot;而非只有&quot;数据泄露&quot;</td></tr><tr><td>2</td><td>从知悉到通知客户最长的实际时间是多少？</td><td>给出数字与一次实例，而不是&quot;immediately&quot;</td></tr><tr><td>3</td><td>谁决定通知内容？会不会经过法务初筛？</td><td>承认有初筛，但同意提供&quot;未经法律判断的事实摘要&quot;</td></tr><tr><td>4</td><td>日志保留多久？事件期间会不会被覆盖？</td><td>明确的窗口 + 事件冻结机制</td></tr><tr><td>5</td><td>能给我一份日志清单样例吗？</td><td>一周内给，且字段可读</td></tr><tr><td>6</td><td>子处理者有几家？在哪里？</td><td>有清单，且会告知变更</td></tr><tr><td>7</td><td>协查要收费吗？谁批？多久？</td><td>有价目与审批路径</td></tr><tr><td>8</td><td>你们自己被攻破时，客户数据的处置顺序是什么？</td><td>有书面顺序，不是&quot;个案处理&quot;</td></tr><tr><td>9</td><td>责任上限的除外项有哪些？</td><td>至少含故意与重大过失</td></tr><tr><td>10</td><td>终止后多久能拿走全部数据？</td><td>有天数与格式</td></tr><tr><td>11</td><td>事件期间我们的对接人是谁？</td><td>有名有姓有替补</td></tr><tr><td>12</td><td>上一个客户问过这些问题吗？</td><td>对方能立刻反应，说明常被问</td></tr></tbody></table>
+<hr>
+<h2>12. 六个失败模式</h2>
+<ol><li><strong>把资质当能力</strong>：ISO 证书与&quot;通过渗透测试&quot;证明的是过去的某个时点，不是事件当天四小时内的行为。</li><li><strong>只在主合同里找安全条款</strong>：真正的义务常在附件、SLA 附录、可接受使用政策里，三份文件常常互相矛盾，而矛盾时通常以&quot;以供应商解释为准&quot;收尾。</li><li><strong>把通知义务交给采购而不是法务与安全共同签</strong>：采购的 KPI 是签约速度，安全团队的 KPI 是事件当天的可执行性，两者必须同时签字。</li><li><strong>相信&quot;我们会配合&quot;</strong>：口头承诺在工单优先级面前一文不值；要么写进合同，要么当成没有。</li><li><strong>忽略子处理者</strong>：你签的是一家，出事的是它用的第三家，而合同里那家不存在。</li><li><strong>事件之后才想起改合同</strong>：那时你在谈判桌上的筹码最少，因为对方知道你换不掉它。</li></ol>
+<hr>
+<h2>13. 加固清单</h2>
+<p><strong>个人与小团队（无采购权时）</strong></p>
+<ul><li>列出你实际依赖的五个外部服务，逐个在帮助中心搜索&quot;security incident notification&quot;与&quot;data retention&quot;，把结果记成一行（多数服务有公开承诺，只是没人读）；</li><li>对你自己的账户数据，开启你能开启的最长导出周期（定期拉一份），因为<strong>你手里的副本是唯一不受对方保留政策影响的证据</strong>（#159 同一条）；</li><li>把上述两件事的结论写进一份两页的&quot;依赖清单&quot;，与 #147 的十项记录放在一起。</li></ul>
+<p><strong>组织</strong></p>
+<ul><li>把 §4–§6 的三条义务做成标准附件，纳入所有新签与续约合同；</li><li>对本族相关的供应商（邮件通道、客服、备份、托管、外包开发）做一次存量盘点，标出&quot;无通知条款 / 有条款无时限 / 有完整条款&quot;三档；</li><li>每年做一次<strong>通知演练</strong>：让对方按合同模板发一份<strong>样例</strong>事件通知，检验它能否在时限内给出六项内容；</li><li>把&quot;子处理者清单&quot;与&quot;日志清单样例&quot;纳入供应商准入的最低材料，而不是可选项。</li></ul>
+<hr>
+<h2>14. 八条常见误解</h2>
+<ol><li><strong>&quot;大供应商一定更规范&quot;</strong>——大供应商的条款更成熟，但更成熟的意思是<strong>更擅长保护自己</strong>；小供应商可能没条款，但更愿意签你的附件。</li><li><strong>&quot;我们有保密协议就够了&quot;</strong>——保密协议管的是&quot;不许说出去&quot;，事件合同管的是&quot;必须说出来&quot;，方向相反。</li><li><strong>&quot;通知晚几个小时不影响&quot;</strong>——#149 的三段动作序列里，0–24 小时那一整段都建立在&quot;你已经知道&quot;之上。</li><li><strong>&quot;日志我们可以事后让他们导&quot;</strong>——保留期是轮转决定的，不是请求决定的。</li><li><strong>&quot;协查费用是小钱&quot;</strong>——单次数万元不罕见，而它出现在你最不想讨论预算的那一周。</li><li><strong>&quot;不可抗力会自动适用网络攻击&quot;</strong>——那是条款措辞问题，不是法律常识问题；写进去的才算。</li><li><strong>&quot;合同是法务的事&quot;</strong>——法务能写到&quot;合规&quot;，写不出&quot;四小时内给我六项内容&quot;；后者只能由懂事件的人提供文本。</li><li><strong>&quot;我们的供应商不会被盯上&quot;</strong>——定向攻击者不攻破最强的，只攻破<strong>唯一有合同关系的那一层</strong>。</li></ol>
+<hr>
+<h2>15. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>关系</th></tr></thead><tbody><tr><td>#148</td><td>买结论 vs 买行为；两套问询单不通用</td></tr><tr><td>#149</td><td>本篇是那张&quot;含与不含&quot;字段表的合同版本：把&quot;应该告诉我什么&quot;变成&quot;必须告诉我什么&quot;</td></tr><tr><td>#151</td><td>通报义务需要事实；本篇解决事实在时限内到不到手</td></tr><tr><td>#156</td><td>成本阶梯里 C2 时间锚定的费用，一半花在等别人</td></tr><tr><td>#158</td><td>清除判定需要可核验凭据；本篇的留证条款是它的前提</td></tr><tr><td>#159</td><td>服务端与账户侧的存续项，有一半在别人名下；本篇决定你能不能看见</td></tr><tr><td>#162</td><td>无合同关系第三方的求援流程 vs 有合同关系的义务条款</td></tr><tr><td>#166</td><td>结案与随访需要的基线包，有一部分只能从供应商处取得</td></tr></tbody></table>
+<hr>
+<h2>16. 总结</h2>
+<table><thead><tr><th>#</th><th>结论</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>事件当天你要等的每一件事，都在签约那天定好了</td></tr><tr><td><strong>2</strong></td><td>要写进去的只有三条：通知、留证、协查；其余条款在事件当天只提供情绪价值</td></tr><tr><td><strong>3</strong></td><td>定义从&quot;知悉&quot;起算、范围收到&quot;客户实例&quot;、内容必须六项、允许不准但要求更正</td></tr><tr><td><strong>4</strong></td><td>日志保留窗口与事件期冻结，是回报最高的一条，而它通常被当成技术条款而不是合同条款</td></tr><tr><td><strong>5</strong></td><td>通知与协查的费用，在供应商自身被攻破时不应由你承担；这不是赔偿，是义务的代履行</td></tr><tr><td><strong>6</strong></td><td>供应商自身被攻破不属于不可抗力，必须在签约时写死</td></tr><tr><td><strong>7</strong></td><td>存量合同不需要重签：一份两页附件 + 一次样例请求，就能筛掉大部分&quot;纸面流程&quot;</td></tr><tr><td><strong>8</strong></td><td>你手里那份定期导出的副本，是唯一不受对方保留政策影响的证据</td></tr></tbody></table>
+<p><strong>一句话总结</strong>：</p>
+<blockquote><p>合同不是用来在事件之后追责的，它是用来让事件当天的事情<strong>不需要靠运气发生</strong>的。 你要买的不是&quot;他们会尽力配合&quot;，而是&quot;四小时、六项内容、三十天不清日志、一个工作日回音&quot;这四句话。 这四句话写不进去，剩下的所有安全投入都在为一次别人掌握节奏的等待付费。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<p>本文是防御视角的合同与采购治理分析，不提供任何下列内容：合同条款范本用于规避、延迟或弱化披露义务的写法；隐匿、销毁或妨碍取证的操作建议；对任何具体供应商、机构或其条款的评价与指名比较；对特定司法辖区法条的解释或适用意见。文中涉及通知时限、留证期限、责任分配与不可抗力范围的全部表述均为<strong>谈判与方法层面的建议</strong>，具体条款须由具备相应资质的律师结合适用法律、合同相对方与业务性质审核后定稿；本文不构成法律意见。任何涉及员工、客户或第三方的数据处理与披露安排，均以当地法律与有效合同为准。</p>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：计算机安全事件处理指南</a>（事件响应生命周期、证据保全与通信义务的通用框架）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：供应链风险管理与供应商评估公开材料</a>（供应商风险、第三方与第四方依赖的公开方法论）</li><li><a href="https://www.enisa.europa.eu/topics/cyber-threats" rel="nofollow noopener" target="_blank">ENISA：供应链安全与事件报告实践</a>（第三方事件通知与协作的行业惯例）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（攻击者选择第三方作为入口的行为分类）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（企业托管、账户与数据归属相关的组织化能力）</li><li>本系列 #148、#149、#151、#156、#158、#159、#162、#166（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a166.html">← 第 166 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a168.html">第 168 篇 →</a></nav></article>
+</main></body></html>

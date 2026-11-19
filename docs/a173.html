@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下对客户与合同相对方的责任分配 | iOS 安全研究文章库</title>
+<meta name="description" content="**归因与责任是两件事**：「这是国家级攻击者所为」在合同上通常不能免除 SLA 义务，把归因当抗辩是本族商业纠纷最常见的一次误判；三种归因形态（结果责任／过错责任／过错推定）与各自举证要求、SLA 三维度与四个常被忽略的条款细节（测量点、维护窗口是否含安全降级、累计与单次、起算点）、赔付四层（服务抵扣／直接">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a173.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下对客户与合同相对方的责任分配">
+<meta property="og:description" content="**归因与责任是两件事**：「这是国家级攻击者所为」在合同上通常不能免除 SLA 义务，把归因当抗辩是本族商业纠纷最常见的一次误判；三种归因形态（结果责任／过错责任／过错推定）与各自举证要求、SLA 三维度与四个常被忽略的条款细节（测量点、维护窗口是否含安全降级、累计与单次、起算点）、赔付四层（服务抵扣／直接">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a173.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 173 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的对客户与合同相对方的责任分配：SLA、赔付与谈判纪律</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>本族事件在商业侧的核心不对称是：<strong>攻击者不需要赢，只要让你的服务达不到承诺，就已经赢了。</strong> 一次定向投递造成的可用性下降、数据延迟或功能受限，会在合同上被换算成<strong>服务抵扣、违约金、解约权</strong>——而这一切<strong>不需要任何人证明&quot;是谁干的&quot;</strong>。前二十篇里 #167 处理的是<strong>采购侧</strong>（你作为买方，要求供应商承担什么），本篇处理<strong>销售与交付侧</strong>：你作为供应方，在合同上要对客户承担什么。</li><li>核心命题一：<strong>归因与责任是两件事，而合同只关心后者。</strong> &quot;这是国家级攻击者所为&quot;在技术上可能成立，在合同上通常<strong>不能免除你的 SLA 义务</strong>——除非不可抗力条款明确覆盖且你满足了它的全部条件（通知、减损、举证）。<strong>把归因当作抗辩理由，是本族商业纠纷里最常见的一次误判。</strong></li><li>核心命题二：<strong>责任沿着合同链向上下游同时传导。</strong> 你既是受害者（上游供应商没守住），又是加害方（下游客户没拿到服务）。同一起事件里你同时站在两个位置，而两份合同的时限、口径与上限往往不一致——<strong>这种不一致本身就是风险</strong>（第 8 节）。</li><li>核心命题三：<strong>&quot;承认事实&quot;与&quot;承认责任&quot;必须被严格分开。</strong> 你可以在 24 小时内承认&quot;服务在 X 时至 Y 时不可用、影响 Z 功能&quot;，同时<strong>不承认</strong>这是你的过错、不承认赔偿金额、不承认归因。混为一谈的代价是：一句过早的&quot;是我们的问题&quot;会在数月后成为对方主张全部损失的起点。</li><li>核心命题四：<strong>自愿补偿会变成先例，而且可能与保险冲突。</strong> 出于善意给出的免费延期或退款，若没有书面限定（一次性、不构成对责任的承认、不影响保单权利），会在此后每一次事件中被引用；而&quot;自愿支付&quot;在多数保单里属于除外责任（#168）。<strong>善意需要被写成条款，而不是被说成口头承诺。</strong></li><li>核心命题五：<strong>谈判纪律的核心是三件&quot;不要&quot;：不承诺日期、不承诺金额、不放弃权利。</strong> 这三件事在压力下最容易被脱口而出，也最难收回。</li><li>一句正向结论：<strong>把&quot;我们遭遇了定向攻击&quot;与&quot;我们没有履行约定的服务&quot;当成两句话，分别对外说</strong>：前一句陈述事实（并且可以在需要时更新），后一句陈述履约状况（并且必须按合同处理）。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#167 是<strong>买方视角</strong>：在采购与外包合同里要写进哪些安全义务（通知、留证、协查），以及如何在签约前把它们谈下来。它的落点是&quot;你要求别人&quot;。</p>
+<p>本篇是<strong>卖方视角</strong>：你作为服务的提供者，在事故中对客户承担什么、如何主张免责、如何在不自伤的前提下表达善意。两篇共同构成&quot;合同链的两端&quot;，而本族事件会让这两端在同一天被同时拉动。</p>
+<p>#168 处理<strong>保险侧的报案纪律与赔付口径</strong>，其中&quot;自愿支付&quot;除外与代位求偿与本篇直接咬合：<strong>你对客户说的每一句话、赔的每一分钱，都会进入保单的视野。</strong></p>
+<p>#151 处理<strong>对外沟通的分级</strong>（B1/B2/B3、W1/W2/W3），#169 处理<strong>报送</strong>，#175 处理<strong>公开披露</strong>。这三篇管的是&quot;向监管与公众&quot;；本篇管的是&quot;向合同相对方&quot;，也就是<strong>唯一一个可以用合同把你拖进仲裁的人</strong>。</p>
+<p>#172 处理<strong>降级运行形态</strong>；本篇处理这些形态的<strong>合同后果</strong>：降级到什么程度会触发哪一条 SLA。</p>
+<hr>
+<h2>3. 责任分配的三种归因形态</h2>
+<p>合同里关于&quot;事件&quot;的表述，通常落在三种形态之一，而它们对举证的要求差别极大。</p>
+<table><thead><tr><th>形态</th><th>合同怎么写</th><th>对方需要证明什么</th><th>你需要证明什么</th><th>常见误判</th></tr></thead><tbody><tr><td><strong>结果责任</strong>（严格）</td><td>&quot;服务可用性不低于 X%&quot;</td><td>只证明未达标</td><td>证明存在约定的免责事由</td><td>以为&quot;是攻击&quot;就能免责</td></tr><tr><td><strong>过错责任</strong></td><td>&quot;因一方过错导致…&quot;</td><td>证明你未尽合理义务</td><td>证明已尽合理义务（标准与证据）</td><td>以为&quot;我们很努力&quot;就够了</td></tr><tr><td><strong>过错推定</strong></td><td>&quot;除不可抗力外…&quot;</td><td>只证明结果</td><td>主动证明免责事由成立</td><td>忘了履行通知与减损义务</td></tr></tbody></table>
+<p>三条判断：</p>
+<ol><li><strong>先看清你的合同是哪一种。</strong> 多数 SLA 是结果责任——<strong>它不问你为什么没做到</strong>。在这类条款下，讨论归因的唯一合法出口是&quot;不可抗力/免责事由&quot;，而它的门槛通常很高。</li><li><strong>免责事由不只是&quot;事件本身&quot;，还包括你的行为。</strong> 通知是否及时、减损是否合理、记录是否完整——<strong>任何一项缺失都可能让免责主张落空</strong>，即使攻击确实不可预见。</li><li><strong>&quot;尽合理义务&quot;要靠证据，不靠描述。</strong> 常态的加固记录（#160）、巡检台账（#104）、演练记录（#165）在此刻变成了法律材料；<strong>平静期没做的，事件中补不出来</strong>。</li></ol>
+<hr>
+<h2>4. SLA 的三个维度与被触发的条件</h2>
+<table><thead><tr><th>维度</th><th>典型表述</th><th>本族事件的触发方式</th><th>关键细节</th></tr></thead><tbody><tr><td><strong>可用性</strong></td><td>月度可用率不低于 X%</td><td>服务中断、区域不可达、登录失败率上升</td><td>计算口径（是否含计划维护、是否按用户加权）决定结果</td></tr><tr><td><strong>性能/时延</strong></td><td>P95 响应时间不超过 Y</td><td>降级运行、人工替代导致处理变慢</td><td>降级态是否算&quot;可用&quot;需在合同中明确（#172）</td></tr><tr><td><strong>功能完整性</strong></td><td>特定功能须可用</td><td>关闭某通道、白名单化、只读模式</td><td>若合同未定义&quot;功能&quot;，几乎无法主张</td></tr></tbody></table>
+<p>四个常被忽略的条款细节：</p>
+<ul><li><strong>测量点在哪里。</strong> 由谁测量、用什么测量、数据由谁保管——测量点在你这一侧时，你才有能力主张&quot;未达标不成立&quot;；测量点在对方时，你会失去对口径的控制。</li><li><strong>维护窗口与例外的定义。</strong> &quot;计划维护&quot;是否包含&quot;因安全原因主动降级&quot;？多数合同没写，于是每次都要谈。</li><li><strong>累计与单次。</strong> 一次 4 小时的中断与四次 1 小时的中断，在很多 SLA 里赔付不同；本族事件的形态更接近后者（断断续续的受限）。</li><li><strong>起算点。</strong> 从&quot;你知悉&quot;还是从&quot;客户感知&quot;？两者可能差数小时，而 SLA 的时钟以分钟计。</li></ul>
+<hr>
+<h2>5. 赔偿的四种形态</h2>
+<table><thead><tr><th>形态</th><th>内容</th><th>上限惯例</th><th>对本族事件的意义</th></tr></thead><tbody><tr><td><strong>服务抵扣</strong></td><td>按未达标比例返还费用</td><td>通常为当月费用的百分比</td><td>最常见的&quot;第一层&quot;，谈判空间较大</td></tr><tr><td><strong>直接损失</strong></td><td>客户可证明的直接经济损失</td><td>常以合同总额或年费为上限</td><td>需要对方举证因果与金额</td></tr><tr><td><strong>间接损失</strong></td><td>利润损失、商誉损失、数据损失</td><td><strong>多数合同明确排除</strong></td><td>排除条款是本族事件中最重要的一道防线</td></tr><tr><td><strong>解约权</strong></td><td>连续未达标可终止</td><td>常附&quot;补救期&quot;</td><td>解约的连锁影响往往大于赔付本身</td></tr></tbody></table>
+<p>三条实务要点：</p>
+<ol><li><strong>上限条款是你最重要的资产。</strong> 在签约时争取到的&quot;责任上限&quot;与&quot;间接损失排除&quot;，在事件中价值高于任何技术措施；<strong>事件中再谈已经晚了</strong>。</li><li><strong>赔付与&quot;是否承认过错&quot;应当解耦。</strong> 合同约定的服务抵扣是<strong>履约调整</strong>，不是<strong>过错承认</strong>；在书面沟通中要区分这两者，否则一次抵扣会被引为&quot;承认违约&quot;。</li><li><strong>不要用&quot;额外免费服务&quot;替代条款化赔付。</strong> 额外服务没有上限、没有定义、没有结束条件；它会在下一次事件中成为&quot;上次也这样&quot;的先例。</li></ol>
+<hr>
+<h2>6. 合同通知义务与法定/监管通知义务的区别</h2>
+<table><thead><tr><th>维度</th><th>合同通知</th><th>法定/监管报送（#169）</th><th>公开披露（#175）</th></tr></thead><tbody><tr><td>触发</td><td>合同约定的&quot;安全事件&quot;定义</td><td>法规规定的门槛</td><td>重大性判断</td></tr><tr><td>时限</td><td>常为 24/48/72 小时，<strong>自你知悉起算</strong></td><td>由法规决定</td><td>由披露规则决定</td></tr><tr><td>对象</td><td>合同相对方</td><td>主管部门</td><td>公众/投资者</td></tr><tr><td>后果</td><td>违约、丧失免责事由</td><td>行政责任</td><td>市场与法律责任</td></tr><tr><td>能否用&quot;还在调查&quot;延迟</td><td>通常不能；多数条款要求&quot;初步通知&quot;</td><td>视法规</td><td>视规则</td></tr></tbody></table>
+<p><strong>一条常被忽略的连锁</strong>：合同通知义务的时限往往<strong>早于</strong>你完成内部确认的时间。因此通知的内容必须是<strong>可更新的初步通知</strong>（&quot;我们于 X 时知悉一起可能影响服务的安全事件，初步影响范围…，下次更新…&quot;），而不是等到结论出来再通知。<strong>等待结论，等于自动违约。</strong></p>
+<hr>
+<h2>7. 谈判纪律：三不承诺</h2>
+<table><thead><tr><th>纪律</th><th>为什么</th><th>替代说法</th></tr></thead><tbody><tr><td><strong>不承诺恢复日期</strong></td><td>恢复取决于取证与闸门（#172），日期一旦给出就会成为违约证据</td><td>&quot;下一次更新时间为…，届时给出评估&quot;</td></tr><tr><td><strong>不承诺赔付金额</strong></td><td>金额取决于损失核算与保单（#168），过早给数会被当作底线</td><td>&quot;赔付将按合同第 X 条计算，我方将在核实后书面确认&quot;</td></tr><tr><td><strong>不放弃权利</strong></td><td>一句&quot;我们负全责&quot;会同时放弃免责主张、保单权利与对上游的追偿</td><td>&quot;我们承认在 X 时至 Y 时服务未达约定，其余事项待核实&quot;</td></tr></tbody></table>
+<p>配套的三条操作建议：</p>
+<ol><li><strong>所有对外承诺走同一个人。</strong> 与 #171 第 5 节的预授权第 4 项一致；多个接口人分别表态，是最常见的自伤方式。</li><li><strong>口头沟通之后补一封书面确认。</strong> 不是对抗，而是防止记忆差异；内容只写&quot;我们谈了什么&quot;，不写&quot;我们承诺了什么&quot;。</li><li><strong>保留对上游的追偿链路。</strong> 你对客户承担的每一笔，都应当能对应到上游供应商合同中的相应条款（#167 的协查与赔偿条款），否则成本全部落在你身上。</li></ol>
+<hr>
+<h2>8. 双重身份：你同时是受害方与供应方</h2>
+<table><thead><tr><th>位置</th><th>你的权利</th><th>你的义务</th><th>时限差</th></tr></thead><tbody><tr><td><strong>对上游</strong>（供应商、云、外包）</td><td>要求协查、留证、赔偿</td><td>及时通知、配合调查</td><td>上游常给 5–30 天响应</td></tr><tr><td><strong>对下游</strong>（客户、渠道、集成商）</td><td>主张免责事由、适用上限</td><td>及时通知、减损、按 SLA 赔付</td><td>下游常要求 24–72 小时</td></tr></tbody></table>
+<p>两份合同的时限<strong>方向相反</strong>：下游要求你快，上游允许它慢。这个差值就是你的<strong>净暴露窗口</strong>——在这个窗口里，你已经对客户产生了义务，但还没有从上游拿到任何材料。</p>
+<p>三条应对：</p>
+<ul><li><strong>在采购合同里压缩上游的响应时间</strong>（#167 的 4h/72h 条款），把净暴露窗口缩短。</li><li><strong>在下游合同里明确&quot;依赖第三方服务&quot;的例外与分摊机制</strong>，避免你独自承担全部后果。</li><li><strong>事前准备一份&quot;链条说明&quot;</strong>：哪些能力依赖哪家上游、其故障会如何传导。事件中它既是对客户的解释材料，也是对上游的索赔依据。</li></ul>
+<hr>
+<h2>9. 与保险的衔接</h2>
+<table><thead><tr><th>衔接点</th><th>保单关注什么</th><th>合同侧要注意什么</th></tr></thead><tbody><tr><td><strong>通知</strong></td><td>是否按保单时限报案（#168）</td><td>对客户的通知不替代对保险人的通知</td></tr><tr><td><strong>自愿支付</strong></td><td>多数保单将&quot;自愿支付&quot;列为除外</td><td>任何补偿都要写成&quot;依合同条款&quot;或&quot;不构成责任承认&quot;</td></tr><tr><td><strong>抗辩控制</strong></td><td>保险人可能要求主导抗辩或指定律师</td><td>合同中约定的争议解决方式会影响可行性</td></tr><tr><td><strong>代位求偿</strong></td><td>赔付后保险人可向你追偿，也可代位向第三方追偿</td><td>你对上游的追偿权是否可转让、是否因和解而丧失</td></tr></tbody></table>
+<p><strong>最容易出问题的一步是&quot;和解&quot;。</strong> 与客户达成的任何和解，若未通知保险人、或包含&quot;放弃对第三方追偿&quot;的条款，可能导致该笔支出无法获赔。<strong>和解文本在签署前必须过一遍保单。</strong></p>
+<hr>
+<h2>10. 常见陷阱</h2>
+<table><thead><tr><th>陷阱</th><th>表现</th><th>后果</th><th>避免方式</th></tr></thead><tbody><tr><td><strong>过早定性</strong></td><td>&quot;这是我们的配置失误&quot;</td><td>成为对方主张全部损失的起点</td><td>只陈述现象与时间，定性留给调查</td></tr><tr><td><strong>口头承诺</strong></td><td>电话里答应&quot;全额退&quot;</td><td>无法否认，且可能触发保单除外</td><td>口头之后立即书面复述谈了什么</td></tr><tr><td><strong>单方免责声明</strong></td><td>单方面发布&quot;因不可抗力免责&quot;</td><td>多数情形不成立，且损害信任</td><td>按合同程序主张，附证据</td></tr><tr><td><strong>免费补偿的先例化</strong></td><td>每次事件都送一个月</td><td>成为事实上的新 SLA</td><td>一次性、书面、限定条件</td></tr><tr><td><strong>忽略渠道方</strong></td><td>只与终端客户沟通</td><td>渠道方按其合同另行主张</td><td>识别全部合同相对方（#173 的&quot;相对方&quot;通常不止一个）</td></tr><tr><td><strong>测量口径失控</strong></td><td>SLA 数据由对方采集</td><td>无法质疑未达标结论</td><td>签约时约定测量点与数据保管</td></tr></tbody></table>
+<hr>
+<h2>11. 加固清单（平静期完成）</h2>
+<table><thead><tr><th>#</th><th>事项</th><th>产出物</th><th>完成标志</th></tr></thead><tbody><tr><td>1</td><td>盘点全部下游合同的 SLA 与上限条款</td><td>一张表：客户 → 可用性/时延/功能 → 上限 → 通知时限</td><td>能在一小时内答出&quot;这次触发哪几条&quot;</td></tr><tr><td>2</td><td>统一&quot;安全事件&quot;在合同中的定义与起算点</td><td>定义对照表</td><td>与 #151 的分级、#169 的报送门槛对齐</td></tr><tr><td>3</td><td>准备&quot;初步通知&quot;模板</td><td>可填空文本</td><td>含时间、初步范围、下次更新时刻</td></tr><tr><td>4</td><td>明确唯一对外承诺人</td><td>名单与代行规则</td><td>与 #171 的预授权第 4 项一致</td></tr><tr><td>5</td><td>准备&quot;不构成责任承认&quot;的标准措辞</td><td>一段固定文本</td><td>法务确认</td></tr><tr><td>6</td><td>建立上游响应时间台账</td><td>每家供应商的实际响应记录</td><td>用于下一次谈判压缩时限</td></tr><tr><td>7</td><td>把&quot;自愿补偿&quot;写成有条件的条款模板</td><td>模板 + 审批路径</td><td>签署前必经保险人确认</td></tr><tr><td>8</td><td>每年核对一次合同链与保单的一致性</td><td>核对记录</td><td>上限、除外、追偿权三者无冲突</td></tr></tbody></table>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;这是国家级攻击，属于不可抗力。&quot;</strong> 不可抗力通常要求&quot;不能预见、不能避免、不能克服&quot;，并需履行通知与减损义务；多数合同并未把网络攻击自动纳入，判断以合同文本与法律意见为准。</li><li><strong>&quot;我们先赔了，客户就不会追究。&quot;</strong> 赔付不当然免除其他主张；且可能触发保单的&quot;自愿支付&quot;除外。</li><li><strong>&quot;等调查清楚再通知客户。&quot;</strong> 合同通知时限通常自&quot;知悉&quot;起算；等待结论等于自动违约。</li><li><strong>&quot;只要态度好，SLA 可以不提。&quot;</strong> SLA 是合同条款，不是关系问题；不主动说明会让对方按最不利口径计算。</li><li><strong>&quot;承认服务中断就等于承认过错。&quot;</strong> 两者可以分开陈述，关键在于措辞是否限定范围。</li><li><strong>&quot;上限条款签的时候吃亏，事件中再说。&quot;</strong> 上限几乎不可能在事件中重谈；它是签约期的资产。</li><li><strong>&quot;上游答应赔我们，我们就能赔客户。&quot;</strong> 上游的响应慢于下游的时限，净暴露窗口由你承担。</li><li><strong>&quot;渠道方不是客户，不用管。&quot;</strong> 渠道方有其自身的合同主张，且常常是第一个发声的一方。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它解决什么</th><th>本篇如何接上</th></tr></thead><tbody><tr><td>#104 季度巡检与例外台账</td><td>常态治理记录</td><td>这些记录在&quot;尽合理义务&quot;的举证中成为材料</td></tr><tr><td>#151 对外沟通与通报义务</td><td>对谁说、分几级</td><td>本篇的初步通知模板与 B1/B2/B3 对齐</td></tr><tr><td>#165 桌面推演</td><td>演练的有效性</td><td>演练记录是免责主张的支撑之一</td></tr><tr><td>#167 供应商合同安全条款</td><td>买方侧的义务设计</td><td>本篇第 8 节依赖它来压缩净暴露窗口</td></tr><tr><td>#168 网络保险</td><td>报案纪律与除外</td><td>本篇第 9 节把合同动作映射到保单</td></tr><tr><td>#169 报送与共享边界</td><td>对监管的出口</td><td>合同通知不替代报送，二者并行</td></tr><tr><td>#171 董事会与高管层治理</td><td>授权与留痕</td><td>赔付与和解需在该层授权</td></tr><tr><td>#172 业务连续性与降级运行</td><td>运行形态</td><td>形态决定触发哪几条 SLA</td></tr><tr><td>#175 公开叙事与第三方披露</td><td>对公众的表述</td><td>客户口径与公开口径必须一致</td></tr></tbody></table>
+<hr>
+<h2>14. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>归因能免除 SLA 吗</td><td>通常不能；合同看的是履约结果</td></tr><tr><td>最早该做什么</td><td>按合同时限发&quot;初步通知&quot;，不等结论</td></tr><tr><td>赔什么、赔多少</td><td>看四层：抵扣、直接损失、上限、间接损失排除</td></tr><tr><td>不能说什么</td><td>不承诺日期、不承诺金额、不放弃权利</td></tr><tr><td>善意怎么给</td><td>写成有条件的一次性条款，并通知保险人</td></tr><tr><td>上游慢、下游快怎么办</td><td>事前压缩上游时限，合同里分摊第三方依赖</td></tr></tbody></table>
+<blockquote><p>说事实、不说归因；按条款、不按情绪；书面承诺、不口头承诺。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>合同与商业沟通的一般结构</strong>，不构成法律意见；SLA 计算、不可抗力认定、赔付上限与代位求偿的具体判断<strong>以合同文本与当地执业律师意见为准</strong>。</li><li>文中不提供任何隐瞒事件、迟延通知或规避合同义务的做法；所有建议均指向&quot;按约定通知、如实陈述、保留权利&quot;。</li><li>涉及具体客户、渠道或供应商的内容均为结构性描述，不指向任何真实主体。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件通知与沟通的流程位置）</li><li><a href="https://www.iso.org/standard/59688.html" rel="nofollow noopener" target="_blank">ISO/IEC 27036：供应链信息安全</a>（供应链责任与信息共享的通用框架）</li><li><a href="https://www.enisa.europa.eu/topics" rel="nofollow noopener" target="_blank">ENISA：供应链与服务水平相关公开材料</a>（合同与连续性条款的实践讨论）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：事件沟通与业务影响资源</a>（沟通结构与业务影响的公开指引）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术行为的通用表述框架）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple Platform Security Guide</a>（能力边界的事实来源）</li><li>本系列 #104、#151、#165、#167、#168、#169、#171、#172、#175（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a172.html">← 第 172 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a174.html">第 174 篇 →</a></nav></article>
+</main></body></html>
