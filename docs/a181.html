@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下审计与认证中的历史事件陈述 | iOS 安全研究文章库</title>
+<meta name="description" content="审计要的不是「没出过事」而是**出过事之后流程还在**，故从未记录过事件反而更像纸面流程；**「没有」是最贵的一句话**（事实层／一致性层／结构性层三重代价，第三层不可修复）；三形态 是/否／范围限定／附证据索引，先**定义「事件」**再回答；审计逻辑 **流程存在 &gt; 结果完美**（五项评分里敢写「未">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a181.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下审计与认证中的历史事件陈述">
+<meta property="og:description" content="审计要的不是「没出过事」而是**出过事之后流程还在**，故从未记录过事件反而更像纸面流程；**「没有」是最贵的一句话**（事实层／一致性层／结构性层三重代价，第三层不可修复）；三形态 是/否／范围限定／附证据索引，先**定义「事件」**再回答；审计逻辑 **流程存在 &gt; 结果完美**（五项评分里敢写「未">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a181.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 181 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的审计陈述：被问&quot;过去一年有没有出过事&quot;时怎么答</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>一次定向投放结束之后，事情通常没有结束——它会以问题的形式，在<strong>审计、认证、招标、客户问卷、年度合规审查</strong>里再出现一次到十次。本篇讨论的是这一类场合：<strong>你被要求对自己的安全历史作陈述</strong>。</li><li>核心命题一：<strong>审计要的不是&quot;没出过事&quot;，是&quot;出过事之后你的流程还在&quot;。</strong> 一个从未记录过事件的组织，在成熟度判断上通常比一个如实记录并闭环的组织更差。</li><li>核心命题二：<strong>&quot;没有&quot;是最贵的一句话。</strong> 一旦后续证据显示有过事件，你失去的不只是一次审计结论，而是此前所有陈述的可信度——包括那些与本事件无关的。</li><li>核心命题三：<strong>陈述要&quot;准确、限定、可核对&quot;，而不是&quot;简短、正面、好懂&quot;。</strong> 三个词各自对应一种写法，缺一个就会在追问时崩溃。</li><li>核心命题四：<strong>同一事实在不同场合会有四个版本。</strong> 审计版、客户问卷版、监管版、公开版。事实必须一致，只有详略与术语可以不同（#174 的口径、#175 的叙事）。</li><li>核心命题五：<strong>认证不证明你没被攻破，只证明你有一套被评估过的体系。</strong> 把认证当作&quot;安全证明&quot;来使用，是审计语言里最常见的一次误读。</li><li>一句话结论：<strong>把每一次陈述都当成未来某次追问的第一句——它必须能被同一套材料接住。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#104 处理<strong>季度巡检与例外台账</strong>：你自己怎么定期检查、例外怎么登记。那套记录正是本篇要用的<strong>证据源</strong>。</p>
+<p>#157 处理<strong>名单治理</strong>、#160 处理<strong>管控栈</strong>、#161 处理<strong>指标治理</strong>：它们产生的记录，构成了审计能看到的&quot;流程存在&quot;的证据。</p>
+<p>#167 处理<strong>合同条款</strong>：客户合同里常常写着&quot;发生安全事件须告知&quot;，那句条款会在审计里被翻出来核对。</p>
+<p>#177 与 #178 处理<strong>外部委托与记录分层</strong>：审计是记录的第三个读者群（不是诉讼，不是监管），它的要求恰好相反——<strong>怕记录少</strong>。</p>
+<p>#182 处理<strong>并购尽调</strong>：另一种&quot;被问历史&quot;的场合，但对象与后果不同（交易对价 vs 认证结论）。</p>
+<p>#186 处理<strong>内部人员</strong>：审计常会追问&quot;关键岗位离职是否有交接记录&quot;。</p>
+<hr>
+<h2>3. 审计会问的五类问题</h2>
+<p>问题看起来很多，其实只有五类。每一类的&quot;正确答案形状&quot;不同。</p>
+<table><thead><tr><th>类别</th><th>典型问法</th><th>真正在评什么</th><th>答案形状</th></tr></thead><tbody><tr><td>历史事件</td><td>&quot;过去 12 个月是否发生过安全事件？&quot;</td><td>你有没有识别与记录能力</td><td>有/无 + 范围界定 + 闭环证据</td></tr><tr><td>流程存在</td><td>&quot;事件如何分级？谁批准？&quot;</td><td>流程是否被写下来并被执行过</td><td>文件 + 一次真实执行的样例</td></tr><tr><td>控制有效</td><td>&quot;检测能否发现横向移动？&quot;</td><td>控制是否被验证过</td><td>验证方法与结果（#148）</td></tr><tr><td>第三方风险</td><td>&quot;关键供应商如何评估？&quot;</td><td>供应链是否有入口</td><td>清单 + 评估记录（#167）</td></tr><tr><td>人员与培训</td><td>&quot;员工是否受过训练？&quot;</td><td>是否有持续机制</td><td>记录 + 覆盖率 + 效果（#176）</td></tr></tbody></table>
+<p>第一类问题是本篇的核心，但它的答案<strong>依赖后四类的材料</strong>。这就是为什么&quot;答没有&quot;在技术上也很危险：如果答&quot;没有&quot;，后四类的&quot;执行过的样例&quot;就无从提供，审计反而会怀疑你的流程只存在于纸面。</p>
+<hr>
+<h2>4. 为什么&quot;答没有&quot;是最贵的一句话</h2>
+<p>三个层面，一个比一个贵。</p>
+<ul><li><strong>事实层面</strong>：你确实有一次事件，只是它没被识别、没被记录，或被定义为&quot;不算事件&quot;。这三种情况在后续追问里都会暴露。</li><li><strong>一致性层面</strong>：这次答&quot;没有&quot;，下次（客户问卷、监管问询）答&quot;有过&quot;，两份材料同时存在于不同对方手里。你无法控制它们何时相遇。</li><li><strong>结构性层面</strong>：一旦被发现陈述不实，评估者会重新审视<strong>所有</strong>由你提供的材料——包括那些完全准确的。这是最贵的一项，因为它不可修复。</li></ul>
+<p>正确的做法不是&quot;如实全说&quot;，而是<strong>准确界定范围</strong>：&quot;本报告期内，我们识别到 X 起安全事件，其中 Y 起符合贵方定义的事件标准，处置情况见附录。&quot;——这句话同时满足如实、限定、可核对三条。</p>
+<hr>
+<h2>5. 陈述的三种形态</h2>
+<table><thead><tr><th>形态</th><th>写法</th><th>适用</th><th>风险</th></tr></thead><tbody><tr><td>是/否</td><td>&quot;未发生&quot; / &quot;发生 1 起&quot;</td><td>只适合问题本身是二值的场合</td><td>一旦被追问细节，容易崩</td></tr><tr><td>范围限定</td><td>&quot;在本报告期、按本合同附件定义的事件标准，未发生须通报事件&quot;</td><td>大多数情况</td><td>需要事先定义清楚</td></tr><tr><td>附证据说明</td><td>上述 + 闭环材料索引</td><td>高价值客户、监管、认证</td><td>材料准备成本高，但最稳</td></tr></tbody></table>
+<p>三个形态不是递进关系，而是<strong>按对方的要求选择</strong>。对方只要二值答案时，给二值答案并附一句范围；对方要证据时，给索引而不是给全部材料（#178 的分层原则同样适用）。</p>
+<p>一个实用细节：<strong>&quot;事件&quot;这个词必须先定义</strong>。你有你的定义（#91 的后果分类），对方有对方的定义（合同附件、标准条款）。陈述前先确认用的是哪一个，否则双方会为同一个词争执到最后。</p>
+<hr>
+<h2>6. 审计的逻辑：流程存在 &gt; 结果完美</h2>
+<p>这一点经常被误解为&quot;审计不认真&quot;。实际上它是有道理的：<strong>没有任何体系能保证不被攻破</strong>，能保证的是&quot;被攻破之后会发生什么&quot;。</p>
+<table><thead><tr><th>评估项</th><th>满分长什么样</th><th>零分长什么样</th><th>你实际能拿到的最好状态</th></tr></thead><tbody><tr><td>识别</td><td>有监测、有告警、有分诊</td><td>靠客户告知</td><td>有监测 + 一次真实识别记录</td></tr><tr><td>记录</td><td>时间线、证据清单齐全</td><td>只有口头回忆</td><td>事件后 72 小时内形成初版</td></tr><tr><td>决策</td><td>有权责清晰的决策记录</td><td>群聊里拍板</td><td>一次有签字的处置决定</td></tr><tr><td>闭环</td><td>改进项有负责人与到期日</td><td>报告归档即结束</td><td>至少一项改进被验证完成（#166）</td></tr><tr><td>复盘</td><td>有反面假设与未解问题</td><td>全篇结论正面</td><td>敢写&quot;未解释的异常&quot;</td></tr></tbody></table>
+<p>第五行最难，也最能区分成熟度。一份敢写&quot;这一项我们没有结论&quot;的复盘，比一份全绿的复盘更能通过成熟评估。</p>
+<hr>
+<h2>7. 认证不等于没被攻破：四个原因</h2>
+<ul><li><strong>范围不同</strong>：认证评估的是体系与控制，不是&quot;是否被针对&quot;。</li><li><strong>时点不同</strong>：认证是某个时间窗口的快照，事件可能发生在其后。</li><li><strong>样本不同</strong>：审计抽样，不覆盖全部系统与全部时段。</li><li><strong>对手不同</strong>：定向投放针对的往往正是&quot;体系之外的那一格&quot;（#94 的暴露画像）。</li></ul>
+<p>因此对外表述应当是&quot;我们通过了 X 认证&quot;而不是&quot;我们通过了 X 认证，因此是安全的&quot;。前一句是事实，后一句是承诺——而承诺会在事件发生时变成虚假陈述。</p>
+<hr>
+<h2>8. 同一事实的四个版本</h2>
+<table><thead><tr><th>版本</th><th>读者</th><th>详略</th><th>必须一致的部分</th></tr></thead><tbody><tr><td>审计版</td><td>审计师/认证机构</td><td>流程 + 证据索引</td><td>事件数量、时间、性质、闭环状态</td></tr><tr><td>客户问卷版</td><td>客户/招标方</td><td>结论 + 影响 + 已采取动作</td><td>同上</td></tr><tr><td>监管版</td><td>主管部门</td><td>按法定要素</td><td>同上（#169）</td></tr><tr><td>公开版</td><td>公众/媒体</td><td>极简，去识别化</td><td>同上（#175）</td></tr></tbody></table>
+<p>四个版本可以有不同的术语、不同的篇幅、不同的技术深度，但<strong>数字、时间、性质、状态必须一致</strong>。维护这种一致性最省力的办法不是反复对照，而是<strong>建一份&quot;事实底稿&quot;</strong>：一张表，列出所有对外说过的事实性陈述及其出处。任何版本都从这张表派生。</p>
+<p>这张表通常只有一两页，但它是防止&quot;四个版本互相打脸&quot;的唯一低成本手段。</p>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>先定义&quot;事件&quot;</strong>：内部定义、合同定义、标准定义三套并存时，明确每次陈述用的是哪一套。</li><li><strong>建事实底稿</strong>：一页表，记录所有已对外陈述的事实与出处。</li><li><strong>用范围限定句式</strong>，不用裸&quot;没有&quot;。</li><li><strong>每次陈述附材料索引</strong>，材料本身按 #178 分层。</li><li><strong>复盘敢留&quot;未解项&quot;</strong>，这是成熟度的正向信号。</li><li><strong>闭环至少一项可验证的改进</strong>，并保留验证记录。</li><li><strong>对外统一&quot;认证≠安全&quot;的表述</strong>，避免给自己制造承诺。</li><li><strong>年度对齐一次四个版本</strong>，在审计季之前做，而不是被问到之后做。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;答没有最省事&quot;</td><td>最贵；一旦被证伪，全部陈述的可信度一起下降</td></tr><tr><td>&quot;审计只看文件&quot;</td><td>也看执行样例；没有样例的文件会被判为纸面流程</td></tr><tr><td>&quot;认证了就证明安全&quot;</td><td>证明体系被评估过，不证明未被攻破</td></tr><tr><td>&quot;不同场合可以说不同版本&quot;</td><td>事实必须一致，只有详略可以不同</td></tr><tr><td>&quot;复盘写得越正面越好&quot;</td><td>敢写未解项的复盘更可信</td></tr><tr><td>&quot;事件小到不用记&quot;</td><td>不记就无法证明识别能力；小事件正是执行样例</td></tr><tr><td>&quot;客户问卷随便填&quot;</td><td>问卷同样是书面陈述，且通常留档多年</td></tr><tr><td>&quot;审计前临时补记录&quot;</td><td>时间戳与版本历史会暴露补记；不如如实说明&quot;当时未记录&quot;</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#104 季度巡检</td><td>定期检查与例外台账</td><td>本篇的证据源</td></tr><tr><td>#148 检测效力甄别</td><td>检测能力怎么验</td><td>控制有效性的评估方法</td></tr><tr><td>#157 / #160 / #161</td><td>名单、管控栈、指标</td><td>流程存在的证据来源</td></tr><tr><td>#167 合同条款</td><td>告知义务</td><td>审计时会核对这一条</td></tr><tr><td>#169 监管报送</td><td>法定报告</td><td>与审计版口径对齐</td></tr><tr><td>#174 统计口径</td><td>数字怎么算</td><td>事实底稿的数字来源</td></tr><tr><td>#175 公开叙事</td><td>对外表述</td><td>公开版与审计版的一致性</td></tr><tr><td>#176 培训有效性</td><td>能力与记录</td><td>人员类问题的答案</td></tr><tr><td>#177 / #178</td><td>委托与记录分层</td><td>材料索引的依据</td></tr><tr><td>#182 并购尽调</td><td>另一种历史陈述</td><td>方法与风险结构相同</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>审计真正在评什么</td><td>你有没有识别、记录、决策、闭环的能力</td></tr><tr><td>能不能答&quot;没有&quot;</td><td>只有在范围内确实没有，且能说明范围</td></tr><tr><td>最稳的句式</td><td>范围限定 + 数量 + 闭环证据索引</td></tr><tr><td>认证能证明什么</td><td>体系被评估过，不证明未被攻破</td></tr><tr><td>四个版本怎么保持一致</td><td>一份事实底稿，全部版本从它派生</td></tr><tr><td>复盘该不该写未解项</td><td>该写，这是成熟度的正向信号</td></tr><tr><td>补记录可以吗</td><td>不如如实说明未记录；时间戳会暴露补记</td></tr></tbody></table>
+<blockquote><p>审计问的不是&quot;你有没有被打过&quot;，是&quot;你被打过之后还剩下什么&quot;。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>面向审计、认证与问卷的历史陈述方法</strong>，不构成法律或审计意见；具体的报告义务、披露范围与标准条款适用，<strong>须由执业律师与审计专业人士判断</strong>。</li><li>本篇<strong>不提供任何规避审计、隐瞒事件或误导评估的方法</strong>；所有建议均以如实陈述为前提，讨论的是范围界定与表达方式。</li><li>不涉及任何具体机构、认证体系或案件；文中为通用结构。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.iso.org/standard/27001" rel="nofollow noopener" target="_blank">ISO/IEC 27001：信息安全管理体系</a>（体系与记录要求）</li><li><a href="https://www.iso.org/standard/75652.html" rel="nofollow noopener" target="_blank">ISO/IEC 27002：信息安全控制实践</a>（控制与证据的对应）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件记录与复盘）</li><li><a href="https://www.nist.gov/cyberframework" rel="nofollow noopener" target="_blank">NIST CSF 2.0</a>（治理与改进的通用框架）</li><li><a href="https://www.enisa.europa.eu/topics/incident-response" rel="nofollow noopener" target="_blank">ENISA：事件响应良好实践</a>（复盘与证据的公开材料）</li><li>本系列 #104、#148、#157、#160、#161、#167、#169、#174、#175、#176、#177、#178、#182（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a180.html">← 第 180 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a182.html">第 182 篇 →</a></nav></article>
+</main></body></html>

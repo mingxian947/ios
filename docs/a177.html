@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下外部响应服务商的委托与授权边界 | iOS 安全研究文章库</title>
+<meta name="description" content="外部服务买到的是**产能不是能力**，授权文件而不是合同金额决定边界；四问 **看什么／给谁看／代表谁说话／记录归谁**，六要素 范围／期限／数据处置／代表权／记录归属／退出交接，四类角色（取证 IR／律师／保险公估／沟通）各有「不能拿到什么」；最大长期风险是**权限扩散**（一页访问登记表 &gt; 任何制">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a177.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下外部响应服务商的委托与授权边界">
+<meta property="og:description" content="外部服务买到的是**产能不是能力**，授权文件而不是合同金额决定边界；四问 **看什么／给谁看／代表谁说话／记录归谁**，六要素 范围／期限／数据处置／代表权／记录归属／退出交接，四类角色（取证 IR／律师／保险公估／沟通）各有「不能拿到什么」；最大长期风险是**权限扩散**（一页访问登记表 &gt; 任何制">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a177.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 177 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的外部响应委托：把&quot;请谁进来帮忙&quot;变成一份可执行的授权</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>定向投放事件进入第二十四小时，绝大多数组织都会引入外部力量：取证公司、事件响应顾问、外部律师、保险公估、沟通顾问。前面三十篇把动作写得足够细，但它们<strong>全部隐含一个假设：执行动作的是&quot;自己人&quot;</strong>。一旦外部人进来，问题的性质就从&quot;会不会做&quot;变成&quot;<strong>谁有权做什么、做到哪一天、留下什么</strong>&quot;。本篇处理这个转折。</li><li>核心命题一：<strong>外部服务的价值是产能，不是能力。</strong> 你买到的是&quot;在你自己还不具备的那段时间里有人能干活&quot;；能不能干、干到哪、干完留下什么，由<strong>授权文件</strong>决定，不由合同金额决定。</li><li>核心命题二：<strong>授权必须回答四个问题：看什么、给谁看、代表谁说话、记录归谁。</strong> 四个问题里任何一个没写清，都会在结束那天变成争议——而结束那天通常也是你最强调整顿的时候。</li><li>核心命题三：<strong>外部人带来的最大风险不是&quot;泄密&quot;，是权限扩散。</strong> 一个为取证开的只读账号、一份离开你控制的设备镜像、一个换到别处去的顾问——它们在事件结束后仍然存在，且多数不在任何台账里。</li><li>核心命题四：<strong>委托的产物不是一份报告，是可交接的状态。</strong> 谁在什么时间知道了什么、做了什么、依据是什么、还没做什么。报告只是这个状态的一个切片。</li><li>核心命题五：<strong>外部服务商的利益与你的利益不完全一致。</strong> 他们靠&quot;发现了什么&quot;建立价值，你靠&quot;结论能不能被依赖&quot;承担后果。因此<strong>结论的验收标准必须由你定义</strong>，不能由对方定义（#156 的结论上限、#148 的效力甄别是同一结构的两个应用）。</li><li>一句话结论：把&quot;请谁来帮忙&quot;改写为&quot;<strong>授权给谁、到哪一天、看完之后留下什么</strong>&quot;。</li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#156 处理<strong>调查的成本结构与结论上限</strong>：钱花在哪里、结论最多能到哪一步。本篇处理成本与结论的<strong>前置决定因素</strong>——委托范围。范围定得宽，钱一定超；范围定得窄，结论一定不够。</p>
+<p>#162 处理<strong>水坑链路服务商协作</strong>：托管、DNS、证书、CDN、投放平台。那是<strong>上游服务商</strong>，你是被投递方。本篇是<strong>下游顾问</strong>，你把他们请进来。</p>
+<p>#164 处理<strong>访谈与协作纪律</strong>：见谁、按什么顺序、哪些问题不该问。本篇决定<strong>谁能坐在访谈室里</strong>、以什么身份坐着。</p>
+<p>#171 处理<strong>董事会与高管层的授权</strong>：谁批准行动、预算从哪出。本篇处理<strong>把授权再外包出去时的边界</strong>——你被授权做的事，能不能转手给外部人做。</p>
+<p>#178 处理<strong>记录的特权与可披露范围</strong>：哪些材料在什么条件下可以不交。本篇是建立这层关系的<strong>第一步</strong>，也是唯一能决定&quot;以后有没有东西可保护&quot;的一步。</p>
+<p>#185 处理<strong>是否更换长期供应商</strong>。本篇是<strong>临时引入</strong>，两者不能互相替代：临时引入的外部方，往往就是下一轮&quot;要不要长期用&quot;讨论里的候选人，但那时的判断依据完全不同。</p>
+<hr>
+<h2>3. 四类外部角色，四种不同的授权</h2>
+<p>&quot;请外部帮忙&quot;不是一件事，是至少四件不同的事。它们的授权结构、产出物、失败方式都不一样。把它们混在一个委托里，是权限扩散最常见的起点。</p>
+<table><thead><tr><th>角色</th><th>他们需要看的</th><th>他们的产出</th><th>谁指挥他们</th><th>他们<strong>不能</strong>拿到的</th></tr></thead><tbody><tr><td>技术取证 / IR</td><td>设备镜像、日志、账号审计记录、网络出口记录</td><td>时间线、指标、影响范围判断</td><td>你的技术负责人（<strong>单一接口人</strong>）</td><td>全公司账号的管理权限；与本案无关的业务数据</td></tr><tr><td>外部律师</td><td>事实材料、内部沟通记录、已出具的证据清单</td><td>法律意见、合规路径、对外口径的合法边界</td><td>法务负责人</td><td>原始取证镜像的处置权（除非另有约定）</td></tr><tr><td>保险公估</td><td>损失证据、时间线、已发生的支出凭证</td><td>损失核定意见</td><td>风险管理 / 财务</td><td>完整取证材料；未脱敏的个人数据</td></tr><tr><td>沟通顾问</td><td>已确认的事实、已决定的动作</td><td>对外表述方案</td><td>指定的发言人</td><td>未经确认的推断；可识别受害者身份的信息</td></tr></tbody></table>
+<p>四类角色有一条共同纪律：<strong>接口人唯一</strong>。每个外部团队只对一个人负责、只从一个人那里接收范围变更。多头指挥的典型后果是——三份报告对同一件事给出三个版本，而三个版本都会被对方在谈判桌上引用。</p>
+<hr>
+<h2>4. 授权文件的六个要素</h2>
+<p>不必写成一份几十页的合同附件，但六个要素一个都不能省。缺哪一条，后果在第 5 列。</p>
+<table><thead><tr><th>要素</th><th>具体要写什么</th><th>常见写法（可抄）</th><th>缺失的后果</th></tr></thead><tbody><tr><td>范围</td><td>哪些设备、哪些系统、哪些时间段、哪些账号</td><td>&quot;仅限下列 14 台设备与 3 个服务账号，时间窗 2026-10-01 至发现日&quot;</td><td>范围自然膨胀到&quot;顺手看看整个域&quot;</td></tr><tr><td>期限</td><td>授权的到期日与续期条件</td><td>&quot;有效期 30 天，续期需书面变更单&quot;</td><td>只读账号在结案一年后仍可用</td></tr><tr><td>数据处置</td><td>副本、镜像、工作文件的存放、加密、销毁时间与证明</td><td>&quot;镜像仅存放于 X，案件结束 30 日内销毁并出具销毁确认&quot;</td><td>你的数据在对方机房里过了三个案子</td></tr><tr><td>代表权</td><td>能否对外发言、能否代表你与第三方沟通</td><td>&quot;不得以我方名义对外沟通；与第三方联络须经接口人书面同意&quot;</td><td>顾问一句&quot;我们认为问题不大&quot;被当成官方结论</td></tr><tr><td>记录归属</td><td>工作记录、原始数据、分析中间件归谁</td><td>&quot;原始数据与工作记录归委托方所有，受托方保留副本须列明&quot;</td><td>关键时刻调不回自己的材料（#178）</td></tr><tr><td>退出与交接</td><td>结束时必须交付什么、以什么形式</td><td>&quot;十项交接清单 + 一次口头交接会&quot;（见第 8 节）</td><td>报告在，判断不在；换人之后一切重来</td></tr></tbody></table>
+<p>写这六条的真正意义不是法律防御，是<strong>让&quot;到时候再说&quot;没有发生的机会</strong>。事件中所有&quot;到时候再说&quot;的事，都会在最没时间处理的那一天集中爆发。</p>
+<hr>
+<h2>5. 权限扩散：三种最常见的泄漏</h2>
+<p>外部委托的长期风险，几乎全部集中在三种泄漏上，而不是&quot;某个人嘴不严&quot;。</p>
+<p><strong>第一种：凭据与账号。</strong> 为查证开的管理员账号、为下载日志开的临时密钥、为连内网开的 VPN 账号。它们在事件结束时的默认状态是&quot;还在&quot;。可执行的解法只有一条：<strong>所有为事件新增的访问，登记在一张表上</strong>，表里写明开通人、用途、到期日、关闭确认人。这张表比任何安全制度都有效，因为它只有一页。</p>
+<p><strong>第二种：副本与镜像。</strong> 设备镜像一旦离开你的控制，就等于多了一份无法证明已删除的数据。三个动作降低风险：镜像在移出前完成登记（谁、何时、什么设备、多大、哈希）；移出方式限定通道；销毁要有确认件。注意这里的现实约束——<strong>你无法验证对方是否真的删了</strong>，所以能做的只是把&quot;该删&quot;变成一个有签字的事实。</p>
+<p><strong>第三种：人。</strong> 顾问团队的人员流动，比公司内部快得多。同一个人这周在你这里看到你的名单，下个月在另一家客户的案子里。这不是道德问题，是行业结构。应对方式不是保密协议（那只是底线），而是<strong>分级披露</strong>：能让三个人看到的东西，不要让十个人看到；能用汇总代替明细的，用汇总。</p>
+<table><thead><tr><th>泄漏类型</th><th>事件期是否可察觉</th><th>结束时的默认状态</th><th>唯一的可行控制</th></tr></thead><tbody><tr><td>账号与凭据</td><td>可（看访问日志）</td><td>仍然存在</td><td>一页访问登记表 + 到期日</td></tr><tr><td>副本与镜像</td><td>部分可（看交接记录）</td><td>多出一份</td><td>登记 + 通道限定 + 销毁确认</td></tr><tr><td>人员流动</td><td>不可</td><td>随人走</td><td>分级披露，不给非必需的明细</td></tr></tbody></table>
+<hr>
+<h2>6. 全程可见性：你怎么知道他们在做什么</h2>
+<p>把工作交出去不等于把知情权交出去。四个机制足以维持基本可见性，且都不增加对方多少负担。</p>
+<ul><li><strong>每日一页书面同步</strong>：昨天做了什么、今天做什么、遇到什么阻碍、需要你做什么决定。<strong>不要求长篇报告</strong>，要求的是&quot;每天都有&quot;。</li><li><strong>范围变更单</strong>：任何超出第 4 节范围的动作，先出一页变更单，你签字后才做。这一条能挡住绝大部分范围膨胀。</li><li><strong>访问日志</strong>：他们用你的账号做了什么，从你自己的日志里就能看到。不必依赖对方的自述。</li><li><strong>镜像与副本登记</strong>：每一次数据离开你的控制，都留一行记录。</li></ul>
+<p>四个机制里最重要的是范围变更单。原因很实际：<strong>事件中真正危险的不是对方做错，而是对方做了你没要求、也不知情的事</strong>——比如为了&quot;全面评估&quot;把你的备份也拉走了，而备份里有三年前的已删除数据（#96 的残留、#102 的历史数据是同一类问题）。</p>
+<hr>
+<h2>7. 结论的验收：外部报告不能直接当结论</h2>
+<p>一份排版精美、图表齐全的外部报告，最容易被当成结论直接往上送。越过这一步，你就把&quot;结论的责任&quot;也一起交了出去。三个问题足以做一次基本验收。</p>
+<p><strong>第一问：证据分级了吗？</strong> 每条结论后面应当能指出它依据的是哪一类材料——直接观察（日志、镜像）、间接推断（时间相关性）、外部情报（同族样本、公开报告）、还是假设。四类混在一起写的报告，无法判断哪一条能在法庭上、监管面前、董事会里站住。</p>
+<p><strong>第二问：置信度写了吗？</strong> &quot;高度可能&quot;&quot;可能&quot;&quot;无法判断&quot;应当出现，并且与证据分级对应。一份没有&quot;无法判断&quot;的报告，本身就是可疑的——因为真实调查几乎总会留下一块黑区（#156 的结论上限说的就是这块）。</p>
+<p><strong>第三问：反面假设处理了吗？</strong> 同一个现象通常至少有两种解释：定向投放，或者误报/正常业务行为。报告里有没有专门写&quot;我们为什么排除了另一种解释&quot;？没有这一节，就等于把排除工作留给了读者。</p>
+<table><thead><tr><th>验收问题</th><th>合格的样子</th><th>不合格的样子</th><th>不合格时怎么办</th></tr></thead><tbody><tr><td>证据分级</td><td>每条结论标注来源类别</td><td>全部写成&quot;经分析确认&quot;</td><td>要求逐条补来源，不补不签收</td></tr><tr><td>置信度</td><td>有&quot;无法判断&quot;的条目</td><td>全篇确定语气</td><td>视为意见书，不作事实依据</td></tr><tr><td>反面假设</td><td>有排除过程</td><td>只写支持结论的发现</td><td>要求补充，或在内部纪要里自行标注</td></tr><tr><td>范围一致</td><td>与授权范围吻合</td><td>覆盖了未授权的系统</td><td>立即核查是否有越权取数</td></tr></tbody></table>
+<hr>
+<h2>8. 结束：交接清单（十项）</h2>
+<p>委托关系结束时，最容易被忽略的是&quot;状态&quot;，因为它不在任何一份交付物清单上。下面十项，缺一项就意味着未来某天要重新做一遍。</p>
+<table><thead><tr><th>#</th><th>交接项</th><th>为什么要它</th></tr></thead><tbody><tr><td>1</td><td>时间线（含不确定区间）</td><td>后续所有判断的骨架</td></tr><tr><td>2</td><td>证据清单（含来源、哈希、存放位置）</td><td>没有它，材料无法被引用</td></tr><tr><td>3</td><td>指标清单（含来源、置信度、有效期）</td><td>指标会过期，必须知道从哪天开始不可信（#161）</td></tr><tr><td>4</td><td>未完成事项与原因</td><td>防止结案后出现&quot;以为做过了&quot;</td></tr><tr><td>5</td><td>访问账号与凭据的关闭确认</td><td>唯一能证明权限已收回的东西</td></tr><tr><td>6</td><td>副本与镜像的处置确认</td><td>见第 5 节</td></tr><tr><td>7</td><td>分析中的假设列表</td><td>后续推翻结论时最有用的一页</td></tr><tr><td>8</td><td>未采纳的方案与理由</td><td>防止下一轮重复讨论</td></tr><tr><td>9</td><td>对外已说过的内容清单</td><td>口径一致性（#175）</td></tr><tr><td>10</td><td>一次口头交接会</td><td>书面材料传不了判断，人能</td></tr></tbody></table>
+<p>第 10 项经常被当成客套跳过。但<strong>写在纸上的判断和讲出来的判断，密度完全不同</strong>——对方在会议上会自然地说出&quot;这条我们其实没有把握&quot;&quot;这里有个人为因素我们没查&quot;。这些话不会进报告，却是你后面几个月最需要的部分。</p>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>一份委托前的一页纸</strong>：范围 / 期限 / 数据处置 / 代表权 / 记录归属 / 交接，六项填完再签字。</li><li><strong>指定唯一接口人</strong>，并在委托文件里写明&quot;范围变更只能由该人书面确认&quot;。</li><li><strong>建立访问登记表</strong>，事件期间新增的每一个账号、密钥、VPN 都登记，写明到期日。</li><li><strong>镜像与副本登记</strong>，每次数据离开控制范围留一行记录与哈希。</li><li><strong>分级披露</strong>：名单、受害者身份、客户明细，只给必须看到的人。</li><li><strong>每日一页同步 + 范围变更单</strong>，不接受口头扩大范围。</li><li><strong>报告验收四问</strong>：证据分级、置信度、反面假设、范围一致。</li><li><strong>十项交接清单</strong>，缺项不结案；口头交接会必须有记录。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;签了保密协议就安全了&quot;</td><td>保密协议是底线，管不住权限扩散；控制靠范围与期限</td></tr><tr><td>&quot;大牌公司一定更可靠&quot;</td><td>大牌带来的是流程与产能，不是对你这家公司的了解；接口人质量差异更大</td></tr><tr><td>&quot;报告越厚越可信&quot;</td><td>厚报告常常是证据与推断混写；验收看分级，不看厚度</td></tr><tr><td>&quot;外部人做完了，我们就不用懂了&quot;</td><td>交接不到判断，下一个事件还得重来；理解必须留在内部</td></tr><tr><td>&quot;让他们全面看看更保险&quot;</td><td>全面=范围膨胀=成本失控+数据多流一处；范围要窄而准</td></tr><tr><td>&quot;让他们顺便对外沟通效率更高&quot;</td><td>代表权一旦模糊，一句非正式表态会被当成官方结论</td></tr><tr><td>&quot;取证镜像留着以后也许有用&quot;</td><td>多留一份就多一份无法证明删除的数据；用途要写清，到期要销毁</td></tr><tr><td>&quot;事件结束了，委托就自然结束了&quot;</td><td>账号、副本、文档不会自己消失；结束是一个动作，不是一个时间点</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#148 检测产品效力甄别</td><td>怎么判断&quot;检测能力&quot;</td><td>外部服务商的检测能力同样要按此甄别，不因品牌豁免</td></tr><tr><td>#156 成本结构与结论上限</td><td>钱与结论</td><td>本篇决定二者的前置条件：委托范围</td></tr><tr><td>#162 水坑链路服务商协作</td><td>上游服务商</td><td>上下游不同，授权结构也不同</td></tr><tr><td>#164 访谈纪律</td><td>访谈怎么做</td><td>本篇决定谁能进访谈室</td></tr><tr><td>#171 董事会治理</td><td>授权与预算</td><td>本篇是&quot;再授权&quot;的边界</td></tr><tr><td>#178 特权与披露</td><td>记录能否不交</td><td>本篇是建立这层保护的第一步</td></tr><tr><td>#185 更换供应商</td><td>长期选择</td><td>本篇只管临时引入</td></tr><tr><td>#96 / #102</td><td>数据残留与历史数据</td><td>备份、历史副本是范围膨胀最常见的载体</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>外部服务买的是什么</td><td>产能，不是能力</td></tr><tr><td>授权要写清哪四件事</td><td>看什么、给谁看、代表谁说话、记录归谁</td></tr><tr><td>最大的长期风险是什么</td><td>权限扩散：账号、副本、人</td></tr><tr><td>怎么保持可见</td><td>每日一页 + 范围变更单 + 自己的访问日志 + 副本登记</td></tr><tr><td>报告能直接当结论吗</td><td>不能；先过证据分级、置信度、反面假设、范围一致四问</td></tr><tr><td>结束时最重要的是什么</td><td>十项交接，尤其是一次口头交接会</td></tr><tr><td>一句话的判断标准</td><td>结束时，你能不能在不联系对方的情况下，独立复述发生了什么、依据是什么</td></tr></tbody></table>
+<blockquote><p>委托的质量，不看请了谁，看结束那天你还剩下什么。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>组织与外部专业服务之间的委托结构</strong>，不构成法律意见；涉及特权、披露义务、合同条款的具体适用，<strong>应由执业律师结合所在法域判断</strong>。</li><li>不涉及任何具体服务商的评价，也不对任何真实案件的处理过程作事实断言。</li><li>文中所有建议均指向<strong>降低权限扩散与提升可交接性</strong>，不涉及对任何第三方的不当限制或对抗性安排。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：计算机安全事件处理指南</a>（事件响应阶段的通用框架）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（证据处理、保管链与记录要求）</li><li><a href="https://www.iso.org/standard/44381.html" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据识别、收集、获取与保存</a>（证据处置的通用规范）</li><li><a href="https://www.enisa.europa.eu/topics/incident-response" rel="nofollow noopener" target="_blank">ENISA：事件响应良好实践</a>（外部协作与角色分工的公开材料）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：事件与漏洞响应资源</a>（协作流程的公开说明）</li><li><a href="https://attack.mitre.org/matrices/mobile/" rel="nofollow noopener" target="_blank">MITRE ATT&amp;CK for Mobile</a>（技术行为的通用表述框架）</li><li>本系列 #148、#156、#162、#164、#171、#178、#185（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a176.html">← 第 176 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a178.html">第 178 篇 →</a></nav></article>
+</main></body></html>

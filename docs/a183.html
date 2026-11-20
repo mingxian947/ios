@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下追偿路径与责任主张 | iOS 安全研究文章库</title>
+<meta name="description" content="**追偿不是止损**（止损在事件期，追偿以年计），先问值不值得再问追谁；三路径依据不同 对攻击者=侵权/刑事附带、对供应商=合同、对第三方=过错，共同前提是**因果链**（而定向投放恰恰最难证明「若无其过失是否仍会成功」）；成本五项（律师专家／内部人力持续数年／管理注意力／关系／机会），多数中小事件追偿经济上">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a183.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下追偿路径与责任主张">
+<meta property="og:description" content="**追偿不是止损**（止损在事件期，追偿以年计），先问值不值得再问追谁；三路径依据不同 对攻击者=侵权/刑事附带、对供应商=合同、对第三方=过错，共同前提是**因果链**（而定向投放恰恰最难证明「若无其过失是否仍会成功」）；成本五项（律师专家／内部人力持续数年／管理注意力／关系／机会），多数中小事件追偿经济上">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a183.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 183 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的追偿：把&quot;我们被骗了&quot;变成&quot;谁来付&quot;</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>事件处理完、损失算清之后，组织通常会问一个问题：<strong>这些钱能不能要回来一部分？</strong> 答案通常是&quot;能，但比想象的慢、比想象的少、且需要现在就动手&quot;。本篇讨论追偿的<strong>路径结构与决策判据</strong>，不讨论任何具体诉讼策略。</li><li>核心命题一：<strong>追偿不是止损。</strong> 止损发生在事件期（#172 的降级、#166 的清除），追偿发生在事件后，周期以年计。把它当成&quot;挽回损失的手段&quot;来规划预算，几乎一定会失望。</li><li>核心命题二：<strong>三条路径的依据完全不同</strong>：对攻击者（侵权/刑事附带）、对供应商（合同）、对失职第三方（过错）。混为一谈会导致用错材料、错过时效。</li><li>核心命题三：<strong>追偿的成败在事件期就已经决定。</strong> 你当时的记录、保全、口径，构成了后面所有主张的基础；事件后再补，补不回来。</li><li>核心命题四：<strong>合同里的责任限制条款，是追偿最大的现实障碍。</strong> 多数供应商合同的赔偿上限，低于一次定向投放的实际损失——这不是意外，是设计。</li><li>核心命题五：<strong>追偿的价值不止于钱</strong>：它改变供应商的行为、影响续约价格、并在内部形成&quot;有人负责&quot;的叙事（#171）。</li><li>一句话结论：<strong>先判断&quot;值不值得追&quot;，再判断&quot;追谁&quot;，最后才判断&quot;怎么追&quot;。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#173 处理<strong>对客户与合同相对方的责任分配</strong>：别人向你主张时，你怎么界定边界。本篇是它的<strong>反面</strong>：你向别人主张。</p>
+<p>#168 处理<strong>网络保险</strong>：承保问询、报案纪律、理赔。保险是<strong>第一方</strong>补偿；追偿是<strong>向第三方</strong>主张，两者在顺序与证据上互相影响（代位求偿）。</p>
+<p>#167 处理<strong>合同中的安全条款</strong>：条款怎么写。本篇处理条款<strong>在争议中的实际效力</strong>——写得好不好，要到这里才见分晓。</p>
+<p>#178 处理<strong>记录分层</strong>：追偿依赖的材料纪律。</p>
+<p>#156 处理<strong>成本结构与结论上限</strong>：追偿的成本是它的延伸。</p>
+<p>#182 处理<strong>交易尽调</strong>：或有负债在交易中的定价，追偿结果直接影响它。</p>
+<hr>
+<h2>3. 三条路径与各自的成立条件</h2>
+<table><thead><tr><th>路径</th><th>依据</th><th>成立条件</th><th>典型周期</th><th>现实成功率</th></tr></thead><tbody><tr><td>对攻击者</td><td>侵权责任 / 刑事程序中的民事主张</td><td>能识别主体、有管辖权、有可执行财产</td><td>数年</td><td>很低</td></tr><tr><td>对供应商</td><td>合同违约 / 服务等级 / 保证条款</td><td>合同有相应义务、能证明因果、未超责任上限</td><td>数月到两年</td><td>中等</td></tr><tr><td>对失职第三方</td><td>过错责任</td><td>能证明其存在义务且违反、与损失有因果</td><td>一年到数年</td><td>视情形</td></tr></tbody></table>
+<p>三条路径的共同前提是<strong>同一件事：因果链</strong>。你需要证明&quot;因为对方没做 X，所以发生了 Y，所以损失了 Z&quot;。这条链上任何一环断了，主张就不成立。而定向投放的因果链，恰恰是最难证明的一类——因为攻击者的行为介入，使&quot;如果没有对方的过失，攻击是否仍会成功&quot;成为一个开放问题。</p>
+<hr>
+<h2>4. 追偿不是止损：成本结构</h2>
+<table><thead><tr><th>成本项</th><th>特征</th><th>常见低估</th></tr></thead><tbody><tr><td>律师与专家费</td><td>前期投入，与结果无关</td><td>以为风险代理可免除前期成本</td></tr><tr><td>内部人力</td><td>取证、作证、材料整理，持续数年</td><td>只算外部费用</td></tr><tr><td>管理注意力</td><td>每次开庭/谈判都占用决策层时间</td><td>完全不计</td></tr><tr><td>关系成本</td><td>与供应商的长期关系</td><td>认为可以&quot;就事论事&quot;</td></tr><tr><td>机会成本</td><td>同一批人本可用于改进</td><td>不计</td></tr></tbody></table>
+<p>把这些加起来，很多中小规模事件的追偿在经济上是负的。因此<strong>第一问应当是&quot;值不值得&quot;，而不是&quot;能不能赢&quot;</strong>。值得的情形通常有三类：损失量级足够大；合同条款明确且上限足够；追偿本身具有战略意义（换供应商、立规矩、对内交代）。</p>
+<hr>
+<h2>5. 证据要求：三类材料</h2>
+<table><thead><tr><th>材料</th><th>内容</th><th>谁产生</th><th>事件期就要做</th></tr></thead><tbody><tr><td>事实链</td><td>时间线、入口、影响范围、因果推理</td><td>内部 + 外部顾问（#177）</td><td>是</td></tr><tr><td>损失链</td><td>直接支出、业务中断、客户补偿、修复成本，各标口径</td><td>财务</td><td>是（#174）</td></tr><tr><td>义务链</td><td>对方承诺了什么（合同、SLA、保证）</td><td>法务</td><td>是（#167）</td></tr></tbody></table>
+<p>三链缺一不可。实践中最多的问题是<strong>损失链</strong>：事件期间的支出被混在常规预算里，事后无法拆分。一个简单做法是<strong>在事件第一天就开一个专账</strong>，所有相关支出单独归集，并在凭证上标注。</p>
+<p>第二个常见问题是<strong>义务链</strong>：合同里写着&quot;采取行业标准安全措施&quot;，但这句话在法律上到底要求什么，需要结合具体条款与行业实践解释。这也是为什么 #167 强调条款要<strong>可核对</strong>——&quot;行业标准&quot;四个字，在追偿时几乎无法直接使用。</p>
+<hr>
+<h2>6. 对供应商追偿：两个结构性难点</h2>
+<p><strong>难点一：责任限制。</strong> 多数合同把赔偿上限设为&quot;过去 12 个月服务费的 1–2 倍&quot;，并排除间接损失（业务中断、商誉、客户流失）。一次定向投放的损失结构，恰恰以间接损失为主。签约时没改这一条，事后基本无法突破——除非能证明对方存在故意或重大过失，而这需要极高的证明标准。</p>
+<p><strong>难点二：因果关系的稀释。</strong> 供应商通常会说：&quot;即使我们做了 X，针对性攻击仍可能通过 Y 成功。&quot; 这在技术上往往成立。要反驳，需要证明<strong>该控制是唯一或决定性的防线</strong>——这在小规模、多层防御的环境里很难。</p>
+<table><thead><tr><th>供应商类型</th><th>可主张的基础</th><th>现实障碍</th><th>更有效的替代动作</th></tr></thead><tbody><tr><td>托管/云服务商</td><td>SLA + 安全义务</td><td>责任上限、因果稀释</td><td>续约谈判中换取控制与审计权</td></tr><tr><td>软件/SDK 供应商</td><td>保证条款、缺陷担保</td><td>&quot;按现状提供&quot;条款</td><td>版本锁定 + 合同加入修复时限</td></tr><tr><td>安全服务商</td><td>服务范围与勤勉义务</td><td>范围界定模糊</td><td>明确交付标准（#148）</td></tr><tr><td>集成/外包商</td><td>交付物缺陷</td><td>多方责任分散</td><td>单一责任人条款（#167）</td></tr></tbody></table>
+<p>表格最后一列是本篇最实用的一条建议：<strong>多数情况下，&quot;在下一份合同里改条款&quot;比&quot;在这一份合同里打官司&quot;回报更高。</strong></p>
+<hr>
+<h2>7. 对攻击者追偿：概率与意义</h2>
+<p>现实中的成功率很低，原因不在法律，在执行：主体难识别（#78 的归因）、管辖难确定、财产难执行。但它在三种情形下仍有意义：</p>
+<ul><li><strong>刑事程序附带民事主张</strong>：当执法机关已经立案并扣押资产时，附带主张的成本较低。</li><li><strong>资产冻结与没收程序</strong>：即使拿不到钱，也能形成威慑。</li><li><strong>对内叙事</strong>：董事会与员工需要看到&quot;我们在追&quot;，这与 #171 的治理结构直接相关。</li></ul>
+<p>需要明确的是：<strong>追偿行动本身也会产生暴露</strong>——诉讼是公开的，证据会进入对方视野。这一点要与 #175 的对外叙事一起考虑，不能分开决定。</p>
+<hr>
+<h2>8. 与保险的分工：代位求偿</h2>
+<p>保险公司赔付之后，通常在赔付范围内取得代位求偿权。这带来三个实际影响：</p>
+<ul><li><strong>你不能自行放弃对第三方的索赔</strong>，否则可能影响赔付。</li><li><strong>保险公司的追偿策略可能与你的商业关系冲突</strong>（比如它去告你的关键供应商）。</li><li><strong>证据要同时满足理赔与追偿两个用途</strong>，因此从第一天起就应当按两套标准准备。</li></ul>
+<p>一个务实的做法：在理赔阶段就与保险公司明确&quot;哪些索赔由谁主导&quot;，把这个决定写进理赔文件，而不是等赔付完成后再讨论。</p>
+<hr>
+<h2>9. 决策判据（五问）</h2>
+<ol><li><strong>损失量级是否显著？</strong> 低于追偿总成本的一半，通常不值得。</li><li><strong>义务是否明确可核对？</strong> 条款含糊的，胜率与成本都不利。</li><li><strong>因果链是否能在技术上说明白？</strong> 说不清的，不如换成合同改进。</li><li><strong>是否影响关键关系？</strong> 与核心供应商对簿公堂的代价要提前算。</li><li><strong>是否有替代收益？</strong> 换条款、换供应商、换架构，往往回报更高（#185）。</li></ol>
+<p>五问里任何两问答&quot;否&quot;，建议转向合同与架构层面的改进，而不是进入争议程序。</p>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>事件第一天开专账</strong>，支出单独归集并标注。</li><li><strong>三链同步建档</strong>：事实、损失、义务。</li><li><strong>合同审查重点放在责任上限与间接损失排除</strong>，签约前改。</li><li><strong>把&quot;行业标准&quot;改写成可核对的具体控制与时限</strong>。</li><li><strong>与保险公司提前约定追偿主导权</strong>。</li><li><strong>追偿决策走五问</strong>，形成书面结论（含&quot;不追&quot;的理由）。</li><li><strong>追偿与对外叙事同步决策</strong>，避免诉讼披露打乱口径。</li><li><strong>把追偿结果反馈进下一轮合同模板</strong>（#167 的闭环）。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;追偿能挽回大部分损失&quot;</td><td>多数情况下只能覆盖一小部分，且周期以年计</td></tr><tr><td>&quot;合同写了安全义务就能赔&quot;</td><td>受责任上限与间接损失排除限制</td></tr><tr><td>&quot;供应商一定有责任&quot;</td><td>因果稀释是常态；需证明决定性防线</td></tr><tr><td>&quot;先处理完再想追偿&quot;</td><td>证据与专账必须在事件期建立</td></tr><tr><td>&quot;风险代理零成本&quot;</td><td>内部人力与注意力仍是实实在在的成本</td></tr><tr><td>&quot;起诉攻击者没意义&quot;</td><td>在刑事附带与资产扣押情形下仍有意义</td></tr><tr><td>&quot;保险赔了就不能再追&quot;</td><td>代位求偿仍会进行，但主导权转移</td></tr><tr><td>&quot;追偿是法务的事&quot;</td><td>技术因果、财务口径、对外口径都要参与</td></tr></tbody></table>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#78 归因方法</td><td>谁干的</td><td>追偿的主体识别前提</td></tr><tr><td>#148 检测效力甄别</td><td>服务商能力怎么验</td><td>安全服务商责任的技术基础</td></tr><tr><td>#156 成本结构</td><td>调查成本</td><td>追偿成本的同源</td></tr><tr><td>#166 清除与验收</td><td>处置完成的判定</td><td>&quot;已止损&quot;是追偿的起点</td></tr><tr><td>#167 合同条款</td><td>条款怎么写</td><td>条款在此接受检验</td></tr><tr><td>#168 网络保险</td><td>第一方补偿</td><td>代位求偿的接口</td></tr><tr><td>#173 责任分配</td><td>别人向你主张</td><td>本篇是反向主张</td></tr><tr><td>#174 统计口径</td><td>数字怎么算</td><td>损失链的口径基础</td></tr><tr><td>#175 对外叙事</td><td>公开表述</td><td>诉讼披露与叙事的冲突</td></tr><tr><td>#177 / #178</td><td>委托与记录</td><td>证据与材料纪律</td></tr><tr><td>#182 交易尽调</td><td>或有负债</td><td>追偿结果影响定价</td></tr><tr><td>#185 更换供应商</td><td>长期选择</td><td>替代追偿的现实方案</td></tr></tbody></table>
+<hr>
+<h2>13. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>追偿能挽回多少</td><td>通常是一小部分，且在数年后</td></tr><tr><td>三条路径的依据</td><td>侵权、合同、过错，材料完全不同</td></tr><tr><td>追偿成败什么时候决定</td><td>事件期：记录、专账、保全</td></tr><tr><td>最大障碍是什么</td><td>责任上限与因果稀释</td></tr><tr><td>对攻击者值得吗</td><td>在刑事附带与资产扣押下有；否则主要是象征</td></tr><tr><td>保险与追偿怎么分</td><td>代位求偿，主导权要提前约定</td></tr><tr><td>更有效的替代是什么</td><td>改条款、换供应商、改架构</td></tr><tr><td>决策用什么</td><td>五问，任何两问答否就转向</td></tr></tbody></table>
+<blockquote><p>追偿不是把损失变没有，是把损失变成一次可复用的谈判筹码。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>追偿路径的结构与决策判据</strong>，不构成法律意见；具体请求权基础、时效、管辖与执行，<strong>须由执业律师判断</strong>。</li><li>本篇<strong>不提供任何伪造损失、夸大因果或不当索赔的方法</strong>；所有建议均以真实、可核对的材料为前提。</li><li>不涉及任何具体供应商、案件或诉讼；文中为通用结构。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件记录与损失评估）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（证据与保管链）</li><li><a href="https://www.iso.org/standard/44381.html" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据处置规范</a>（证据完整性）</li><li><a href="https://www.enisa.europa.eu/topics/cyber-threats" rel="nofollow noopener" target="_blank">ENISA：供应链安全资源</a>（供应商风险与合同控制的公开材料）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：网络保险与风险管理资源</a>（风险转移的公开参考）</li><li>本系列 #78、#148、#156、#166、#167、#168、#173、#174、#175、#177、#178、#182、#185（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a182.html">← 第 182 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a184.html">第 184 篇 →</a></nav></article>
+</main></body></html>

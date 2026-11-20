@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下并购尽调中的安全历史披露 | iOS 安全研究文章库</title>
+<meta name="description" content="事件真正的长尾在一次**交易**里结算；**「有没有瞒着」比「有没有出过事」贵一个数量级**（价格账／条款账／信誉账，最后一项会进入对方内部的交易对手档案）；三个时点（尽调期／签约到交割／交割后）中**最危险的是第二段**——团队心态从防守转为成交，新事实最容易被「内部消化」；买方八问里第八问（团队留任）在定">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a182.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下并购尽调中的安全历史披露">
+<meta property="og:description" content="事件真正的长尾在一次**交易**里结算；**「有没有瞒着」比「有没有出过事」贵一个数量级**（价格账／条款账／信誉账，最后一项会进入对方内部的交易对手档案）；三个时点（尽调期／签约到交割／交割后）中**最危险的是第二段**——团队心态从防守转为成交，新事实最容易被「内部消化」；买方八问里第八问（团队留任）在定">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a182.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 182 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的交易尽调：安全历史在被买卖时值多少钱</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>一起定向投放事件的长期代价，经常不在事件当年显现，而在<strong>三年后的一次交易</strong>里：并购尽调、投资尽调、客户招标的大型合同、上市前的合规梳理。本篇讨论这一场景——<strong>你的安全历史被当作一项资产或负债来估值</strong>。</li><li>核心命题一：<strong>&quot;有没有出过事&quot;与&quot;有没有瞒着&quot;是两笔不同的账。</strong> 前者影响估值，后者影响交易本身能否成立；后者通常贵一个数量级。</li><li>核心命题二：<strong>尽调的问题不是为了了解你，是为了分配风险。</strong> 买方问的每一个问题，最终都会变成合同里的一个条款或一个价格调整项。</li><li>核心命题三：<strong>陈述与保证的纪律只有三条：准确、可核对、说清范围。</strong> 与 #181 的审计陈述同构，但后果更集中——它直接进合同。</li><li>核心命题四：<strong>交割后才发现的事件，有三种局面，且只有一种不伤交易。</strong> 提前披露 + 有闭环 = 价格问题；事后暴露 = 违约问题；被第三方先发现 = 信誉问题。</li><li>核心命题五：<strong>卖方最容易忽略的不是技术材料，是&quot;人&quot;的材料</strong>：谁走了、谁带走了一份名单、谁在离职时保留了访问（#120 的离职边界在交易场景下的第二次发作）。</li><li>一句话结论：<strong>在交易里，安全历史的价值不在于它有多干净，而在于它有多可核对。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#181 处理<strong>审计与认证</strong>：周期性、以体系为对象、结论是&quot;是否符合标准&quot;。本篇处理<strong>交易</strong>：一次性、以历史事实为对象、结论是&quot;价格与条款&quot;。</p>
+<p>#167 处理<strong>合同中的安全条款</strong>：日常供应商合同。本篇处理<strong>股权/资产交易中的陈述与保证</strong>——它不是一份服务合同，而是一次对所有权的重新定价。</p>
+<p>#120 处理<strong>离职与账户交接</strong>：组织内部的人员退出。本篇是在<strong>交易</strong>语境下再看一次：被收购方的人员流动，是买方最关心、卖方最容易低估的一项。</p>
+<p>#96 处理<strong>设备处置与流转</strong>：设备离开组织时留下什么。交易中会有大量设备、备份、账号随主体一起转移，这一篇的清单在这里第二次生效。</p>
+<p>#102 处理<strong>数字遗产与代持</strong>：主体消失后的访问权。交易中的&quot;主体变更&quot;是它的商业版本。</p>
+<p>#178 处理<strong>记录分层</strong>：尽调室里给什么、不给什么，依据同一套原则。</p>
+<hr>
+<h2>3. 交易中的三个时点</h2>
+<table><thead><tr><th>时点</th><th>谁在问</th><th>你暴露的程度</th><th>关键动作</th></tr></thead><tbody><tr><td>尽调期（签约前）</td><td>买方、其顾问</td><td>可控：你能决定给什么</td><td>建立数据室，分层披露（#178）</td></tr><tr><td>签约到交割</td><td>双方律师</td><td>条款已定，事实仍在补充</td><td>发现新事实须按条款处理，不能自行&quot;消化&quot;</td></tr><tr><td>交割后</td><td>买方团队</td><td>几乎完全暴露</td><td>交接清单 + 保留期内的配合义务</td></tr></tbody></table>
+<p>最容易出问题的不是第一段，而是第二段。签约之后，团队的心理状态从&quot;防守&quot;转向&quot;成交&quot;，此时发现的新事实——比如一份旧的渗透测试报告、一台没人管的测试机、一个仍有效的服务账号——最容易被&quot;内部消化&quot;。而这一段的隐瞒，性质与签约前完全不同。</p>
+<hr>
+<h2>4. 买方会问的八类问题</h2>
+<table><thead><tr><th>#</th><th>问题</th><th>真正想确认的</th><th>卖方常见错误</th></tr></thead><tbody><tr><td>1</td><td>过去 3–5 年是否发生过安全事件？</td><td>是否有未了结的责任</td><td>只报&quot;已公开的&quot;</td></tr><tr><td>2</td><td>是否有正在进行的调查或诉讼？</td><td>是否存在或有负债</td><td>认为&quot;只是内部调查&quot;不算</td></tr><tr><td>3</td><td>是否有已知但未修复的漏洞？</td><td>交割后的修复成本</td><td>用&quot;都是低危&quot;概括</td></tr><tr><td>4</td><td>关键系统的访问权在谁手里？</td><td>交割后能否真正接管</td><td>只列在职人员</td></tr><tr><td>5</td><td>是否有针对本公司的定向威胁？</td><td>威胁是否随资产转移</td><td>以&quot;没有证据&quot;回避</td></tr><tr><td>6</td><td>第三方依赖与许可状况？</td><td>供应链风险与合规</td><td>只列主要供应商（#167）</td></tr><tr><td>7</td><td>数据资产清单与合规基础？</td><td>数据能否合法转移</td><td>用&quot;都在云上&quot;概括</td></tr><tr><td>8</td><td>安全团队与关键人员留任？</td><td>交割后能力是否还在</td><td>忽略已提离职的人</td></tr></tbody></table>
+<p>第八问在定向投放的语境下格外重要：<strong>一个刚刚经历过事件的组织，其安全团队往往处在疲劳与流失的高峰</strong>。买方知道这一点，所以会问；卖方如果只答&quot;团队稳定&quot;，在背景调查里很容易被推翻。</p>
+<hr>
+<h2>5. 陈述与保证的三条纪律</h2>
+<ul><li><strong>准确</strong>：不把&quot;未发现证据&quot;写成&quot;未发生&quot;。前者是调查结论，后者是事实断言。</li><li><strong>可核对</strong>：每一个陈述都应能指向一份材料。没有材料支撑的陈述，在争议中等于没有。</li><li><strong>说清范围</strong>：时间范围、主体范围、系统范围。&quot;本公司未发生&quot;与&quot;本集团未发生&quot;是两个陈述。</li></ul>
+<table><thead><tr><th>陈述写法</th><th>问题</th><th>改写</th></tr></thead><tbody><tr><td>&quot;未发生过数据泄露&quot;</td><td>绝对化，且范围不明</td><td>&quot;2021-01 至 2026-10，本公司未发生依适用法律须通报的数据泄露事件&quot;</td></tr><tr><td>&quot;系统安全状况良好&quot;</td><td>无法核对</td><td>&quot;截至 2026-10，已知高危漏洞 0 项，中危 3 项，修复计划见附表&quot;</td></tr><tr><td>&quot;已采取行业最佳实践&quot;</td><td>不可验证</td><td>&quot;已实施 A/B/C 三项控制，验证记录见附件&quot;</td></tr><tr><td>&quot;无正在进行的调查&quot;</td><td>范围模糊</td><td>&quot;就本公司所知，无正在进行的监管调查；内部调查 1 项已于 2026-08 结案&quot;</td></tr></tbody></table>
+<p>第四行的改写展示了最重要的技巧：<strong>把&quot;无&quot;拆成&quot;就我所知无&quot;与&quot;具体有一项且已结案&quot;</strong>。前者是法律上的谨慎，后者是事实上的诚实，两者并不矛盾。</p>
+<hr>
+<h2>6. 为什么&quot;未披露&quot;比&quot;有事件&quot;贵</h2>
+<p>三笔账，逐笔加重。</p>
+<ul><li><strong>价格账</strong>：有事件 → 买方要求价格调整或专项赔偿；未披露 → 买方在交割后主张违约，索赔基础是&quot;如果早知道&quot;，通常远高于实际损失。</li><li><strong>条款账</strong>：已披露的事实，可以进入&quot;特别赔偿&quot;或&quot;除外条款&quot;，责任被限定；未披露的事实，落入一般陈述与保证，责任无上限。</li><li><strong>信誉账</strong>：买方在交割后发现的第一件事，会成为它此后对你<strong>所有</strong>材料的默认假设。这一项在跨境交易里尤其明显，因为它会进入对方内部的&quot;交易对手档案&quot;。</li></ul>
+<p>值得注意的是：<strong>定向投放事件本身不一定是重大不利事项</strong>。很多买方对&quot;被国家级行为体盯上&quot;有心理准备，真正影响判断的是<strong>你有没有能力发现并处理</strong>。一份写得清楚的复盘（含未解项），在尽调里通常是加分项。</p>
+<hr>
+<h2>7. 交割后才发现：三种局面</h2>
+<table><thead><tr><th>局面</th><th>触发方式</th><th>后果</th><th>能否挽回</th></tr></thead><tbody><tr><td>买方自查发现</td><td>常规扫描或接管审计</td><td>违约主张、价格重谈</td><td>部分：取决于披露义务条款</td></tr><tr><td>第三方（客户/监管）先发现</td><td>外部通知</td><td>交易信誉受损，可能触发回购条款</td><td>困难</td></tr><tr><td>攻击者再次利用</td><td>同一入口被复用</td><td>最严重：证明&quot;未修复&quot;而非&quot;未披露&quot;</td><td>极难</td></tr></tbody></table>
+<p>第三种最少见，但最能说明问题：<strong>它把&quot;历史问题&quot;变成&quot;当下问题&quot;</strong>，而当下问题的处理成本与历史问题不在一个量级。</p>
+<p>一个实操建议：<strong>交割前做一次&quot;遗留账号与入口&quot;专项检查</strong>。交易期间最常见的遗留物是：测试环境的管理账号、离职人员的服务账号、为过渡期保留的 VPN、以及没人说得清用途的第三方集成。这四类东西在 #96 的设备清单与 #120 的离职清单里都出现过，交易只是把它们集中暴露了一次。</p>
+<hr>
+<h2>8. 数据与设备在交易中的处置</h2>
+<p>交易会同时触发前几篇里分别讨论过的三类问题：</p>
+<ul><li><strong>数据</strong>：哪些数据能随交易转移、哪些需要重新取得同意、哪些必须删除（#102 的历史数据、#105 的数据位置）。</li><li><strong>设备</strong>：随主体转移的设备上有什么、谁能解锁、MDM 是否随主体转移（#96 的十项残留、#160 的管控栈）。</li><li><strong>账号与关系</strong>：企业账号、Apple 商务管理、开发者账号、域名的所有权与恢复方式（#120 的 R1/R2/R3 归属规则）。</li></ul>
+<p>这三类的共同点是：<strong>它们在合同里通常被写成一句话，在执行时需要一份清单</strong>。清单不该等到交割日才写。</p>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>常备一份&quot;安全事实底稿&quot;</strong>：事件、漏洞、调查、改进项，一页可核对（#181）。</li><li><strong>尽调数据室分层</strong>：事实轨与意见轨分开（#178）。</li><li><strong>陈述句禁用绝对化词汇</strong>，全部加时间、主体、系统范围。</li><li><strong>签约后保持同一套披露纪律</strong>，发现新事实按条款处理。</li><li><strong>交割前专项检查遗留账号与入口</strong>（四类：测试账号、离职账号、过渡 VPN、用途不明的集成）。</li><li><strong>关键人员留任方案写进交割计划</strong>，不只写在意向书里。</li><li><strong>对外口径与尽调口径对齐</strong>（#175），避免&quot;对客户说一套、对买方说一套&quot;。</li><li><strong>交割后保留配合期</strong>：材料、人员、访问，写清期限与范围。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;没被公开报道就不用说&quot;</td><td>披露义务看事实，不看是否公开</td></tr><tr><td>&quot;内部调查不算调查&quot;</td><td>在陈述里通常需要说明</td></tr><tr><td>&quot;低危漏洞不用列&quot;</td><td>买方要的是完整清单与修复计划；隐瞒一项会波及全部</td></tr><tr><td>&quot;签约后不用再报&quot;</td><td>多数交易文件对签约后新事实有专门约定</td></tr><tr><td>&quot;有事件一定影响估值&quot;</td><td>更影响估值的是&quot;发现与处理能力&quot;</td></tr><tr><td>&quot;口头说过就行了&quot;</td><td>陈述与保证是书面文件；口头不构成</td></tr><tr><td>&quot;数据都在云上，没什么可查&quot;</td><td>云的配置、账号、导出权限恰恰是重点</td></tr><tr><td>&quot;交割完成就结束了&quot;</td><td>配合期、赔偿期、信誉影响都还在</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#96 设备处置</td><td>残留项与交接</td><td>交易中批量发生</td></tr><tr><td>#102 数字遗产</td><td>主体缺失时的访问</td><td>主体变更的商业版本</td></tr><tr><td>#120 离职交接</td><td>关系型授权的收回</td><td>卖方最易低估的一项</td></tr><tr><td>#160 管控栈</td><td>MDM 与描述文件</td><td>是否随主体转移</td></tr><tr><td>#167 合同条款</td><td>供应商安全条款</td><td>交易是条款的最终定价</td></tr><tr><td>#174 统计口径</td><td>数字怎么算</td><td>损失与漏洞数量的口径</td></tr><tr><td>#175 对外叙事</td><td>对外表述</td><td>与尽调口径必须一致</td></tr><tr><td>#177 / #178</td><td>委托与记录分层</td><td>数据室的组织方式</td></tr><tr><td>#181 审计陈述</td><td>周期性历史陈述</td><td>交易是一次性、后果集中版</td></tr><tr><td>#185 更换供应商</td><td>长期选择</td><td>交割后的平台决策</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>交易里什么最贵</td><td>未披露，而不是事件本身</td></tr><tr><td>陈述的三条纪律</td><td>准确、可核对、说清范围</td></tr><tr><td>买方真正关心什么</td><td>你的发现与处理能力，而非&quot;是否干净&quot;</td></tr><tr><td>最容易漏的材料是什么</td><td>人：离职、账号、关系型授权</td></tr><tr><td>签约后发现新事实怎么办</td><td>按条款处理，不内部消化</td></tr><tr><td>交割前必须查什么</td><td>遗留账号与入口四类</td></tr><tr><td>一句话判断标准</td><td>你的每一句陈述，能否被一份材料接住</td></tr></tbody></table>
+<blockquote><p>在交易里，安全历史不是一段过去，是一份可以被定价的证据。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>交易场景下的安全历史披露结构</strong>，不构成法律意见；陈述与保证、披露义务、赔偿条款的具体适用，<strong>须由交易律师结合适用法律判断</strong>。</li><li>本篇<strong>不提供任何隐瞒、淡化或规避披露的方法</strong>；所有建议均以如实、可核对为前提。</li><li>不涉及任何具体交易、机构或案件；文中为通用结构。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.nist.gov/cyberframework" rel="nofollow noopener" target="_blank">NIST CSF 2.0</a>（治理与风险管理框架）</li><li><a href="https://www.iso.org/standard/27001" rel="nofollow noopener" target="_blank">ISO/IEC 27001：信息安全管理体系</a>（记录与控制证据）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件记录与复盘）</li><li><a href="https://www.enisa.europa.eu/topics/cyber-threats" rel="nofollow noopener" target="_blank">ENISA：供应链与第三方风险资源</a>（第三方依赖的公开材料）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：网络安全尽职调查资源</a>（尽调问题的公开参考）</li><li>本系列 #96、#102、#120、#160、#167、#174、#175、#177、#178、#181、#185（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a181.html">← 第 181 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a183.html">第 183 篇 →</a></nav></article>
+</main></body></html>

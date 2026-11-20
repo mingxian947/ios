@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下多法域并行处置的冲突管理 | iOS 安全研究文章库</title>
+<meta name="description" content="冲突不发生在法律之间，发生在 **时点／范围／形态** 三维上（前者结构性、后者表述性，先解结构）；五来源 披露时点／留存与删除／数据出境／员工知情／定性口径；三典型场景的处置 删vs留（**先划证据边界再删业务数据**）、原件vs出境（先找认证副本与远程查验）、告知vs保密（**分层告知＋书面理由**）；优">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a184.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下多法域并行处置的冲突管理">
+<meta property="og:description" content="冲突不发生在法律之间，发生在 **时点／范围／形态** 三维上（前者结构性、后者表述性，先解结构）；五来源 披露时点／留存与删除／数据出境／员工知情／定性口径；三典型场景的处置 删vs留（**先划证据边界再删业务数据**）、原件vs出境（先找认证副本与远程查验）、告知vs保密（**分层告知＋书面理由**）；优">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a184.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 184 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的多法域并行处置：同一件事，五套说法的冲突</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>当一起定向投放涉及多个国家的员工、客户、服务器与监管主体时，你会同时收到<strong>互相矛盾的要求</strong>：这一边要求尽快披露，那一边要求暂缓；这一边要求删除，那一边要求留存；这一边要证据原件，那一边不许数据出境。本篇讨论这类冲突的<strong>结构与可执行的处理原则</strong>，不讨论任何具体法域的法律适用。</li><li>核心命题一：<strong>冲突不发生在法律之间，发生在&quot;时点、范围、形态&quot;三个维度上。</strong> 看清这一点，多数冲突可以被拆成可以分头处理的小问题。</li><li>核心命题二：<strong>没有一个组织能同时满足所有要求；能做的是让每一个&quot;做不到&quot;都有记录、有理由、有决定人。</strong></li><li>核心命题三：<strong>唯一能同时服务多套要求的东西，是一份事实底稿。</strong> 所有对外陈述从它派生（#181、#174），否则每增加一个法域就多一个版本。</li><li>核心命题四：<strong>时间是最早爆发的冲突。</strong> 不同的报告期限、不同的工作日定义、不同的时区，会让&quot;同一天&quot;变成三天（#146 的时间基准在此二次发作）。</li><li>核心命题五：<strong>并行处置的组织成本被严重低估。</strong> 五个法域意味着至少五套外联、五份材料、五次口径确认，而决策层还是同一批人。</li><li>一句话结论：<strong>先建事实底稿与外联矩阵，再谈具体怎么做——顺序反了，越做越乱。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#169 处理<strong>监管报送与行业信息共享的边界</strong>：报什么、报给谁、共享到什么程度。本篇处理<strong>多个报送对象同时存在且要求冲突</strong>。</p>
+<p>#170 处理<strong>跨境取证与司法协助的时间尺度</strong>：程序内的协助如何发生、为什么慢。本篇处理<strong>协助之外</strong>的并行要求：删除、留存、披露、员工告知。</p>
+<p>#105 处理<strong>平台方合法披露边界</strong>：数据在谁手里。本篇处理<strong>你在多地都有实体时，同一份数据被多套规则同时指向</strong>。</p>
+<p>#178 处理<strong>记录分层</strong>：哪些材料该受控。本篇处理<strong>受控材料在跨境流动时的额外约束</strong>。</p>
+<p>#179 处理<strong>报案决策</strong>：报不报、交什么。本篇处理<strong>同时向多处报案时</strong>的一致性。</p>
+<p>#181 / #182 处理<strong>审计与交易</strong>：另外两类&quot;同一事实、不同读者&quot;的场景。本篇是它们的多法域版本。</p>
+<hr>
+<h2>3. 冲突的五个来源</h2>
+<table><thead><tr><th>来源</th><th>冲突表现</th><th>实际争的是什么</th></tr></thead><tbody><tr><td>披露时点</td><td>A 要求 72 小时内，B 要求调查完成后再报</td><td>谁先知道、谁知道多少</td></tr><tr><td>留存与删除</td><td>A 要求删除个人数据，B 要求保留证据</td><td>数据的存在与否</td></tr><tr><td>数据出境</td><td>A 要求提供原件，B 限制出境</td><td>数据的物理位置与控制权</td></tr><tr><td>员工与个人权利</td><td>A 要求告知员工，B 要求保密调查</td><td>个人的知情权与调查完整性</td></tr><tr><td>口径与定性</td><td>A 认定为&quot;未遂&quot;，B 认定为&quot;已发生&quot;</td><td>同一事实的不同法律分类</td></tr></tbody></table>
+<p>五个来源里，前三个是<strong>结构性的</strong>（无论你怎么做都会冲突），后两个是<strong>表述性的</strong>（可以通过统一标准缓解）。处理顺序应当是先结构性、后表述性——因为表述性冲突往往只是结构性冲突的表象。</p>
+<hr>
+<h2>4. 三种典型场景与处理原则</h2>
+<p><strong>场景一：一边要删，一边要留。</strong></p>
+<p>处置原则：<strong>分离&quot;证据&quot;与&quot;业务数据&quot;</strong>。证据按证据规则保全（有清单、有哈希、有保管链，#178），业务数据按删除要求处理。两者的边界要在动手前划定并记录，否则&quot;删了证据&quot;和&quot;留了不该留的&quot;会同时发生。</p>
+<p><strong>场景二：一边要原件，一边限制出境。</strong></p>
+<p>处置原则：<strong>先问&quot;能不能用派生材料替代&quot;</strong>。多数程序接受经认证的副本、摘要或远程查验，原件的出境往往是最后手段。若确实必须出境，需要提前准备的通常不是技术，而是授权文件与时间。</p>
+<p><strong>场景三：一边要求告知个人，一边要求保密。</strong></p>
+<p>处置原则：<strong>分层次告知</strong>。先告知&quot;你的数据可能受影响&quot;这一事实，暂不披露调查细节；同时把&quot;为何暂不披露&quot;写成书面理由。这一条在实践中能同时满足两边的核心诉求，代价是需要法务提前设计措辞。</p>
+<table><thead><tr><th>场景</th><th>最容易犯的错</th><th>更稳的做法</th></tr></thead><tbody><tr><td>删 vs 留</td><td>先删后想，证据没了</td><td>先划证据边界，再删业务数据</td></tr><tr><td>原件 vs 出境</td><td>直接拒绝或直接给</td><td>先找替代形态，再谈原件</td></tr><tr><td>告知 vs 保密</td><td>全说或全不说</td><td>分层告知 + 书面理由</td></tr></tbody></table>
+<hr>
+<h2>5. 冲突的优先级：风险排序，不是法律排序</h2>
+<p>当两个要求确实无法同时满足时，实际决策通常按四层排序——<strong>这不是法律意见，而是组织做决定时的思考顺序</strong>：</p>
+<ol><li><strong>不可逆性</strong>：哪一个动作做了就回不来？（证据销毁、数据出境、公开披露）</li><li><strong>时限刚性</strong>：哪一个的期限是硬的、错过就没有补救？</li><li><strong>影响范围</strong>：哪一个影响的是个人权利，哪一个是程序形式？</li><li><strong>可解释性</strong>：哪一个&quot;没做到&quot;更容易被解释清楚？</li></ol>
+<p>第一层最重要。<strong>在不确定时，优先做可逆的动作，把不可逆的动作推后</strong>——这条原则能解决大部分&quot;两边都急&quot;的局面。第二层决定了你必须先找谁；第三、四层决定了你怎么写解释。</p>
+<p>需要注意：<strong>这些只是组织内部的决策启发式</strong>。真正的法律优先级由各法域的规则决定，必须由当地律师分别判断——而且不同律师给出的答案可能相互矛盾，这本身就是需要管理的一项风险。</p>
+<hr>
+<h2>6. 组织结构：一个底稿，多套外联</h2>
+<p>多法域处置失败的最常见原因不是法律判断错误，而是<strong>组织结构错误</strong>：每个法域一个团队，各自建材料、各自对外说、各自记时间。</p>
+<p>可行的结构只有一种：</p>
+<ul><li><strong>一个事实底稿</strong>（单一真相源）：事件时间线、影响范围、已采取措施、已知未知。所有版本从它派生。</li><li><strong>一个决策记录</strong>：每一次&quot;我们选择满足 A、暂缓 B&quot;的决定，写明理由、决定人、复核时点。</li><li><strong>多套外联</strong>：每个法域一个接口人，但所有对外材料必须回到事实底稿核对后才能发出。</li><li><strong>一个时钟</strong>：所有期限用同一时区记录，并标注各自的本地期限（#146）。</li></ul>
+<table><thead><tr><th>角色</th><th>职责</th><th>不能兼什么</th></tr></thead><tbody><tr><td>事实底稿维护人</td><td>唯一版本控制</td><td>不负责对外沟通</td></tr><tr><td>各法域接口人</td><td>本地沟通与期限跟踪</td><td>不能自行修改事实</td></tr><tr><td>决策记录人</td><td>记录取舍与理由</td><td>不参与技术判断</td></tr><tr><td>总协调人</td><td>排优先级、分配资源</td><td>不能同时是某法域的接口人</td></tr></tbody></table>
+<p>最后一条容易被忽略：<strong>总协调人如果兼任某地接口人，他的判断会天然偏向那个法域</strong>。</p>
+<hr>
+<h2>7. 时间：最早爆发的冲突</h2>
+<p>三个技术性因素会让&quot;同一天&quot;变成三天：</p>
+<ul><li><strong>期限的起算点不同</strong>：有的是&quot;知悉时&quot;，有的是&quot;确认时&quot;，有的是&quot;通知送达时&quot;。</li><li><strong>工作日定义不同</strong>：周末、法定假日、宗教节日各不相同。</li><li><strong>时区</strong>：一个&quot;48 小时&quot;在跨三个时区时，实际可用时间可能少半天。</li></ul>
+<p>可执行的做法：<strong>建一张期限表</strong>，每一行写清&quot;起算事件、起算时点（含时区）、期限、本地截止时间、负责人&quot;。这张表的价值在于它把模糊的&quot;尽快&quot;变成可核对的日期。</p>
+<hr>
+<h2>8. 加固清单（八条）</h2>
+<ol><li><strong>先建事实底稿</strong>，再开任何外联。</li><li><strong>建外联矩阵</strong>：法域 × 对象 × 材料级别 × 期限 × 接口人。</li><li><strong>按&quot;可逆优先&quot;排动作</strong>，不可逆动作一律延后到信息充分。</li><li><strong>分离证据与业务数据</strong>，边界先划后动。</li><li><strong>原件出境前先找替代形态</strong>。</li><li><strong>分层告知</strong>：先事实，后细节，附书面理由。</li><li><strong>统一时钟与期限表</strong>，标注时区与起算事件。</li><li><strong>每次取舍写决策记录</strong>（理由、决定人、复核点）。</li></ol>
+<hr>
+<h2>9. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;找一个律师就能统管所有法域&quot;</td><td>多数情况下需要多地律师分别判断，且结论可能冲突</td></tr><tr><td>&quot;先满足最严的那个就行&quot;</td><td>最严的要求可能与其他要求直接互斥</td></tr><tr><td>&quot;各法域各做各的更快&quot;</td><td>材料分歧会在后期集中爆发</td></tr><tr><td>&quot;删除越快越安全&quot;</td><td>可能同时构成证据销毁</td></tr><tr><td>&quot;原件一定要给&quot;</td><td>多数程序接受认证副本或远程查验</td></tr><tr><td>&quot;告知就是全说&quot;</td><td>分层告知通常同时满足两边核心诉求</td></tr><tr><td>&quot;期限都按自然日算&quot;</td><td>工作日、节假日、起算点都会改变实际截止时间</td></tr><tr><td>&quot;冲突无法管理&quot;</td><td>结构化的底稿 + 矩阵 + 决策记录能覆盖大部分情形</td></tr></tbody></table>
+<hr>
+<h2>10. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#105 平台方披露</td><td>数据在哪</td><td>多法域下的数据位置问题</td></tr><tr><td>#146 时间基准</td><td>设备侧时间不可靠</td><td>本篇是组织侧时间的同类问题</td></tr><tr><td>#169 监管报送</td><td>报什么、给谁</td><td>本篇处理多个对象冲突</td></tr><tr><td>#170 跨境协助</td><td>程序内的时间尺度</td><td>本篇处理程序外的并行要求</td></tr><tr><td>#174 统计口径</td><td>数字怎么算</td><td>事实底稿的数字标准</td></tr><tr><td>#175 公开叙事</td><td>对外表述</td><td>多法域口径的外层</td></tr><tr><td>#178 记录分层</td><td>记录受控</td><td>跨境流动的额外约束</td></tr><tr><td>#179 报案决策</td><td>报不报、交什么</td><td>多处报案的一致性</td></tr><tr><td>#181 / #182</td><td>审计与交易</td><td>同结构的不同读者</td></tr><tr><td>#186 内部人员</td><td>告知员工</td><td>员工知情权的处理</td></tr></tbody></table>
+<hr>
+<h2>11. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>冲突发生在哪三个维度</td><td>时点、范围、形态</td></tr><tr><td>最大的风险是什么</td><td>做不可逆动作时信息不足</td></tr><tr><td>怎么排优先级</td><td>不可逆性 → 时限刚性 → 影响范围 → 可解释性（组织启发式）</td></tr><tr><td>组织上怎么防乱</td><td>一个底稿、一个决策记录、多套外联、一个时钟</td></tr><tr><td>删与留怎么处理</td><td>先划证据边界，再删业务数据</td></tr><tr><td>原件出境怎么办</td><td>先找认证副本/远程查验等替代</td></tr><tr><td>告知与保密怎么兼顾</td><td>分层告知 + 书面理由</td></tr></tbody></table>
+<blockquote><p>多法域处置的质量，不看满足了几家，看每一次没满足是否有据可查。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>多法域并行处置的冲突结构与组织方法</strong>，不构成法律意见；各法域的报送义务、数据出境规则、员工告知要求，<strong>须由当地执业律师分别判断</strong>。</li><li>本篇<strong>不提供任何规避监管、隐瞒事件或规避数据保护义务的方法</strong>；所有建议均以如实履行义务、记录取舍为前提。</li><li>不涉及任何具体国家、机构或案件；文中为通用结构。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件沟通与协调）</li><li><a href="https://www.iso.org/standard/44381.html" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据处置规范</a>（证据留存与移交）</li><li><a href="https://www.enisa.europa.eu/topics/incident-response" rel="nofollow noopener" target="_blank">ENISA：跨境事件协作资源</a>（协调机制的公开材料）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：国际协作与事件报告资源</a>（协作流程公开说明）</li><li><a href="https://www.first.org/global/sigs/vulnerability-coordination/multiparty/guidelines-v1.1" rel="nofollow noopener" target="_blank">FIRST：多方协调披露指南</a>（多方协调的实践方法）</li><li>本系列 #105、#146、#169、#170、#174、#175、#178、#179、#181、#182、#186（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a183.html">← 第 183 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a185.html">第 185 篇 →</a></nav></article>
+</main></body></html>

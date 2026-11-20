@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下事件后的平台与供应商更换决策 | iOS 安全研究文章库</title>
+<meta name="description" content="**「被攻破」不是更换理由，「根因落在该组件的信任假设上」才是**——换品牌不改变 #94 的暴露画像；四种可更换对象（设备平台／安全产品／云与 SaaS／托管服务商）代价与「是否解决根因」各不相同，四问定位根因层；**迁移期是新的最大暴露窗口**（旧系统在拆、新系统未熟、两套并行、临时放宽四事并发，防御强度">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a185.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下事件后的平台与供应商更换决策">
+<meta property="og:description" content="**「被攻破」不是更换理由，「根因落在该组件的信任假设上」才是**——换品牌不改变 #94 的暴露画像；四种可更换对象（设备平台／安全产品／云与 SaaS／托管服务商）代价与「是否解决根因」各不相同，四问定位根因层；**迁移期是新的最大暴露窗口**（旧系统在拆、新系统未熟、两套并行、临时放宽四事并发，防御强度">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a185.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 185 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的更换决策：出事之后，哪些东西真的该换</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>事件平息后的第一次管理会上，几乎一定会有人提出：&quot;要不要把 X 换掉？&quot; X 可能是设备平台、安全产品、云服务、托管商，也可能是安全团队负责人。本篇讨论<strong>这个决定的判据结构</strong>——什么时候该换、换的是什么、换的过程为什么比事件本身更危险。</li><li>核心命题一：<strong>&quot;被攻破&quot;不是更换的理由，&quot;根因落在该组件的信任假设上&quot;才是。</strong> 定向投放针对的是你的暴露画像（#94），换个品牌并不改变&quot;你被盯上&quot;这件事。</li><li>核心命题二：<strong>迁移期是新的最大暴露窗口。</strong> 旧系统在拆、新系统未熟、两套并行、账号双开、策略临时放宽——这四件事同时发生时，你的实际防御强度低于事件前。</li><li>核心命题三：<strong>不换不等于不改。</strong> 多数情况下正确的答案是&quot;换掉那一层出问题的信任假设&quot;，而不是换掉整个产品；这需要能定位到层（#113 的分层、#114 的修复形态）。</li><li>核心命题四：<strong>更换经常是政治决定，被包装成技术决定。</strong> 识别这一点不是为了讽刺，而是为了在决策时把&quot;要给谁一个交代&quot;和&quot;技术风险&quot;分开评估。</li><li>核心命题五：<strong>换的成本要在决定时算清，不要在执行时算。</strong> 迁移的人力、双轨期的费用、培训、集成、数据搬迁、合同违约金，通常被低估两到三倍。</li><li>一句话结论：<strong>先问&quot;哪一层失效了&quot;，再问&quot;换掉这一层的最小动作是什么&quot;，最后才问&quot;要不要整体换&quot;。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#110 处理<strong>多身份与备用设备架构</strong>：怎么在设计上隔离。本篇处理<strong>出事之后的存量调整</strong>——从现状出发，而不是从白纸出发。</p>
+<p>#96 处理<strong>设备处置与流转</strong>：单台设备怎么退出。本篇是<strong>组织级</strong>的批量退出与替换。</p>
+<p>#167 处理<strong>合同条款</strong>：签约时怎么约束。本篇处理<strong>合同期内</strong>要不要终止、终止的代价。</p>
+<p>#172 处理<strong>业务连续性与降级运行</strong>：事件期怎么活下去。本篇是<strong>事件后</strong>的结构调整，且必须在不中断业务的前提下进行。</p>
+<p>#183 处理<strong>追偿</strong>：向对方主张。本篇是它的替代方案——用&quot;换&quot;来替代&quot;告&quot;。</p>
+<p>#160 处理<strong>管控栈可见性</strong>：MDM/描述文件能看见什么。更换平台时，管控能力的差异是关键判据之一。</p>
+<hr>
+<h2>3. 四种可更换的对象</h2>
+<p>&quot;换个供应商&quot;是很粗的说法。实际可换的至少有四层，代价与风险差异巨大。</p>
+<table><thead><tr><th>对象</th><th>典型触发</th><th>迁移代价</th><th>迁移期风险</th><th>是否解决根因</th></tr></thead><tbody><tr><td>设备平台</td><td>长期无法修复、支持终止</td><td>极高</td><td>极高</td><td>部分（若根因是平台层缺陷密度）</td></tr><tr><td>安全产品</td><td>检测失效、误报拖垮运营</td><td>中</td><td>中</td><td>视根因：覆盖缺口是产品问题，绕过是能力问题</td></tr><tr><td>云 / SaaS</td><td>配置权不足、数据位置不合规</td><td>高</td><td>高</td><td>常见（权限与可见性问题）</td></tr><tr><td>托管 / 外包服务商</td><td>响应能力不足、沟通失败</td><td>中</td><td>中到高</td><td>常见（能力与流程问题）</td></tr></tbody></table>
+<p>表格最后一列是关键判据：<strong>更换只在你确实能指出&quot;该组件是根因所在&quot;时才解决问题</strong>。如果根因是&quot;你的账号权限设计过宽&quot;，换成任何平台，过宽的权限依然存在。</p>
+<hr>
+<h2>4. 判据：根因归属</h2>
+<p>用四个问题定位根因层。</p>
+<ol><li><strong>入口在谁的控制范围内？</strong> 如果是平台自身的缺陷，且该平台有修复承诺，那么&quot;等补丁 + 缓解&quot;通常优于&quot;整体迁移&quot;。</li><li><strong>失效的是检测、阻断，还是响应？</strong> 检测失效换产品；阻断失效可能是策略；响应失效是流程与人（#176）。</li><li><strong>同类事件在别的平台会不会同样发生？</strong> 会——说明根因不在平台。</li><li><strong>更换之后，哪些控制会暂时缺失？</strong> 这一问最容易被跳过，却是迁移风险的来源。</li></ol>
+<table><thead><tr><th>根因</th><th>正确动作</th><th>错误动作</th></tr></thead><tbody><tr><td>平台缺陷密度高且修复慢</td><td>评估分期迁移</td><td>立刻全面替换</td></tr><tr><td>检测覆盖缺口</td><td>换产品 / 加产品</td><td>换整个平台</td></tr><tr><td>权限与配置过宽</td><td>收紧权限、改架构（#110）</td><td>认为换平台能解决</td></tr><tr><td>响应能力不足</td><td>换服务商 / 补能力（#176）</td><td>换设备</td></tr><tr><td>人（内部因素）</td><td>结构与纪律（#186）</td><td>任何技术更换</td></tr></tbody></table>
+<hr>
+<h2>5. 迁移本身是最大的暴露窗口</h2>
+<p>迁移期有四件事同时发生，每一件都会削弱防御：</p>
+<ul><li><strong>旧系统在拆</strong>：部分控制已关闭，但替代尚未上线。</li><li><strong>新系统未熟</strong>：默认配置、缺失的集成、未调优的告警。</li><li><strong>两套并行</strong>：账号、权限、日志、备份出现双份，边界模糊。</li><li><strong>临时放宽</strong>：为赶进度而开的例外，通常没人负责收回（#104 的例外台账、#177 的访问登记表在此第二次生效）。</li></ul>
+<table><thead><tr><th>迁移阶段</th><th>主要风险</th><th>必须同步做的</th></tr></thead><tbody><tr><td>准备期</td><td>范围不清、依赖遗漏</td><td>资产与依赖清单（#167）</td></tr><tr><td>并行期</td><td>双份权限、日志割裂</td><td>双份清单 + 到期日</td></tr><tr><td>切换期</td><td>控制空窗</td><td>选择低业务时段 + 加强监测</td></tr><tr><td>收尾期</td><td>临时例外未收回</td><td>一次性回收审计</td></tr><tr><td>稳定期</td><td>旧系统残留</td><td>残留清单与销毁确认（#96）</td></tr></tbody></table>
+<p><strong>收尾期是最容易失守的一环</strong>：迁移项目通常以&quot;新系统上线&quot;为完成标志，而真正的完成标志应当是&quot;旧系统的所有访问、数据、集成都已断开并有记录&quot;。</p>
+<hr>
+<h2>6. 不换时的补偿控制</h2>
+<p>如果决定不换（这是多数情况下的正确答案），必须同时给出补偿措施，否则这个决定在下次审计或事件时无法解释。</p>
+<ul><li><strong>加一层</strong>：在失效的那一层外面加一个独立控制（例如在浏览器与内容之间加一层解析隔离，#118 的解析面）。</li><li><strong>缩范围</strong>：把高价值数据从该组件能触达的位置移开（#110 的分域）。</li><li><strong>提可见性</strong>：对该组件的行为加额外日志与告警（#161 的指标）。</li><li><strong>定期复议</strong>：设定一个复议时点，而不是&quot;以后再说&quot;。</li></ul>
+<p>四项里最容易被忽略的是第四项。<strong>一个没有复议点的&quot;暂不更换&quot;，在两年后会被读成&quot;从未评估&quot;。</strong></p>
+<hr>
+<h2>7. 决策表</h2>
+<table><thead><tr><th>条件</th><th>建议</th><th>备注</th></tr></thead><tbody><tr><td>根因明确在该组件，且无修复承诺</td><td>更换</td><td>分期，先低风险业务</td></tr><tr><td>根因明确，有修复承诺与时间表</td><td>不换 + 缓解</td><td>设复议点（#180）</td></tr><tr><td>根因不明</td><td>不换，先查清</td><td>换掉可能只是换掉证据</td></tr><tr><td>支持状态终止</td><td>必须换</td><td>无缓解选项（#180）</td></tr><tr><td>更换成本 &gt; 预期损失 × 3</td><td>优先补偿控制</td><td>需书面结论</td></tr><tr><td>主要动因是&quot;给一个交代&quot;</td><td>分开评估</td><td>政治需求与技术要求分开记录</td></tr></tbody></table>
+<p>最后一行需要展开一句：<strong>&quot;给一个交代&quot;是正当需求</strong>，但它不该伪装成技术结论。正确做法是同时写两份：技术评估（该不该换）与管理决定（为什么现在换/不换）。两份都留着，未来无论谁问，都有答案。</p>
+<hr>
+<h2>8. 加固清单（八条）</h2>
+<ol><li><strong>先定根因层，再谈更换对象。</strong></li><li><strong>迁移前做资产与依赖清单</strong>，否则范围必失控。</li><li><strong>并行期建立双份清单</strong>（账号、数据、集成），每项有到期日。</li><li><strong>切换期选低业务时段并临时加强监测。</strong></li><li><strong>收尾以&quot;旧系统完全断开&quot;为完成标志</strong>，不是&quot;新系统上线&quot;。</li><li><strong>不换时给四项补偿</strong>：加层、缩范围、提可见性、设复议点。</li><li><strong>技术评估与管理决定分开书面对待。</strong></li><li><strong>更换决定纳入下一年度的预算与培训计划</strong>（#176）。</li></ol>
+<hr>
+<h2>9. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;被攻破了就该换&quot;</td><td>被盯上是暴露画像问题，换品牌不改变</td></tr><tr><td>&quot;换了就安全了&quot;</td><td>根因不在组件时，换了照样发生</td></tr><tr><td>&quot;迁移是 IT 项目&quot;</td><td>它是安全项目：迁移期防御强度最低</td></tr><tr><td>&quot;新系统上线就算完成&quot;</td><td>旧系统未断开等于没完成</td></tr><tr><td>&quot;并行期只是多花点钱&quot;</td><td>双份权限与日志割裂是实质风险</td></tr><tr><td>&quot;暂不更换就是什么都不做&quot;</td><td>必须有四项补偿与复议点</td></tr><tr><td>&quot;换掉负责人就解决问题&quot;</td><td>人的问题需要结构与纪律（#186）</td></tr><tr><td>&quot;政治因素不能写进决策&quot;</td><td>要写，但要与技术评估分开</td></tr></tbody></table>
+<hr>
+<h2>10. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#94 暴露画像</td><td>为什么是你们</td><td>更换不改变被盯上的事实</td></tr><tr><td>#96 设备退出</td><td>单台设备的残留</td><td>批量退出的放大版</td></tr><tr><td>#104 例外台账</td><td>例外怎么登记</td><td>迁移期例外的管理</td></tr><tr><td>#110 多身份架构</td><td>设计上的隔离</td><td>存量的调整路径</td></tr><tr><td>#113 平台分层</td><td>同源代码在多平台</td><td>换平台的真实收益评估</td></tr><tr><td>#114 修复形态</td><td>补丁写在哪一层</td><td>判断根因层的技术依据</td></tr><tr><td>#160 管控栈</td><td>管控能力差异</td><td>更换平台的判据之一</td></tr><tr><td>#167 合同条款</td><td>终止与违约金</td><td>更换的合同成本</td></tr><tr><td>#172 降级运行</td><td>事件期怎么活</td><td>迁移期同样需要降级方案</td></tr><tr><td>#176 能力建设</td><td>人与培训</td><td>新平台的培训成本</td></tr><tr><td>#180 上报与协作</td><td>支持状态</td><td>支持终止是硬性更换条件</td></tr><tr><td>#183 追偿</td><td>向对方主张</td><td>&quot;换&quot;是&quot;告&quot;的替代</td></tr></tbody></table>
+<hr>
+<h2>11. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>什么情况下该换</td><td>根因明确在该组件且无修复承诺，或支持已终止</td></tr><tr><td>最常见的错误理由</td><td>&quot;被攻破了&quot;或&quot;要给个交代&quot;</td></tr><tr><td>迁移期最大的风险</td><td>控制空窗 + 双份权限 + 临时例外未收回</td></tr><tr><td>迁移何时算完成</td><td>旧系统全部断开并有记录</td></tr><tr><td>决定不换要做什么</td><td>加层、缩范围、提可见性、设复议点</td></tr><tr><td>政治因素怎么办</td><td>承认它，与技术评估分开写</td></tr><tr><td>一句话判据</td><td>换掉的是失效的信任假设，不是一个品牌</td></tr></tbody></table>
+<blockquote><p>更换解决的是信任假设，不是焦虑。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>事件后的更换决策判据与迁移风险管理</strong>，不构成采购或法律意见；合同终止、数据迁移合规等具体问题<strong>须由相应专业人士判断</strong>。</li><li>不涉及任何具体厂商的评价或推荐；文中所有判断均为结构性框架。</li><li>不涉及任何真实事件中&quot;应当更换什么&quot;的事实断言。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.nist.gov/cyberframework" rel="nofollow noopener" target="_blank">NIST CSF 2.0</a>（风险管理与改进）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事后改进与决策）</li><li><a href="https://www.iso.org/standard/27001" rel="nofollow noopener" target="_blank">ISO/IEC 27001：信息安全管理体系</a>（变更管理要求）</li><li><a href="https://www.iso.org/standard/75106.html" rel="nofollow noopener" target="_blank">ISO 22301：业务连续性管理体系</a>（迁移期的连续性保障）</li><li><a href="https://www.enisa.europa.eu/topics/cyber-threats" rel="nofollow noopener" target="_blank">ENISA：供应链安全资源</a>（供应商评估与替换的公开材料）</li><li>本系列 #94、#96、#104、#110、#113、#114、#160、#167、#172、#176、#180、#183（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a184.html">← 第 184 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a186.html">第 186 篇 →</a></nav></article>
+</main></body></html>

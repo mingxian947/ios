@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下事件期的人员叠加因素与纪律 | iOS 安全研究文章库</title>
+<meta name="description" content="立场先行：目的是**让处置更稳，不是找出可以归咎的人**；**「抓内鬼」是最差的第一反应**（报告停摆／证据割裂／调查偏移／法律风险／长期团队记忆五连锁）；四类叠加风险中只有「趁乱获取」含恶意，**最该先处理的反而是离职与转岗窗口**（可预期、可执行、不动情绪）；信号只建在**系统层**（账号／设备／数据／协">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a186.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下事件期的人员叠加因素与纪律">
+<meta property="og:description" content="立场先行：目的是**让处置更稳，不是找出可以归咎的人**；**「抓内鬼」是最差的第一反应**（报告停摆／证据割裂／调查偏移／法律风险／长期团队记忆五连锁）；四类叠加风险中只有「趁乱获取」含恶意，**最该先处理的反而是离职与转岗窗口**（可预期、可执行、不动情绪）；信号只建在**系统层**（账号／设备／数据／协">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a186.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 186 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的人员叠加因素：事件期最容易做错的那一半</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>一起定向投放发生在组织里，就一定会与&quot;人&quot;发生关系：谁看到了告警、谁被社工、谁在事件期间离职、谁在群里转发了截图。本篇讨论这些<strong>人员叠加因素</strong>——但立场很明确：<strong>目的是让处置更稳，不是找出一个可以归咎的人。</strong></li><li>核心命题一：<strong>&quot;抓内鬼&quot;是最差的第一个反应。</strong> 它会把一个技术调查变成一次人事行动，导致证据不再被共享、员工不再报告异常、真正的入口在噪音里被忽略。</li><li>核心命题二：<strong>事件期的人员风险有四类，只有一类与恶意有关。</strong> 趁乱获取、误传与过度传播、离职/转岗窗口、被社工（含其家属）。后三类的数量远大于第一类。</li><li>核心命题三：<strong>识别信号应当建在系统层，不建在人层。</strong> 看&quot;账号做了什么&quot;，不看&quot;这个人像不像&quot;。前者可核对、可复核、不伤人；后者不可核对，且极易被偏见污染。</li><li>核心命题四：<strong>隔离动作要最小、程序化、可回退。</strong> 一次没有依据的权限收回，会在团队里留下比事件本身更长的记忆。</li><li>核心命题五：<strong>纪律调查与安全调查是两条线。</strong> 混在一起，两条都会失败：安全调查需要开放的信息流，纪律调查需要严格的程序保障。</li><li>一句话结论：<strong>把&quot;是谁&quot;的问题，改写成&quot;哪个账号、在什么时间、做了什么、依据什么授权&quot;的问题。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#120 处理<strong>离职与账户交接</strong>：人离开组织时的资产与关系收回。本篇处理<strong>事件期</strong>的人员因素——时间窗重叠、情绪高压、信息需求激增。</p>
+<p>#164 处理<strong>访谈与协作纪律</strong>：怎么问、问什么、记录怎么用。本篇处理<strong>访谈之外</strong>的日常协作与隔离动作。</p>
+<p>#99 处理<strong>同居施害者</strong>：个人场景下的胁迫控制。本篇是组织场景，威胁模型完全不同，不能类比。</p>
+<p>#171 处理<strong>董事会与高管层治理</strong>：谁批准行动。本篇处理<strong>执行层</strong>的人与协作。</p>
+<p>#177 处理<strong>外部委托</strong>：外部人进来之后，内部人的角色变化。</p>
+<p>#178 处理<strong>记录分层</strong>：涉及人员的记录尤其需要分层。</p>
+<p>#185 处理<strong>更换决策</strong>：更换负责人不是本篇的答案，本篇的答案是<strong>结构与纪律</strong>。</p>
+<hr>
+<h2>3. 四类叠加风险</h2>
+<table><thead><tr><th>类型</th><th>表现</th><th>数量级</th><th>主要危害</th><th>首要动作</th></tr></thead><tbody><tr><td>趁乱获取</td><td>有人借事件扩大自己的访问权</td><td>少</td><td>权限扩散不可追溯</td><td>访问登记表（#177）</td></tr><tr><td>误传与过度传播</td><td>截图、转发、外传&quot;内部消息&quot;</td><td>多</td><td>信息失控、受害者暴露</td><td>渠道收敛（#178）</td></tr><tr><td>离职 / 转岗窗口</td><td>事件期恰好有人走或换岗</td><td>中</td><td>访问未收回、知识断层</td><td>离职清单提前执行（#120）</td></tr><tr><td>被社工（含家属）</td><td>员工或其家人被定向接触</td><td>中到多</td><td>凭据泄露、二次投递</td><td>告知与演练（#176）</td></tr></tbody></table>
+<p>四类里只有第一类含恶意，而它也是最难证明的一类。把资源按&quot;危害 × 可处理性&quot;排序，通常会得出一个与直觉相反的结论：<strong>第三类的优先级最高</strong>——因为它可预期、可执行、且不动情绪。</p>
+<hr>
+<h2>4. 为什么&quot;抓内鬼&quot;是最差的第一反应</h2>
+<p>五个连锁后果，一个比一个难修复。</p>
+<ul><li><strong>报告停摆</strong>：员工开始担心自己的操作被误解，于是不再主动报告异常（而异常报告恰恰是发现残留的主要来源）。</li><li><strong>证据割裂</strong>：各部门开始&quot;先自查再上报&quot;，你拿到的是被整理过的版本。</li><li><strong>调查偏移</strong>：技术线索被放在&quot;某人行为异常&quot;的框架里解读，错误归因的概率大幅上升。</li><li><strong>法律风险</strong>：无依据的针对性调查可能触及劳动、隐私与人格权边界，具体须由律师判断。</li><li><strong>长期成本</strong>：团队记得的不是事件，是那次事件里的人事处理。</li></ul>
+<p>一个替代性框架：&quot;<strong>先假设是无意的，直到系统层的证据指向别的方向。</strong>&quot; 这句话不是道德姿态，是调查方法——它保住了信息流。</p>
+<hr>
+<h2>5. 可观察信号：系统层，不是人层</h2>
+<table><thead><tr><th>观察对象</th><th>可核对的信号</th><th>不可用的信号</th></tr></thead><tbody><tr><td>账号</td><td>非常规时段、非常规来源、权限变更、批量导出</td><td>&quot;他最近表现反常&quot;</td></tr><tr><td>设备</td><td>新装描述文件、异常进程、外接存储</td><td>&quot;他的电脑看起来很乱&quot;</td></tr><tr><td>数据</td><td>下载量、共享链接、邮件附件外发</td><td>&quot;他最近总在打听&quot;</td></tr><tr><td>协作</td><td>谁在何时被加入了哪个群、哪个文档</td><td>&quot;他和谁走得近&quot;</td></tr><tr><td>社交工程</td><td>收到可疑邮件/电话的报告记录</td><td>主观印象</td></tr></tbody></table>
+<p>右列的三条都属于&quot;人层判断&quot;，它们不可核对、不可复核，且与真实风险的相关性极低。<strong>把它们写进调查记录，本身就是一种风险</strong>（#178 的自毁式记录）。</p>
+<p>左列的信号有一个共同特点：<strong>任何一个都能被单独解释</strong>。一次夜间登录可能是加班，一次导出可能是正常工作。因此正确的做法不是&quot;看到异常就怀疑&quot;，而是<strong>把异常放在时间线上与其他事实对照</strong>。</p>
+<hr>
+<h2>6. 隔离动作的四个层次</h2>
+<p>从最轻到最重，每一步都应当有依据、有期限、有复核。</p>
+<table><thead><tr><th>层次</th><th>动作</th><th>触发条件</th><th>可逆性</th></tr></thead><tbody><tr><td>L1 提示</td><td>提醒该账号近期有异常，请确认</td><td>单一异常信号</td><td>完全可逆</td></tr><tr><td>L2 收紧</td><td>缩短会话有效期、要求重新认证</td><td>多个信号叠加</td><td>可逆</td></tr><tr><td>L3 限制</td><td>暂停特定系统访问，保留其他</td><td>有明确证据指向该账号</td><td>可逆，需记录</td></tr><tr><td>L4 停用</td><td>全面停用账号并保留取证镜像</td><td>证据充分且风险持续</td><td>不可逆（影响工作）</td></tr></tbody></table>
+<p>三条纪律：</p>
+<ul><li><strong>先做 L1–L2</strong>。绝大多数情形在 L2 就解决了，而 L1–L2 不会造成&quot;被怀疑&quot;的公开信号。</li><li><strong>L3 以上必须有书面依据与批准人</strong>，并写明复核时点。</li><li><strong>L4 之前先镜像</strong>（#116），否则后续无论结论如何都没有依据。</li></ul>
+<hr>
+<h2>7. 纪律调查与安全调查的边界</h2>
+<table><thead><tr><th>维度</th><th>安全调查</th><th>纪律调查</th></tr></thead><tbody><tr><td>目的</td><td>弄清技术事实与影响</td><td>判断是否违反内部规则</td></tr><tr><td>主导</td><td>安全/技术负责人</td><td>人力/合规（依当地规则）</td></tr><tr><td>证据标准</td><td>技术可复现、可复核</td><td>程序合规、可申辩</td></tr><tr><td>信息范围</td><td>需要广泛共享以推进</td><td>需要严格限定以保障程序</td></tr><tr><td>结论形式</td><td>事件报告</td><td>处理决定</td></tr></tbody></table>
+<p>两条线可以并行，但<strong>不能共用同一份未经分层的记录</strong>。安全调查中&quot;某人账号有异常&quot;的片段，流入纪律程序后会变成&quot;某人被怀疑&quot;的证据，而它可能只是一个共享账号。这正是 #178 强调分层的原因。</p>
+<p>一个可执行的规则：<strong>任何涉及具体个人的结论，都必须由两条线各自的负责人分别签字</strong>，且签字前互相看不到对方未定稿的推断。</p>
+<hr>
+<h2>8. 离职窗口：可预期的那一类</h2>
+<p>事件期恰逢离职是很常见的。它之所以危险，不是因为离职者一定有问题，而是因为<strong>离职流程在压力下会被压缩</strong>。</p>
+<ul><li><strong>清单提前执行</strong>：不要等最后一天；事件期一旦确认有人要走，立即按 #120 的十项执行。</li><li><strong>关系型授权单独检查</strong>：共享相册、家庭组、转发规则、日历共享——这些不随企业账号一起消失。</li><li><strong>知识交接优先于权限交接</strong>：谁知道哪台设备在哪里、哪份日志怎么读，比谁能登录更重要。</li><li><strong>不要事件化</strong>：把离职者当作嫌疑人对待，既不公平也无必要；按标准流程做，就足够。</li></ul>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>事件第一天明确&quot;不做人事归因&quot;</strong>，直到系统层证据出现。</li><li><strong>建访问登记表</strong>，所有新增访问有到期日（#177）。</li><li><strong>渠道收敛</strong>，指定一个讨论渠道，其余只谈执行。</li><li><strong>人员相关记录单独分层</strong>，不进入通用材料（#178）。</li><li><strong>隔离动作四级化</strong>，L3 以上书面批准 + 复核点。</li><li><strong>L4 前先镜像</strong>。</li><li><strong>离职清单在事件期提前执行</strong>，关系型授权单列。</li><li><strong>两条调查线分别签字</strong>，互不引用未定稿推断。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;出事了先查内部人&quot;</td><td>会切断信息流，且极易错误归因</td></tr><tr><td>&quot;行为反常就是信号&quot;</td><td>人层判断不可核对，相关性极低</td></tr><tr><td>&quot;先停账号最保险&quot;</td><td>L4 不可逆，且应先镜像</td></tr><tr><td>&quot;离职的人最可疑&quot;</td><td>离职窗口的风险是流程被压缩，不是人</td></tr><tr><td>&quot;两条调查可以合并&quot;</td><td>目的、标准、信息范围都不同</td></tr><tr><td>&quot;内部调查不算调查&quot;</td><td>在审计与交易里通常需要披露（#181、#182）</td></tr><tr><td>&quot;员工不需要知道&quot;</td><td>不告知会被社工利用；告知要与 #176 的演练结合</td></tr><tr><td>&quot;处理完人就处理完了&quot;</td><td>权限、关系、知识都还在</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#99 同居施害</td><td>个人胁迫场景</td><td>威胁模型不同，不可类比</td></tr><tr><td>#116 入侵时间轴</td><td>证据保全顺序</td><td>L4 前必须镜像</td></tr><tr><td>#120 离职交接</td><td>资产与关系收回</td><td>事件期的压缩执行版</td></tr><tr><td>#164 访谈纪律</td><td>怎么问</td><td>本篇处理访谈之外的协作</td></tr><tr><td>#171 治理授权</td><td>谁批准</td><td>隔离动作的批准链</td></tr><tr><td>#176 能力建设</td><td>培训与演练</td><td>社工告知与演练</td></tr><tr><td>#177 委托边界</td><td>外部人进来</td><td>内部人角色变化</td></tr><tr><td>#178 记录分层</td><td>记录受控</td><td>人员记录尤其需要</td></tr><tr><td>#185 更换决策</td><td>换供应商</td><td>换人不是答案</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>第一反应不该是什么</td><td>抓内鬼</td></tr><tr><td>人员风险有几类</td><td>四类，只有一类含恶意</td></tr><tr><td>哪一类最该先处理</td><td>离职/转岗窗口：可预期、可执行、不动情绪</td></tr><tr><td>信号建在哪</td><td>系统层（账号、设备、数据），不建在人层</td></tr><tr><td>隔离怎么做</td><td>四级，L3 以上书面批准，L4 前先镜像</td></tr><tr><td>两条调查怎么相处</td><td>并行但记录分层，分别签字</td></tr><tr><td>一句话判断标准</td><td>你讨论的是&quot;账号做了什么&quot;，还是&quot;这个人像不像&quot;</td></tr></tbody></table>
+<blockquote><p>事件期最昂贵的错误，是把技术问题变成对人的判断。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>事件期的组织协作与人员相关风险管理</strong>，立场是<strong>避免无依据的针对性调查</strong>；所有建议均指向程序化、可复核、最小化的动作。</li><li>涉及员工个人信息处理、内部调查程序与劳动关系的具体问题，<strong>须由执业律师与人力资源合规专业人士判断</strong>；本篇不提供任何监控、取证或施压方法。</li><li>不涉及任何具体组织、个人或案件；文中为通用结构。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件沟通与协作）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/53/r5/final" rel="nofollow noopener" target="_blank">NIST SP 800-53：安全与隐私控制</a>（访问控制与审计）</li><li><a href="https://www.iso.org/standard/27001" rel="nofollow noopener" target="_blank">ISO/IEC 27001：信息安全管理体系</a>（职责分离与人员安全）</li><li><a href="https://www.iso.org/standard/75652.html" rel="nofollow noopener" target="_blank">ISO/IEC 27002：信息安全控制实践</a>（人员相关控制）</li><li><a href="https://www.enisa.europa.eu/topics/incident-response" rel="nofollow noopener" target="_blank">ENISA：事件响应良好实践</a>（协作与沟通的公开材料）</li><li>本系列 #116、#120、#164、#171、#176、#177、#178、#185（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a185.html">← 第 185 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>

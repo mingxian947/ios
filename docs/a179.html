@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下报案决策与材料提交边界 | iOS 安全研究文章库</title>
+<meta name="description" content="报案是四件事 **立案意愿／材料提交／后续配合／结果使用**，混乱来自当成一件；四动机（调查资源／合规义务／对外证明／追偿铺路）各自要的材料不同，同时按最严标准执行必给多；时机顺序 **证据保全 → 止血 → 报案**（可并行，保全永远最先，「先清理干净再报案」= 入口关了证据没了解释不清）；材料三级 **M">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a179.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下报案决策与材料提交边界">
+<meta property="og:description" content="报案是四件事 **立案意愿／材料提交／后续配合／结果使用**，混乱来自当成一件；四动机（调查资源／合规义务／对外证明／追偿铺路）各自要的材料不同，同时按最严标准执行必给多；时机顺序 **证据保全 → 止血 → 报案**（可并行，保全永远最先，「先清理干净再报案」= 入口关了证据没了解释不清）；材料三级 **M">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a179.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 179 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的报案决策：什么时候报、报什么、报到哪一步为止</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>确认被定向投放之后，&quot;要不要报案&quot;是几乎每个组织都会在三天内问出、却常常没人敢拍板的问题。本篇不讨论任何具体法域的程序，只讨论<strong>决策结构与材料粒度</strong>——这两件是组织自己就能想清楚的。</li><li>核心命题一：<strong>报案不是一个动作，是四个动作：立案意愿、材料提交、后续配合、结果使用。</strong> 多数组织的混乱来自把这四件事当成一件。</li><li>核心命题二：<strong>报案的动机决定了材料的粒度。</strong> 为了拿到调查资源、为了满足合规义务、为了形成对外证明、为了后续追偿——四种动机要的材料完全不同，混在一起报，一定给多。</li><li>核心命题三：<strong>&quot;报了案&quot;与&quot;全交了&quot;是两件事。</strong> 前者是一个法律事实，后者是一个范围问题；范围可以在规则允许内协商，而一旦交出去，通常不可撤回。</li><li>核心命题四：<strong>时机上，止血优先于报案，但证据保全优先于两者。</strong> 三者的顺序错了，你可能既没止住血，也没留下证据。</li><li>核心命题五：<strong>配合期最贵的不是时间，是&quot;承诺&quot;。</strong> 你在配合期口头说过的话，会在后半程变成你的义务。</li><li>一句话结论：<strong>报案前先写清四件事：为什么报、报给谁、交什么、我准备好承受哪六项副作用。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>#170 处理<strong>跨境取证与司法协助</strong>：不同司法辖区之间的协助请求、时间尺度与不可控性。那是<strong>已经进入程序之后</strong>的事。本篇处理<strong>进入程序之前</strong>的那一步。</p>
+<p>#105 处理<strong>平台方的合法披露边界</strong>：数据在谁手里、谁能调。那你是<strong>被请求方</strong>。本篇你是<strong>请求方</strong>。</p>
+<p>#117 处理<strong>保险/支付/交易对手</strong>的索取：依据是合同，不是法定权力。本篇的依据是法定权力，性质完全不同——<strong>对合同方可以持续协商，对执法方通常只能就范围与方式沟通</strong>。</p>
+<p>#167 处理<strong>合同条款</strong>（含配合义务）。本篇的&quot;配合&quot;往往正是合同义务被激活的地方。</p>
+<p>#178 处理<strong>记录能否不交</strong>。本篇处理<strong>主动交什么</strong>——两者是同一组材料的两端。</p>
+<hr>
+<h2>3. 报案的四个真实动机</h2>
+<p>动机不是修辞，它直接决定你该准备什么。</p>
+<table><thead><tr><th>动机</th><th>成立条件</th><th>需要提交的材料</th><th>不成立的典型情形</th></tr></thead><tbody><tr><td>获取调查资源</td><td>案件可能触及有组织犯罪、跨境基础设施、需要技术手段</td><td>时间线、指标、基础设施线索</td><td>单点、无持续性的个案</td></tr><tr><td>满足合规义务</td><td>所在行业/辖区存在明确的报告要求（#169）</td><td>按义务清单，不多不少</td><td>无明确义务却按最严标准交</td></tr><tr><td>形成对外证明</td><td>需要对客户、合作方、监管证明&quot;已依法处理&quot;</td><td>受案回执、处理结论</td><td>用受案回执代替事实说明</td></tr><tr><td>为追偿铺路</td><td>后续需向责任方主张（#183）</td><td>可核对的损失证据、因果链</td><td>把希望寄托在刑事程序上</td></tr></tbody></table>
+<p>四者的交集很小。实践中真正的问题是：<strong>一个人同时抱着四个动机去报案</strong>，结果按最严的那一套准备材料，把本不需要交的东西也交了出去。</p>
+<hr>
+<h2>4. 三个时机，一个顺序</h2>
+<table><thead><tr><th>方案</th><th>适用情形</th><th>优点</th><th>风险</th></tr></thead><tbody><tr><td>先止血，后报案</td><td>攻击仍在持续、入口未关闭</td><td>减少继续损失</td><td>时间线可能因处置而改变，需靠记录补回</td></tr><tr><td>先报案，后止血</td><td>已确认停止、但需要外部资源</td><td>保全现场</td><td>在等待中失去处置窗口</td></tr><tr><td>并行</td><td>团队足够、有专人对接</td><td>理论上最优</td><td>现实中极易多头指挥、口径分裂</td></tr></tbody></table>
+<p>三者之上有一条<strong>绝对优先</strong>：<strong>证据保全</strong>。它必须先于处置动作（#116 的证据衰减表说的就是这件事）。具体说：在动手清理之前，先把该留的留好——日志导出、镜像、账号审计记录、原始告警。这一步做不到，后面无论报不报案、怎么止血，都缺依据。</p>
+<p>一个常见的错误顺序是&quot;先清理干净再说&quot;，理由是&quot;留着不安全&quot;。结果是：<strong>入口关了，证据没了，解释不清损失，也解释不清为什么现在才报</strong>。</p>
+<hr>
+<h2>5. 材料的三级粒度</h2>
+<p>把可提交的材料分成三级，是控制范围最有效的办法。它与 #117 的三级结构相似，但依据不同：那里是合同强度，这里是法定程序下的<strong>相关性与必要性</strong>。</p>
+<table><thead><tr><th>级别</th><th>内容</th><th>什么时候给</th><th>不给会怎样</th><th>给了会怎样</th></tr></thead><tbody><tr><td><strong>M1 结论</strong></td><td>事件性质、影响范围、已采取动作、时间线概要</td><td>立案阶段通常足够</td><td>可能被认为不配合</td><td>风险最低，但可能不足以立案</td></tr><tr><td><strong>M2 证据</strong></td><td>日志摘录、指标、账号记录、设备清单（脱敏）</td><td>立案后、需要定向调查时</td><td>调查无法推进</td><td>数据范围扩大，需登记</td></tr><tr><td><strong>M3 原始载体</strong></td><td>完整镜像、原始日志全量、未脱敏名单</td><td>明确要求且无法以 M2 替代时</td><td>极少数情况下影响鉴定</td><td>不可撤回，且含大量无关个人信息</td></tr></tbody></table>
+<p>判断顺序建议是：<strong>先问&quot;这个结论能不能用 M1 说清&quot;，再问&quot;能不能用 M2 支撑&quot;，最后才考虑 M3。</strong></p>
+<p>三级的另一个用处是在<strong>内部</strong>统一口径：谁有权决定升级到 M2、谁有权决定交 M3，必须提前指定（#171 的授权结构）。现场临时决定升级的，通常是级别最高、在现场待得最短的那个人。</p>
+<hr>
+<h2>6. 最容易多给的三样东西</h2>
+<ul><li><strong>完整的受害者名单。</strong> 除非调查确需，明细可以用编号 + 数量替代。多交名单的代价是双重的：既扩大了个人信息扩散面，也让&quot;谁被盯上&quot;成为可被二次利用的信息（#157 的名单治理是同一问题的防御侧）。</li><li><strong>内部归因意见。</strong> &quot;我们怀疑是某人/某组织&quot;这类判断，在没有证据支撑时提交，等于把自己的推测变成别人的调查方向；一旦方向错误，你的可信度会被一并打折。</li><li><strong>与本案无关的系统信息。</strong> 为了让对方&quot;了解我们的环境&quot;，把架构图、账号体系、供应商清单一并给出。这些材料一旦进入某个流程，就离开了你的控制。</li></ul>
+<p>三者的共同点是：<strong>它们看起来能帮助调查，实际上主要帮助你解释自己</strong>。而解释自己，用 M1 就够。</p>
+<hr>
+<h2>7. 配合期：节奏与&quot;不能承诺的事&quot;</h2>
+<p>配合期通常比预期长。它的成本不在会议，而在<strong>每一次回应都会形成记录</strong>。</p>
+<ul><li><strong>节奏由你控制的部分</strong>：响应时限、材料格式、接口人、会议频率。这些应当在第一次沟通时就说明。</li><li><strong>节奏不受你控制的部分</strong>：对方内部流程、跨部门协调、技术鉴定的排期。对这些不要给出时间承诺。</li><li><strong>不能承诺的四类事</strong>：不对结果作预期；不对他人的责任作判断；不承诺&quot;不再发生&quot;（#173 的责任分配里，这句话的代价最大）；不承诺无限期配合（配合义务通常有边界，边界需要专业判断）。</li></ul>
+<p>一个技术性的建议：<strong>每次提交材料都留一份提交记录</strong>——交了什么、什么时候、给谁、依据什么要求。这份记录在半年后是唯一能回答&quot;我们到底交过什么&quot;的东西（#178 的材料登记）。</p>
+<hr>
+<h2>8. 报案的六项可预期副作用</h2>
+<p>报案不是没有代价的。提前知道代价，才能判断值不值。</p>
+<table><thead><tr><th>副作用</th><th>可预见程度</th><th>能否减轻</th><th>减轻方式</th></tr></thead><tbody><tr><td>事件进入更长的处理周期</td><td>高</td><td>部分</td><td>内部处置不因报案而暂停</td></tr><tr><td>材料范围可能扩大</td><td>中</td><td>是</td><td>分级提交 + 每次留记录</td></tr><tr><td>对外口径受约束</td><td>中</td><td>部分</td><td>先定&quot;能说什么&quot;再定&quot;怎么说&quot;（#175）</td></tr><tr><td>客户/合作方知情的时点提前</td><td>中</td><td>是</td><td>提前准备通知方案（#151）</td></tr><tr><td>内部人员被约谈</td><td>中</td><td>有限</td><td>提前沟通，避免&quot;被调查&quot;的误读（#186）</td></tr><tr><td>商业信息被动披露</td><td>低到中</td><td>部分</td><td>提交前做最小化处理</td></tr></tbody></table>
+<p>最容易被低估的是第五项：<strong>内部人员第一次被外部约谈时，组织往往没有准备</strong>。这会同时损伤士气和配合质量。</p>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>报案前写一页决策备忘</strong>：四个动机中哪个是主因、依据是什么、谁批准。</li><li><strong>先保全证据，再动处置</strong>；处置动作与证据动作分别记录。</li><li><strong>材料分三级（M1/M2/M3）</strong>，并指定每一级的批准人。</li><li><strong>受害者名单默认用编号</strong>，除非确需明细。</li><li><strong>归因意见不随材料提交</strong>；如被问及，说明&quot;尚无结论&quot;。</li><li><strong>指定唯一对外接口人</strong>，所有约谈与材料提交经其登记。</li><li><strong>四类承诺不出口</strong>：结果、责任、不再发生、无限期配合。</li><li><strong>建一张提交台账</strong>：时间、对象、内容摘要、依据、批准人。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<table><thead><tr><th>误解</th><th>实际情况</th></tr></thead><tbody><tr><td>&quot;报案就等于把一切都交出去&quot;</td><td>报案与材料范围是两件事；范围可协商</td></tr><tr><td>&quot;不报案就不会被发现&quot;</td><td>平台通知、客户投诉、供应商披露都可能先于你（#149）</td></tr><tr><td>&quot;先清理干净再报案更体面&quot;</td><td>证据没了，损失与时间线都说不清</td></tr><tr><td>&quot;报得越早越好&quot;</td><td>时机取决于是否已止血与是否已保全；顺序错了代价更大</td></tr><tr><td>&quot;多给材料显得配合&quot;</td><td>相关性以外的东西给你带不来配合度，只带来范围</td></tr><tr><td>&quot;受案回执就是对客户的证明&quot;</td><td>回执只证明你报过，不证明事实与处置</td></tr><tr><td>&quot;承诺全力配合不会有问题&quot;</td><td>无边界承诺会在后半程变成压力来源</td></tr><tr><td>&quot;内部人知道得越少越好&quot;</td><td>被约谈时的惊讶，比事前沟通的代价高得多</td></tr></tbody></table>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<table><thead><tr><th>篇目</th><th>它处理什么</th><th>本篇与它的关系</th></tr></thead><tbody><tr><td>#105 平台方披露边界</td><td>你是被请求方</td><td>本篇你是请求方</td></tr><tr><td>#117 第三方索取强度</td><td>合同依据</td><td>本篇是法定权力，协商空间不同</td></tr><tr><td>#151 对外沟通与通报义务</td><td>怎么告诉别人</td><td>报案的时点会推动通知时点</td></tr><tr><td>#167 合同条款</td><td>配合义务</td><td>配合义务在此被激活</td></tr><tr><td>#169 监管报送</td><td>强制报告</td><td>与报案可能重叠，需对齐口径</td></tr><tr><td>#170 跨境司法协助</td><td>程序内的时间尺度</td><td>本篇是程序前的决策</td></tr><tr><td>#175 公开叙事</td><td>对外表述</td><td>报案后口径受更多约束</td></tr><tr><td>#178 记录分层</td><td>记录能否不交</td><td>本篇处理主动提交</td></tr><tr><td>#183 追偿</td><td>后续主张</td><td>报案材料是追偿的基础之一</td></tr><tr><td>#186 内部人员</td><td>人的因素</td><td>约谈的沟通准备</td></tr></tbody></table>
+<hr>
+<h2>12. 总结</h2>
+<table><thead><tr><th>问题</th><th>一句话答案</th></tr></thead><tbody><tr><td>报案是几件事</td><td>立案意愿、材料提交、后续配合、结果使用</td></tr><tr><td>动机影响什么</td><td>决定材料粒度；四种动机不要同时按最严标准执行</td></tr><tr><td>三个时机的顺序</td><td>证据保全 → 止血 → 报案（可并行，但保全永远最先）</td></tr><tr><td>材料怎么分</td><td>M1 结论 / M2 证据 / M3 原始载体，逐级升级</td></tr><tr><td>最容易多给什么</td><td>完整名单、归因意见、无关系统信息</td></tr><tr><td>配合期最贵的是什么</td><td>承诺</td></tr><tr><td>值不值得报</td><td>看四个动机里哪个成立，以及六项副作用你是否承受得起</td></tr></tbody></table>
+<blockquote><p>报案的第一步不是打电话，是决定你要交出的范围。</p></blockquote>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论<strong>报案决策的结构与材料粒度</strong>，不构成法律意见；是否报案、报给谁、法定报告义务的范围与时限，<strong>须由执业律师结合所在法域判断</strong>。</li><li>本篇<strong>不提供任何隐瞒、拖延或规避报告义务的方法</strong>；所有建议均在&quot;如实报告&quot;的前提下讨论范围与方式。</li><li>不涉及任何具体机构、具体案件；文中流程为通用结构，不指向任何真实事件的处理。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/pubs/sp/800/61/r2/final" rel="nofollow noopener" target="_blank">NIST SP 800-61：事件处理指南</a>（事件分类与报告阶段）</li><li><a href="https://csrc.nist.gov/pubs/sp/800/86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（证据保全与提交）</li><li><a href="https://www.iso.org/standard/44381.html" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据处置规范</a>（证据完整性与可追溯）</li><li><a href="https://www.enisa.europa.eu/topics/incident-response" rel="nofollow noopener" target="_blank">ENISA：事件响应良好实践</a>（对外协作的公开材料）</li><li><a href="https://www.cisa.gov/topics/cyber-threats-and-advisories" rel="nofollow noopener" target="_blank">CISA：事件报告与协作资源</a>（协作流程的公开说明）</li><li>本系列 #105、#117、#151、#167、#169、#170、#175、#178、#183、#186（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a178.html">← 第 178 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a180.html">第 180 篇 →</a></nav></article>
+</main></body></html>
