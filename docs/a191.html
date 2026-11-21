@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的证书与签名材料：沉默且不可撤回的资产 | iOS 安全研究文章库</title>
+<meta name="description" content="签名材料是事件里**唯一不可撤回的资产**——备份可以删、会话可以踢、证书一旦被滥用只能吊销并承担连带代价；六类（App 签名证书／描述文件／企业分发证书／推送密钥／TLS 证书／信任根与自签 CA）；资产—属主—绑定—用途四张表；三态 泄露／疑似／滥用 的判定与响应不同；吊销代价表（已装应用、MDM 设备、">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a191.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的证书与签名材料：沉默且不可撤回的资产">
+<meta property="og:description" content="签名材料是事件里**唯一不可撤回的资产**——备份可以删、会话可以踢、证书一旦被滥用只能吊销并承担连带代价；六类（App 签名证书／描述文件／企业分发证书／推送密钥／TLS 证书／信任根与自签 CA）；资产—属主—绑定—用途四张表；三态 泄露／疑似／滥用 的判定与响应不同；吊销代价表（已装应用、MDM 设备、">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a191.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 191 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的证书与签名材料：事件里最沉默、也最不可撤回的资产</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>设备、账号、会话都能&quot;收回&quot;；<strong>签名材料一旦泄露，你失去的是&quot;未来所有产物都可信&quot;这件事</strong>。它是事件里唯一不能在事后补救到原状的资产。</li><li>核心命题一：<strong>签名材料的失守，通常不以&quot;被黑&quot;的形式出现。</strong> 它更常见的形式是：离职者仍持有、构建机无人看管、测试证书被当生产用、描述文件在共享盘里放了三年。</li><li>核心命题二：<strong>&quot;吊销&quot;不是无代价动作。</strong> 吊销一张证书会同时影响所有使用它的产品；因此必须区分&quot;泄露&quot;与&quot;疑似&quot;，并准备好替代路径。</li><li>核心命题三：<strong>证书治理的核心是清单，而不是技术。</strong> 谁签发了什么、有效期到哪天、绑定到哪些产物、谁能吊销——四件事说不清，处置就无法开始。</li><li>核心命题四：<strong>信任链是一次性的。</strong> 一旦某个中间环节被替换，之前所有&quot;已验证通过&quot;的记录都需要重新审视（#181 审计与认证中的历史事件陈述）。</li><li>核心命题五：<strong>这件事没有&quot;事后修好&quot;，只有&quot;提前设计&quot;。</strong> 短周期证书、自动化签发、分离的签名环境，是唯一能承受事件的形态。</li><li>一句话结论：<strong>把签名材料当作&quot;高价值、低可见、不可逆&quot;的资产单独治理，而不是附件在发布流程末尾的一个步骤。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>讨论对象</th></tr></thead><tbody><tr><td>#115 软件更新链安全边界</td><td>更新分发链路的完整性</td></tr><tr><td>#153 网页第三方脚本依赖被篡改的投递放大</td><td>Web 侧依赖被篡改</td></tr><tr><td>#190 第三方 SDK 与组件供应链的上下游处置</td><td>集成组件的处置</td></tr><tr><td>本篇 #191</td><td><strong>签名与信任材料本身</strong>：证书、描述文件、密钥、信任根</td></tr></tbody></table>
+<p>#115 关心&quot;包从哪来、路上有没有被改&quot;；本篇关心&quot;签这个包的东西，现在还在谁手里&quot;。</p>
+<hr>
+<h2>3. 六类签名与信任材料</h2>
+<table><thead><tr><th>类别</th><th>作用</th><th>泄露后果</th><th>撤回难度</th></tr></thead><tbody><tr><td>应用签名证书</td><td>证明产物来源</td><td>可签发未授权产物</td><td>高（影响存量）</td></tr><tr><td>描述文件</td><td>授权在哪些设备上运行</td><td>可扩大授权范围</td><td>中</td></tr><tr><td>企业分发材料</td><td>内部大规模分发</td><td>可向非授权设备分发</td><td>高</td></tr><tr><td>推送与通知密钥</td><td>向你的应用发通知</td><td>可伪造通知</td><td>中</td></tr><tr><td>服务端 TLS 证书</td><td>证明服务身份</td><td>可冒充服务</td><td>中（可轮换）</td></tr><tr><td>信任根与自建 CA</td><td>全局信任</td><td>可签发任意受信证书</td><td>极高</td></tr></tbody></table>
+<p><strong>最后一行是&quot;事件级的核按钮&quot;。</strong> 自建 CA 一旦泄露，唯一的补救是重新建立信任，而那意味着所有终端都需要更新——成本按用户量线性增长。</p>
+<hr>
+<h2>4. 清单：四张表，必须在事件之前存在</h2>
+<table><thead><tr><th>表</th><th>内容</th><th>更新时机</th></tr></thead><tbody><tr><td>资产表</td><td>证书/密钥/描述文件清单，含序列号与到期日</td><td>每次签发</td></tr><tr><td>属主表</td><td>每一项的负责人与备份保管人</td><td>人员变动时</td></tr><tr><td>绑定表</td><td>每项材料绑定到哪些产物与环境</td><td>每次发布</td></tr><tr><td>使用记录</td><td>何时、由谁、在哪个环境中被使用</td><td>每次签名</td></tr></tbody></table>
+<p><strong>第三张表是事件期最有价值的。</strong> 它把&quot;某张证书泄露&quot;直接转换成&quot;以下这些产物需要重新签发&quot;，而不需要事后反查。</p>
+<hr>
+<h2>5. 事件判定：泄露、疑似、滥用，三种状态</h2>
+<table><thead><tr><th>状态</th><th>判定依据</th><th>首要动作</th><th>对外口径</th></tr></thead><tbody><tr><td>泄露</td><td>材料副本出现在不应出现的位置</td><td>立即吊销 + 重新签发</td><td>内部通报 + 受影响方告知</td></tr><tr><td>疑似</td><td>持有环境出现异常访问或人员变动</td><td>收紧访问 + 加强监控 + 准备替代</td><td>暂不对外</td></tr><tr><td>滥用</td><td>出现未授权产物或异常分发</td><td>吊销 + 追查 + 版本核验</td><td>按影响范围告知</td></tr></tbody></table>
+<p><strong>&quot;疑似&quot;这一档经常被跳过。</strong> 实践中大量事件停在&quot;疑似&quot;，因为证明&quot;泄露&quot;需要时间，而处置又不能等；这时正确做法是<strong>准备替代并按&quot;疑似&quot;管理</strong>，而不是在两种极端之间摇摆。</p>
+<hr>
+<h2>6. 吊销的真实代价：一张影响面表</h2>
+<p>在按下吊销之前，先填完这张表：</p>
+<table><thead><tr><th>受影响面</th><th>问题</th><th>若不评估的后果</th></tr></thead><tbody><tr><td>存量产物</td><td>已发布的包是否仍能安装/运行</td><td>大面积不可用</td></tr><tr><td>自动更新</td><td>更新链路是否依赖该证书</td><td>更新中断</td></tr><tr><td>外部集成</td><td>合作方是否依赖固定证书</td><td>集成失败</td></tr><tr><td>用户侧操作</td><td>是否需要用户手动干预</td><td>支持成本激增</td></tr><tr><td>时间窗</td><td>重新签发与验证需要多久</td><td>服务中断时长失控</td></tr></tbody></table>
+<p><strong>第五行决定了&quot;先吊销还是先准备&quot;。</strong> 若替代路径需要两周，而泄露是确定的，正确的顺序通常是<strong>并行推进</strong>：一边准备替代，一边收紧而不吊销，直到切换完成。</p>
+<hr>
+<h2>7. 阻断继续使用：四个可逆动作</h2>
+<ol><li><strong>收紧签发环境的访问。</strong> 立即生效、可回退、影响面小。</li><li><strong>保留审计轨迹。</strong> 采集签发日志与使用记录，注意不要覆盖。</li><li><strong>监控异常产物。</strong> 建立&quot;是否有未经授权的产物出现&quot;的观察点。</li><li><strong>准备新材料的试用签发。</strong> 在隔离环境中验证替代证书的兼容性。</li></ol>
+<p>四个动作都不需要立即吊销，但都能显著降低继续失血的速度。</p>
+<hr>
+<h2>8. 签发环境的三条硬规则</h2>
+<table><thead><tr><th>规则</th><th>内容</th><th>原因</th></tr></thead><tbody><tr><td>分离</td><td>签名环境与开发环境物理/逻辑分离</td><td>开发机的任何问题都不应影响签发</td></tr><tr><td>最小</td><td>只有签发流程能读到私钥</td><td>人越多，泄露面越大</td></tr><tr><td>自动</td><td>短有效期 + 自动续期</td><td>人工流程是过期与遗漏的主要来源</td></tr></tbody></table>
+<p><strong>三条规则的核心是一致的：减少&quot;人接触私钥&quot;的次数。</strong> 任何一次人工接触，都是一次不可审计的暴露。</p>
+<hr>
+<h2>9. 与外部协作时的边界</h2>
+<ol><li><strong>鉴定机构需要材料，不等于需要私钥。</strong> 提供签名记录与产物哈希即可（#195）。</li><li><strong>律师需要事实，不需要副本。</strong> 描述&quot;何时发现、谁接触过&quot;，比交出一份密钥副本更安全（#183）。</li><li><strong>上游平台需要配合，不等于需要你的私钥。</strong> 多数吊销流程只需要标识与授权证明（#187）。</li></ol>
+<p><strong>这三条的共同点：任何外部方都不应获得私钥本身。</strong> 一旦给出，就等于把&quot;未来&quot;也交了出去。</p>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>建四张表</strong>：资产、属主、绑定、使用记录。</li><li><strong>分离签名环境</strong>，任何人不得在开发机上持有生产私钥。</li><li><strong>缩短有效期</strong>，用自动化续期替代人工记忆。</li><li><strong>定期核验绑定表</strong>，发布前自动比对。</li><li><strong>准备替代路径</strong>：每类材料至少有一次性演练过的更换流程。</li><li><strong>离职即轮换</strong>：接触过私钥的人员离开，按&quot;疑似&quot;处理。</li><li><strong>监控异常产物</strong>：建立产物与证书的对应关系。</li><li><strong>演练一次吊销</strong>：在非生产环境中走完全流程（#176）。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;证书没泄露就不用管。&quot;</strong> 未记录、未绑定、无人负责，比泄露更难查。</li><li><strong>&quot;吊销随时可以做。&quot;</strong> 吊销会同时影响全部存量产物。</li><li><strong>&quot;有效期长一点省事。&quot;</strong> 长有效期意味着泄露后的暴露窗口更长。</li><li><strong>&quot;备份放共享盘最保险。&quot;</strong> 那是泄露最常见的起点。</li><li><strong>&quot;改密码就等于收回了。&quot;</strong> 私钥文件不会随密码更改失效。</li><li><strong>&quot;这是运维的事。&quot;</strong> 签名材料同时是安全、发布与法律对象。</li><li><strong>&quot;签名了就是可信的。&quot;</strong> 签名只证明来源，不证明内容安全。</li><li><strong>&quot;这件事没有征兆。&quot;</strong> 人员变动、构建机异常、共享盘访问，都是可观察的前兆。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#115</strong> 衔接：更新链的完整性以签名材料为前提。</li><li>与 <strong>#190</strong> 互补：组件供应链关心&quot;代码从哪来&quot;，本篇关心&quot;谁证明它是你的&quot;。</li><li>与 <strong>#181</strong> 对接：信任链被替换后，历史结论需重新审视。</li><li>与 <strong>#187 / #195 / #183</strong> 对接：对外协作时私钥不出门。</li><li>与 <strong>#176</strong> 对接：吊销演练应列入年度能力建设。</li><li>与 <strong>#184</strong> 对接：吊销与切换的排期，必须并入统一决策日志。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>签名材料是<strong>唯一一类&quot;丢了就回不到原状&quot;的资产</strong>：设备可以重装，账号可以重建，会话可以失效，而一张泄露的私钥会永久性地削弱&quot;你的产物可信&quot;这件事。</p>
+<p>可执行的原则只有三条：</p>
+<ol><li><strong>清单先于技术</strong>：四张表比任何工具都重要。</li><li><strong>缩短暴露窗口</strong>：短有效期、自动化、分离环境。</li><li><strong>先准备再吊销</strong>：把不可逆动作放在可逆动作之后。</li></ol>
+<p>把签名材料从&quot;发布流程的最后一步&quot;提到&quot;独立治理的高价值资产&quot;，这篇文章的目的就达到了。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论签名与信任材料的<strong>治理与事件处置</strong>，不涉及任何证书伪造、签名滥用或绕过平台校验的手段。</li><li>各类证书的签发、吊销与分发规则以平台官方文档与合同为准；涉及法律问题的判断以专业意见为准，本篇不构成法律意见。</li><li>文中不提供任何密钥提取、伪造或规避检测的方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final" rel="nofollow noopener" target="_blank">NIST SP 800-57：密钥管理建议</a>（密钥生命周期管理）</li><li><a href="https://csrc.nist.gov/publications/detail/sp/800-32/final" rel="nofollow noopener" target="_blank">NIST SP 800-32：公钥基础设施简介</a>（PKI 与信任链）</li><li><a href="https://cabforum.org/" rel="nofollow noopener" target="_blank">CA/Browser Forum 基线要求</a>（证书治理的行业实践）</li><li>本系列 #115、#153、#176、#181、#183、#184、#187、#190、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a190.html">← 第 190 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a192.html">第 192 篇 →</a></nav></article>
+</main></body></html>

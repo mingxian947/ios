@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的第三方 SDK：上下游处置 | iOS 安全研究文章库</title>
+<meta name="description" content="供应链事件的第一个事实是 **「我不知道我用了什么」**；六字段组件清单（名称供应方／版本构建号／集成方式／调用位置／数据访问范围／更新责任人），**没有责任人的组件等于没人敢动**；三层判定 代码层→运行时层→数据层，**「休眠」是合法结论**；九步处置（上游事实→冻结配置→三层判定→替代方案→预发布→分批">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a190.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的第三方 SDK：上下游处置">
+<meta property="og:description" content="供应链事件的第一个事实是 **「我不知道我用了什么」**；六字段组件清单（名称供应方／版本构建号／集成方式／调用位置／数据访问范围／更新责任人），**没有责任人的组件等于没人敢动**；三层判定 代码层→运行时层→数据层，**「休眠」是合法结论**；九步处置（上游事实→冻结配置→三层判定→替代方案→预发布→分批">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a190.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 190 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的第三方 SDK：你发出去的包，没有一个是你自己写的</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>一个 iOS 应用动辄链接几十个第三方 SDK：统计、推送、支付、广告、地图、客服、风控。出事时，<strong>上游的一个版本问题会同时出现在成千上万个应用里</strong>，而你既不是发现者，也不是修复者，却要面对用户。</li><li>核心命题一：<strong>供应链事件的第一个事实是&quot;我不知道我用了什么&quot;。</strong> 没有组件清单的组织，在通知到达的那一刻才开始做资产盘点，而盘点的成本高于事件本身。</li><li>核心命题二：<strong>&quot;受影响&quot;分三层：代码层、运行时层、数据层。</strong> 只有代码层能靠升级解决；运行时层要看实际触达，数据层要看实际外发。</li><li>核心命题三：<strong>上下游的义务是不对称的。</strong> 上游通知你&quot;有风险&quot;，不等于它告诉你&quot;哪一段代码、影响哪些功能&quot;；下游你必须自己判定&quot;我的用户是否真的被影响&quot;。</li><li>核心命题四：<strong>重打包与发版是新的暴露窗口。</strong> 事件期仓促升级，可能把未经充分验证的版本推给全部用户。</li><li>核心命题五：<strong>用户告知的口径，必须严于你的事实，宽于你的隐私边界。</strong></li><li>一句话结论：<strong>把 SDK 当成&quot;外部依赖&quot;就会被动挨打；把它当成&quot;必须随时能说清版本、来源与实际行为&quot;的资产，处置才可能按时完成。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>视角</th></tr></thead><tbody><tr><td>#153 网页第三方脚本依赖被篡改的投递放大</td><td>Web 侧第三方脚本被篡改后的放大效应</td></tr><tr><td>#167 供应商与外包合同中的安全条款</td><td>合同条款：事前怎么约定</td></tr><tr><td>#176 长期能力建设与培训有效性</td><td>能力建设</td></tr><tr><td>本篇 #190</td><td><strong>已集成的 SDK 在事件期如何自证与处置</strong>：影响面判定、重打包、对下通知</td></tr></tbody></table>
+<p>#167 是&quot;签合同之前做对&quot;，本篇是&quot;事件已经发生之后做对&quot;。两者之间隔着的正是没有合同条款的可执行性。</p>
+<hr>
+<h2>3. 组件清单：事件期最贵的东西，是事前最便宜的东西</h2>
+<p>一份可用的组件清单至少包含六个字段：</p>
+<table><thead><tr><th>字段</th><th>为什么必须有</th><th>常见缺口</th></tr></thead><tbody><tr><td>组件名与供应方</td><td>定位上游</td><td>只写了商业名，没写实际包名</td></tr><tr><td>版本号（含构建号）</td><td>判定是否受影响</td><td>只记录主版本</td></tr><tr><td>集成方式</td><td>二进制 / 源码 / 动态库</td><td>不知道是否被二次封装</td></tr><tr><td>调用位置</td><td>哪条功能路径会触发</td><td>无人维护</td></tr><tr><td>数据访问范围</td><td>能读到什么</td><td>只信&quot;隐私标签&quot;</td></tr><tr><td>更新责任人</td><td>谁能拍板升级</td><td>组件已无人负责</td></tr></tbody></table>
+<p><strong>最后一行是组织层面的真问题。</strong> 一个没有责任人的 SDK，在事件期会变成&quot;没人敢动&quot;的那一个。</p>
+<hr>
+<h2>4. 三层影响判定</h2>
+<p>收到上游通报之后，先做三层判断，而不是直接升级：</p>
+<pre><code>代码层：我的包里是否包含受影响版本？
+   ↓ 是
+运行时层：哪些功能路径真的会加载并执行它？
+   ↓ 是
+数据层：它实际拿到了什么数据、发往哪里？</code></pre>
+<table><thead><tr><th>层</th><th>判定方法</th><th>结论形态</th></tr></thead><tbody><tr><td>代码层</td><td>产物比对的版本与哈希</td><td>是 / 否 / 部分（动态下发）</td></tr><tr><td>运行时层</td><td>配置开关、初始化条件、功能入口</td><td>活跃 / 休眠 / 不可达</td></tr><tr><td>数据层</td><td>网络行为观察与字段核对</td><td>实际外发内容清单</td></tr></tbody></table>
+<p><strong>&quot;休眠&quot;是一个合法结论。</strong> 受影响代码被打包但从未被初始化，与&quot;完全没有&quot;不同，与&quot;已受影响&quot;也不同；这一层区分直接影响后续对用户的措辞（#181 审计与认证中的历史事件陈述）。</p>
+<hr>
+<h2>5. 处置顺序：九个步骤</h2>
+<ol><li><strong>确认上游事实</strong>：受影响版本区间、缺陷性质、官方建议动作。</li><li><strong>冻结相关配置</strong>：先断开可能有风险的远端开关与初始化路径（可逆动作优先，#184）。</li><li><strong>完成三层判定</strong>，产出一张影响表。</li><li><strong>评估替代方案</strong>：升级、降级、移除、或临时隔离。</li><li><strong>在预发布环境验证</strong>：功能回归优先于版本号追新。</li><li><strong>分批放量</strong>：先小比例，观察崩溃与关键路径。</li><li><strong>对下通知</strong>：按影响层写不同版本的说明。</li><li><strong>留痕</strong>：版本、时间、决策理由。</li><li><strong>复盘入清单</strong>：把这次学到的东西写回组件清单。</li></ol>
+<p><strong>第五步与第六步是事件期最容易被压缩掉的两步。</strong> 压缩它们的代价，往往是一次新的、与事件无关的线上故障。</p>
+<hr>
+<h2>6. 对下通知的三种口径</h2>
+<table><thead><tr><th>场景</th><th>可以说</th><th>不能说</th></tr></thead><tbody><tr><td>只有代码层受影响、未激活</td><td>&quot;包含某组件，但该功能未启用&quot;</td><td>&quot;我们没有使用该组件&quot;</td></tr><tr><td>运行时层可达、数据层未触及</td><td>&quot;功能路径可达，经核查未观察到相关数据外发&quot;</td><td>&quot;绝对没有数据泄露&quot;</td></tr><tr><td>数据层已触及</td><td>&quot;存在相关数据外发，范围为…，已采取…&quot;</td><td>任何缩小范围的形容词</td></tr></tbody></table>
+<p>三行共同的纪律：<strong>结论必须带上判定方法与范围</strong>。没有方法的结论，在复核时会被当作猜测（#178）。</p>
+<hr>
+<h2>7. 与上游打交道的四个现实</h2>
+<ol><li><strong>上游不会给你 PoC。</strong> 它给的是&quot;受影响版本 + 修复版本&quot;，你必须自己完成影响面判定。</li><li><strong>上游的通知可能晚于你的用户投诉。</strong> 建立独立的观察渠道（崩溃、异常网络、客服关键词），不要只等邮件。</li><li><strong>上游可能已停止维护。</strong> 对不再维护的组件，&quot;移除&quot;往往比&quot;打补丁&quot;更现实。</li><li><strong>上游的措辞会被转述。</strong> 你在内部与对外的每一次转述，都会被当成&quot;官方口径&quot;——<strong>不要把上游的谨慎措辞改写成确定性结论</strong>。</li></ol>
+<hr>
+<h2>8. 两个结构性建议</h2>
+<p><strong>建议一：把组件清单纳入发布流程。</strong> 每次发版自动生成一份&quot;本次产物包含的组件与版本&quot;，作为发版物料的一部分，而不是事件期临时去找。</p>
+<p><strong>建议二：给每个高危组件准备一份&quot;移除预案&quot;。</strong> 不需要真的执行，只需要写清楚&quot;如果明天必须移除它，谁来做、影响哪些功能、需要多久&quot;。</p>
+<p>这两条的共同点是：<strong>把事件期的临时工作，转化为发布期的固定动作</strong>（#176）。</p>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>建清单</strong>：六个字段，缺一不可。</li><li><strong>指定责任人</strong>：没有责任人的组件，等于没有人管。</li><li><strong>分三层判定</strong>：代码、运行时、数据，逐层给结论。</li><li><strong>可逆优先</strong>：先断开关，再改代码。</li><li><strong>预发布验证</strong>：功能回归优先于版本追新。</li><li><strong>分批放量</strong>：不要一次推给全部用户。</li><li><strong>口径带方法</strong>：每条结论都说明是怎么判定的。</li><li><strong>写回清单</strong>：复盘结论必须落到组件清单里。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<ol><li><strong>&quot;用了知名 SDK 就安全。&quot;</strong> 知名度与本次版本的安全性无关。</li><li><strong>&quot;上游说修复了就等于我修复了。&quot;</strong> 你必须自己发版。</li><li><strong>&quot;打包进去就等于在用。&quot;</strong> 可能从未初始化。</li><li><strong>&quot;没初始化就等于没风险。&quot;</strong> 取决于是否可能被远端打开。</li><li><strong>&quot;升级越快越好。&quot;</strong> 未验证的升级会制造新故障。</li><li><strong>&quot;用户不会在意。&quot;</strong> 用户在意的是告知是否及时、口径是否一致。</li><li><strong>&quot;我们没有数据外发。&quot;</strong> 需要有观察证据，而不是断言。</li><li><strong>&quot;这不归安全团队管。&quot;</strong> 供应链事件的处置是跨团队的，必须有单一协调人。</li></ol>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#153</strong> 对照：Web 侧脚本与原生 SDK，是同一类问题的两个战场。</li><li>与 <strong>#167</strong> 衔接：合同条款决定了你在上游不配合时有多少手段。</li><li>与 <strong>#181</strong> 对接：对用户与审计的陈述，必须有范围与方法。</li><li>与 <strong>#184</strong> 对接：重打包与发版的排期，要与其它处置动作统一。</li><li>与 <strong>#176</strong> 对接：清单与移除预案，属于能力建设的固定科目。</li><li>与 <strong>#195</strong> 对接：需要技术意见时，鉴定范围应覆盖&quot;组件是否实际执行&quot;。</li></ul>
+<hr>
+<h2>12. 总结</h2>
+<p>第三方 SDK 的本质是<strong>你承担了别人代码的风险，却没有别人的上下文</strong>。事件期能做对的事只有三件：</p>
+<ol><li><strong>知道用了什么、什么版本、谁负责。</strong></li><li><strong>分清代码层、运行时层、数据层，分别给结论。</strong></li><li><strong>用可验证的口径对外说话，用可回退的节奏发版。</strong></li></ol>
+<p>把这三件事做成发布流程的一部分，供应链事件就从&quot;突袭&quot;变成了&quot;演练过的那一天&quot;。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论第三方组件的<strong>影响判定与处置流程</strong>，不涉及任何针对具体 SDK 的逆向、利用或规避手段。</li><li>组件版本与缺陷信息以供应方官方公告为准；对用户的披露口径受法律与合同约束，<strong>以专业意见为准</strong>，本篇不构成法律意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/publications/detail/sp/800-161/rev-1/final" rel="nofollow noopener" target="_blank">NIST SP 800-161：网络安全供应链风险管理实践</a>（供应链风险管理框架）</li><li><a href="https://www.ntia.gov/" rel="nofollow noopener" target="_blank">NTIA：软件物料清单（SBOM）最小要素</a>（组件清单的公开标准讨论）</li><li><a href="https://owasp.org/www-project-top-ten/" rel="nofollow noopener" target="_blank">OWASP：软件组件安全</a>（组件风险的一般性说明）</li><li>本系列 #153、#167、#176、#178、#181、#184、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a189.html">← 第 189 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a191.html">第 191 篇 →</a></nav></article>
+</main></body></html>

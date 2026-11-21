@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的保险定损：赔的是被证明的损失 | iOS 安全研究文章库</title>
+<meta name="description" content="赔的是**被证明的损失**；三类损失三套证据 第一方直接费用（外部凭证，内部人力通常只认额外支出）／业务中断（**依赖事前基线**）／第三方责任（私下和解可能不赔）；七科目专账**事件第一天开、当天记**；三种口径 会计／承保／诉讼——**一座底层凭证账派生三种换算**，不要分记三本；因果四种混杂因素（既有故">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a196.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的保险定损：赔的是被证明的损失">
+<meta property="og:description" content="赔的是**被证明的损失**；三类损失三套证据 第一方直接费用（外部凭证，内部人力通常只认额外支出）／业务中断（**依赖事前基线**）／第三方责任（私下和解可能不赔）；七科目专账**事件第一天开、当天记**；三种口径 会计／承保／诉讼——**一座底层凭证账派生三种换算**，不要分记三本；因果四种混杂因素（既有故">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a196.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 196 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的保险定损：赔的是&quot;被证明的损失&quot;，不是&quot;发生过的事&quot;</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>保单不是自动售货机。事件发生了、保单有效、损失真实，三件事同时成立，也未必能拿到足额赔付——<strong>决定结果的是损失能不能被还原成一串可核对的数字与凭证</strong>。</li><li>核心命题一：<strong>损失有三种口径：会计口径、承保口径、诉讼口径。</strong> 三者对同一件事的计量方式不同，事件期就要按最严的那一种建账（#183）。</li><li>核心命题二：<strong>&quot;因为事件&quot;这四个字，是定损的核心争点。</strong> 一笔支出是否&quot;因事件而起&quot;，需要用时间、因果与必要性三条线把它钉住。</li><li>核心命题三：<strong>专账必须从事件第一天开始记。</strong> 事后补的台账，在核赔时会被整体打折，而不是逐条打折。</li><li>核心命题四：<strong>减损义务是双向的。</strong> 你采取措施避免损失扩大，费用通常可赔；你没有采取措施，扩大的部分可能不赔——<strong>做了什么要留痕，没做要写明原因</strong>。</li><li>核心命题五：<strong>公估人不是对手。</strong> 他们的工作是还原事实、核对凭证；把你已知的事实整理好交给他们，比在谈判桌上争辩有效得多。</li><li>一句话结论：<strong>保险定损质量的上限，在事件发生后的第一个星期就已经决定了；后面所有工作，都是把那一周的事实变成能被核对的材料。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>讨论的是</th><th>阶段</th></tr></thead><tbody><tr><td>#117 保险理赔与欺诈核查场景</td><td>从核赔方视角看欺诈与核查</td><td>保险公司侧</td></tr><tr><td>#168 网络保险的承保问询与报案纪律</td><td>买之前怎么答、出事怎么报</td><td>承保与报案</td></tr><tr><td>#183 追偿路径与责任主张</td><td>向谁追、值不值得追</td><td>赔偿之后</td></tr><tr><td><strong>本篇 #196</strong></td><td><strong>损失怎么量化、凭证怎么留、核赔怎么过</strong></td><td><strong>定损与理赔</strong></td></tr></tbody></table>
+<p>#168 解决&quot;报案这一步不要做错&quot;，本篇解决&quot;报完案之后，钱怎么算清楚&quot;。两者之间隔着的正是<strong>证据链的构建</strong>。</p>
+<p>同时本篇与 #195（司法鉴定）有交叉：鉴定意见可以支撑因果关系，但<strong>鉴定意见不等于损失金额</strong>；金额的证明要靠单据、合同与账目。</p>
+<hr>
+<h2>3. 三类损失，三套证据</h2>
+<table><thead><tr><th>损失类型</th><th>典型内容</th><th>核心证据</th><th>常见缺口</th></tr></thead><tbody><tr><td>第一方直接费用</td><td>响应人力、外部服务、取证鉴定、通知成本、设备更换</td><td>合同、发票、工时记录、付款凭证</td><td>只有内部工时表，没有外部凭证</td></tr><tr><td>业务中断</td><td>停产、停业、交付延迟、客户流失</td><td>财务基线、实际发生额、差异分析</td><td>没有事前基线，无法证明&quot;少了多少&quot;</td></tr><tr><td>第三方责任</td><td>客户索赔、合同违约、监管罚款</td><td>索赔函、和解协议、判决或处罚决定</td><td>私下和解未通知保险人</td></tr></tbody></table>
+<p><strong>第一行最容易被低估。</strong> 内部人力的价值在核赔时通常按&quot;额外成本&quot;而非&quot;机会成本&quot;计算；如果团队本来就在发工资，这部分往往不被认可为损失。<strong>真正能赔的是&quot;因为你的事件而额外发生的支出&quot;</strong>，而不是&quot;这段时间大家很辛苦&quot;。</p>
+<p>第二行最容易被高估。业务中断的赔付依赖<strong>基线</strong>：事件前同期的收入、订单、产能。没有基线，任何&quot;损失了多少&quot;都是估计。</p>
+<hr>
+<h2>4. 事件第一天就该开的专账</h2>
+<p>七个科目，逐笔登记，当天记，不隔夜：</p>
+<ol><li><strong>响应人力</strong>：谁、哪天、多少小时、做什么；外部人员的合同与发票单独归档。</li><li><strong>外部服务</strong>：事件响应、法律、鉴定、公关、通信（#177）。</li><li><strong>设备与介质</strong>：替换设备、取证镜像盘、隔离环境。</li><li><strong>通知与沟通</strong>：短信、邮件、呼叫中心、邮寄、翻译。</li><li><strong>业务替代</strong>：临时系统、加急运输、外包产能。</li><li><strong>鉴定与检测</strong>：检测产品、第三方检查、专家意见（#195）。</li><li><strong>其他</strong>：差旅、加班餐、临时安保等小额但真实的支出。</li></ol>
+<p><strong>每笔都要回答四个问题：什么时候发生、为什么发生、和事件什么关系、凭证在哪。</strong> 缺一项，核赔时就要额外解释；缺四项，这笔就可能被整体剔除。</p>
+<p>专账的形式不重要（表格即可），重要的是<strong>连续、同日、可追溯</strong>。</p>
+<hr>
+<h2>5. 三种口径为什么对不上</h2>
+<table><thead><tr><th>口径</th><th>关注点</th><th>常见差异来源</th></tr></thead><tbody><tr><td>会计口径</td><td>报表上的费用与减值</td><td>资本化、摊销、期间归属</td></tr><tr><td>承保口径</td><td>保单责任范围内的实际支出</td><td>免赔额、分项限额、等待期、除外责任</td></tr><tr><td>诉讼口径</td><td>可主张的损害赔偿</td><td>因果、可预见性、减损义务</td></tr></tbody></table>
+<p>同一笔支出，在会计上可能已经资本化，在承保上属于&quot;维护性支出&quot;不赔，在诉讼上可能因为&quot;本来也要做&quot;而不被支持。</p>
+<p><strong>处置纪律：建一份底层凭证账，三种口径都从它派生。</strong> 不要为三种口径分别记账——那样做，三本账迟早对不上，而对不上本身就是核赔时的大问题（#181 的&quot;同一事实四版本&quot;在这里同样适用）。</p>
+<hr>
+<h2>6. 因果链：四种混杂因素</h2>
+<p>核赔要问的是&quot;这笔损失是不是因为这次事件&quot;。四类因素会让这个问题变复杂：</p>
+<ol><li><strong>既有问题</strong>：系统本来就有故障，事件只是让它暴露。要区分&quot;事件造成的&quot;与&quot;本来就会发生的&quot;。</li><li><strong>同期事件</strong>：同一时期还有其它事故（供应商故障、自然灾害、市场波动）。需要时间线与影响范围的证据。</li><li><strong>计划中的变更</strong>：有些支出本来就在预算里（系统升级、设备换新）。<strong>计划内的部分通常不赔</strong>，计划外的加急部分才可能赔。</li><li><strong>管理决策</strong>：事件后决定更换供应商或重构系统（#185）。这是&quot;事件后的改进&quot;，不一定是&quot;事件造成的损失&quot;。</li></ol>
+<p>对策不是争辩，而是<strong>在专账里就把每笔支出标注&quot;直接/间接&quot;与&quot;事件前是否已计划&quot;</strong>。标注了，核赔时有据可依；不标注，就会被默认按最不利的方式解释。</p>
+<hr>
+<h2>7. 减损义务的两面</h2>
+<p>保单通常要求被保险人在事件后采取合理措施防止损失扩大。这条义务在实践中有两个方向：</p>
+<ul><li><strong>做了要留痕</strong>：隔离设备、关闭服务、加急修复、临时替代——每一件都要记录&quot;做了什么、为什么、花了多少&quot;。</li><li><strong>没做要解释</strong>：如果决定不采取某项措施（成本过高、风险更大、等待官方指引），要写下判断依据与决策人。</li></ul>
+<p><strong>&quot;没做&quot;本身不一定是违约，但&quot;没记录为什么没做&quot;几乎一定会被减损。</strong> 这条在定向投放场景里尤其重要，因为很多处置动作都有副作用（关闭功能影响业务、隔离设备影响可用性），取舍是正常的，记录是必须的。</p>
+<hr>
+<h2>8. 五个节点与时限</h2>
+<table><thead><tr><th>节点</th><th>你要做的</th><th>典型时限来源</th></tr></thead><tbody><tr><td>发现事件</td><td>内部上报、启动专账</td><td>保单约定的通知期限</td></tr><tr><td>报案</td><td>向保险人提交初步通知</td><td>通常为&quot;及时&quot;，部分保单有小时/天数限制</td></tr><tr><td>材料提交</td><td>损失清单、凭证、时间线</td><td>保险人要求的期限内</td></tr><tr><td>公估</td><td>配合现场与账目核查</td><td>由公估安排</td></tr><tr><td>理算与赔付</td><td>确认金额、签署文件</td><td>依保单与协商</td></tr></tbody></table>
+<p><strong>第二个节点最容易出问题。</strong> &quot;及时&quot;在很多保单里没有精确天数，但<strong>拖延会直接影响赔付比例</strong>；而拖延的原因往往是&quot;等调查清楚再报&quot;——正确的做法是<strong>先通知、后补充</strong>（#168 的报案纪律）。</p>
+<hr>
+<h2>9. 与公估人协作的三个要点</h2>
+<ol><li><strong>先给事实，后给判断。</strong> 时间线、专账、凭证、处置记录，按时间顺序整理好；判断留到他们提问时再说。</li><li><strong>指定一个对接人。</strong> 多头对接会让同一问题得到不同回答，而这在核赔记录里是减分项（#178）。</li><li><strong>不隐藏不利事实。</strong> 核赔过程中被发现隐瞒，后果远大于事实本身的影响；主动说明&quot;这一段我们处理得不好&quot;，通常比被发现要好。</li></ol>
+<p>公估人的报告会进入保险人的理算流程，<strong>他们写下的每一句话都可能影响最终金额</strong>，所以给他们的事实必须经得起复核。</p>
+<hr>
+<h2>10. 五种典型减赔与预防</h2>
+<table><thead><tr><th>情形</th><th>原因</th><th>预防</th></tr></thead><tbody><tr><td>未及时报案</td><td>超过通知期限</td><td>发现即通知，细节后补</td></tr><tr><td>损失无法量化</td><td>缺基线、缺凭证</td><td>事件前保存财务基线；事件第一天开专账</td></tr><tr><td>因果不清</td><td>混杂因素未区分</td><td>专账标注直接/间接、计划内/计划外</td></tr><tr><td>减损不当</td><td>未采取措施或未记录</td><td>决策与理由书面化</td></tr><tr><td>除外责任</td><td>损失类型不在承保范围</td><td>投保时逐条核对；事件后按除外条款分类</td></tr></tbody></table>
+<p><strong>第五行是承保阶段的问题，但要到定损阶段才暴露。</strong> 很多组织在事件后才发现&quot;这类损失根本不赔&quot;——这不是理赔失败，而是投保时的信息不对称（#168）。</p>
+<hr>
+<h2>11. 加固清单（八条）</h2>
+<ol><li><strong>事件第一天开专账</strong>：七个科目，当天记。</li><li><strong>四问留痕</strong>：时间、原因、关系、凭证。</li><li><strong>标注计划内外</strong>：事件前已计划的支出单独标出。</li><li><strong>保存财务基线</strong>：收入、订单、产能的同口径历史数据。</li><li><strong>决策书面化</strong>：做与不做，都写理由与决策人。</li><li><strong>单一对接人</strong>：对保险人、公估人各指定一人。</li><li><strong>一账派生三口径</strong>：底层凭证账一份，口径分别换算。</li><li><strong>理赔后复盘</strong>：把这次的缺口写回下一份保单的投保问卷。</li></ol>
+<hr>
+<h2>12. 八条常见误解</h2>
+<ol><li><strong>&quot;有保单就能赔。&quot;</strong> 责任范围、免赔额、限额、除外责任都可能让赔付小于预期。</li><li><strong>&quot;损失越大赔得越多。&quot;</strong> 赔的是被证明的损失。</li><li><strong>&quot;内部人力也是损失。&quot;</strong> 通常只认可额外支出。</li><li><strong>&quot;事后补台账一样。&quot;</strong> 补的台账会被整体打折。</li><li><strong>&quot;先查清楚再报案。&quot;</strong> 先通知、后补充。</li><li><strong>&quot;公估人是来挑刺的。&quot;</strong> 他们的结论建立在你能提供的事实上。</li><li><strong>&quot;和解可以私下进行。&quot;</strong> 未经通知的和解可能影响赔付。</li><li><strong>&quot;这次赔了，下次也一样。&quot;</strong> 保单条款与承保条件每次续保都可能变化。</li></ol>
+<hr>
+<h2>13. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#117</strong> 对照：核赔方的核查逻辑，正是本篇要准备的方向。</li><li>与 <strong>#168</strong> 衔接：承保问询与报案纪律，是定损的前置环节。</li><li>与 <strong>#177</strong> 对接：外部服务的合同与发票，是直接费用的核心凭证。</li><li>与 <strong>#178</strong> 对接：记录分层，决定了哪些材料可以交给公估人。</li><li>与 <strong>#183</strong> 对接：诉讼口径的损失主张，与承保口径需要分别准备。</li><li>与 <strong>#185</strong> 对接：事件后的更换决策，要区分&quot;改进支出&quot;与&quot;事件损失&quot;。</li><li>与 <strong>#195</strong> 对接：鉴定意见支撑因果，不支撑金额。</li></ul>
+<hr>
+<h2>14. 总结</h2>
+<p>保险定损的胜负手，不在谈判，而在账本：</p>
+<ol><li><strong>当天开账，逐笔留痕。</strong></li><li><strong>一账派生，三口径换算。</strong></li><li><strong>因果标注，减损记录。</strong></li></ol>
+<p>做到这三条，核赔时你交出去的不是一份&quot;说明&quot;，而是一份能被逐项核对的事实。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论损失量化与证据准备的一般方法，不涉及任何保险欺诈、虚构损失或夸大索赔的行为；此类行为在法律上后果严重。</li><li>保单条款、赔付范围与程序因产品与法域而异，<strong>以保险合同与专业意见为准</strong>；本篇不构成法律或保险意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/" rel="nofollow noopener" target="_blank">NIST SP 800-61：计算机安全事件处理指南</a>（事件记录与成本归集的一般框架）</li><li><a href="https://www.iso.org/" rel="nofollow noopener" target="_blank">ISO/IEC 27035：信息安全事件管理</a>（事件处置过程的记录要求）</li><li><a href="https://www.enisa.europa.eu/" rel="nofollow noopener" target="_blank">ENISA：网络保险与风险管理</a>（网络风险量化与承保实践）</li><li>本系列 #117、#168、#177、#178、#183、#185、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a195.html">← 第 195 篇</a> ｜ <a href="index.html">目录</a> ｜ </nav></article>
+</main></body></html>

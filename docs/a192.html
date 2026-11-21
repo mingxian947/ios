@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的运营商侧信号：能证明连接，不能证明意图 | iOS 安全研究文章库</title>
+<meta name="description" content="运营商看到的是**连接不是内容、计费不是意图**；五类记录 订阅实名／计费详单／**SIM 生命周期**／投递记录／接入与位置；今天就能自查三件事 详单、SIM 变更历史、号码业务状态（呼叫转移／短信转移／副卡／停机保号）——**解释不了的那一条优先级高于任何设备侧异常**；给不了的四样（短信内容／精确位置／">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a192.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的运营商侧信号：能证明连接，不能证明意图">
+<meta property="og:description" content="运营商看到的是**连接不是内容、计费不是意图**；五类记录 订阅实名／计费详单／**SIM 生命周期**／投递记录／接入与位置；今天就能自查三件事 详单、SIM 变更历史、号码业务状态（呼叫转移／短信转移／副卡／停机保号）——**解释不了的那一条优先级高于任何设备侧异常**；给不了的四样（短信内容／精确位置／">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a192.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 192 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的运营商侧信号：它能证明连接，不能证明意图</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>在定向投放的处置链里，运营商是最常被想当然、也最常被真正忽略的一环。很多人默认&quot;运营商什么都看得到&quot;，实际上<strong>它看到的是连接，不是内容；是计费，不是意图</strong>。</li><li>核心命题一：<strong>运营商手里最有价值的东西，不是流量，而是号码与 SIM 的生命周期记录。</strong> 换卡、补卡、携转、停机、复机，这几条时间戳往往比任何设备日志都更能解释&quot;为什么短信验证码没有到我这里&quot;。</li><li>核心命题二：<strong>运营商是&quot;当时只有它知道&quot;的少数场景的唯一证人。</strong> 短信是否投递、是否被转发、号码是否被复机、是否出现异常漫游——这些事实在事件发生之后，设备侧通常已经没有任何痕迹。</li><li>核心命题三：<strong>发起请求的路径不由你决定。</strong> 个人能自助拿到的是详单与业务记录；接入记录与位置信息通常只在法律程序下由侦查机关调取，周期以周甚至月计（#170）。</li><li>核心命题四：<strong>漫游、时区与计费口径，会把一条干净的时间线搅成三份互相对不上的材料。</strong> 在把运营商数据写进报告之前，先统一口径，再谈结论（#178）。</li><li>核心命题五：<strong>运营商数据只能回答&quot;发生了什么&quot;，不能回答&quot;谁干的&quot;。</strong> 把连接记录当作归因证据，是最常见的越界（#194）。</li><li>一句话结论：<strong>把运营商当成&quot;号码与链路的登记处&quot;而不是&quot;监控方&quot;，你能从它那里得到的结论会比预期少，但每一条都很难被别的东西替代。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>本系列此前讨论过的&quot;外部主体&quot;，都还差运营商这一块：</p>
+<table><thead><tr><th>篇目</th><th>主体</th><th>它掌握的是</th></tr></thead><tbody><tr><td>#149 平台方主动通知与被告知窗口</td><td>设备与账户平台</td><td>账户侧访问与设备注册</td></tr><tr><td>#187 向平台方请求记录</td><td>设备与账户平台</td><td>你 → 平台的请求形态</td></tr><tr><td>#189 身份提供商与单点登录的会话处置</td><td>身份服务商</td><td>会话与联邦断言</td></tr><tr><td><strong>本篇 #192</strong></td><td><strong>电信运营商</strong></td><td><strong>号码、SIM、链路、投递与计费</strong></td></tr></tbody></table>
+<p>关键区别在于：平台方记录的是&quot;你的账户被谁用过&quot;，运营商记录的是&quot;你的号码在什么时候、以什么方式活着&quot;。定向投放里，&quot;号码活着但人收不到&quot;和&quot;号码根本没活过&quot;是两种完全不同的处境，而只有运营商能给出这个区分。</p>
+<p>同时本篇与 #159（服务端与账号侧处置闭环）互补：#159 处理的是账号侧存续项，本篇处理的是<strong>号码作为恢复通道</strong>时的存续项。</p>
+<hr>
+<h2>3. 运营商手上的五类记录</h2>
+<p>按&quot;能不能拿到&quot;和&quot;有多有用&quot;两个维度排一次序：</p>
+<table><thead><tr><th>类别</th><th>典型内容</th><th>可得性</th><th>对事件的意义</th></tr></thead><tbody><tr><td>订阅与实名登记</td><td>开户信息、证件、副卡关系、套餐</td><td>高（本人可查）</td><td>确认号码归属与副卡是否存在</td></tr><tr><td>计费与详单</td><td>通话、短信条数、流量、增值业务订购</td><td>高（本人可查，通常可回溯数月）</td><td>发现未授权的增值业务与异常开销</td></tr><tr><td>SIM/eSIM 生命周期</td><td>换卡、补卡、挂失、复机、携转、停机</td><td>中（本人可申请，部分需到厅）</td><td><strong>识别 SIM 交换与号码劫持</strong></td></tr><tr><td>投递记录</td><td>短信是否下发、是否送达、失败原因</td><td>低到中（通常只给汇总）</td><td>判断验证码为何未到</td></tr><tr><td>接入与位置</td><td>基站接入、漫游地、IP 分配</td><td>低（一般需法律程序）</td><td>粗粒度活动范围，不能定位个人</td></tr></tbody></table>
+<p><strong>第三行是本篇的核心。</strong> 定向投放者如果想绕开短信二次验证，最省力的路径往往不是攻破设备，而是拿到号码——补卡、复机、或通过运营商侧的业务变更把短信导向别处。这条路在设备日志里几乎不留痕迹，在运营商记录里却是一条完整的时间线。</p>
+<hr>
+<h2>4. 三条你可以马上自查的事</h2>
+<p>不需要任何程序，今天就能做：</p>
+<ol><li><strong>打一份近六个月的详单。</strong> 看两样东西：未曾使用的增值业务（可能是开通渠道被利用），以及在你&quot;以为没收到短信&quot;的时间窗内是否有短信下发记录。</li><li><strong>查 SIM 变更历史。</strong> 换卡、补卡、复机、副卡添加，每一条都要能解释。<strong>解释不了的那一条，优先级高于任何设备侧异常。</strong></li><li><strong>确认号码当前的业务状态。</strong> 是否被设置过呼叫转移、短信转移、副卡、亲情号、以及&quot;停机保号&quot;。这些业务大多可以在营业厅或 App 内一次性查全。</li></ol>
+<p>三条共同点：<strong>它们都是&quot;号码作为身份通道&quot;的配置项，而配置项是攻击者最喜欢改、受害者最不容易看的地方。</strong></p>
+<hr>
+<h2>5. 运营商给不了的四样东西</h2>
+<p>把期待先降下来，后面的沟通才有效：</p>
+<table><thead><tr><th>你想要的</th><th>现实</th><th>替代路径</th></tr></thead><tbody><tr><td>短信内容</td><td>运营商不存储个人短信内容</td><td>设备侧备份、iMessage 走平台侧（#187）</td></tr><tr><td>精确位置</td><td>只有基站级粗粒度，且通常需法律程序</td><td>设备&quot;查找&quot;历史、照片地理位置（#188）</td></tr><tr><td>&quot;我是否被定向攻击&quot;</td><td>运营商不做此类判断，也没有输入</td><td>综合设备侧与账户侧材料自行判断（#147）</td></tr><tr><td>对方是谁</td><td>连接记录只到号码与 IP 段</td><td>归因交给专业方，不要自行下结论（#194）</td></tr></tbody></table>
+<p>第 3 行与第 4 行是最容易引发失望的两条。运营商的数据是<strong>关联性证据</strong>：它能证明某个时间点发生了某件事，但无法证明这件事与另一个人有关。</p>
+<hr>
+<h2>6. 什么时候运营商是唯一证人</h2>
+<p>四种场景，设备侧与平台侧都帮不上忙：</p>
+<ul><li><strong>SIM 交换。</strong> 号码被复机到另一张卡上，验证码在别处被接收。设备侧看到的是&quot;我收不到短信&quot;，平台侧看到的是&quot;登录成功&quot;。</li><li><strong>短信转发与呼叫转移。</strong> 业务在运营商侧配置，设备侧可能完全没有提示。</li><li><strong>号码找回流程被滥用。</strong> 攻击者通过客服渠道完成身份核验，把号码转移到自己控制的卡上。</li><li><strong>异常漫游。</strong> 设备在你身边，号码却在另一地区产生接入记录——这可能意味着号码被复制，也可能只是计费延迟，必须由运营商区分。</li></ul>
+<p>这四种场景的共同结论是：<strong>当&quot;第二条因子&quot;本身被接管时，所有基于它的判断都要重做。</strong></p>
+<hr>
+<h2>7. 请求路径与时限</h2>
+<table><thead><tr><th>请求类型</th><th>谁发起</th><th>典型耗时</th><th>你能得到的形式</th></tr></thead><tbody><tr><td>本人业务查询</td><td>你</td><td>即时到数个工作日</td><td>详单、业务清单、SIM 变更记录</td></tr><tr><td>本人投诉与工单</td><td>你</td><td>数个工作日</td><td>工单答复，通常不构成证据</td></tr><tr><td>侦查机关调取</td><td>报案后的办案单位</td><td>数周到数月</td><td>调取回执与提取记录</td></tr><tr><td>司法鉴定协助</td><td>鉴定机构经委托</td><td>数周</td><td>鉴定意见中的引用（#195）</td></tr></tbody></table>
+<p><strong>第二行经常被误当成第三行。</strong> 客服工单是服务记录，不是证据；它可以帮助你确认事实，但写进报告时需要注明来源等级（#178 调查记录的分层）。</p>
+<p>提前准备的材料只有三样：<strong>号码实名信息、事件时间窗、以及&quot;你要证明的具体命题&quot;</strong>。命题写得越具体，办案单位越容易判断该调哪一类记录（#187 的五要素同样适用）。</p>
+<hr>
+<h2>8. 漫游、时区与计费口径</h2>
+<p>同一件事，在运营商材料里可能出现三份不同的时间：</p>
+<ul><li><strong>计费时间</strong>：账单出账时刻，可能晚于事件数小时到数天。</li><li><strong>投递时间</strong>：短信下发与送达是两个时刻，失败重试会产生多条记录。</li><li><strong>接入时间</strong>：基站记录以本地时区书写，漫游时可能保留归属地时区。</li></ul>
+<p>处置纪律只有一条：<strong>先把所有时间统一到一个口径（建议 UTC），并在报告里注明每个时间戳的原始口径与换算方式。</strong> 不做这一步，后面的&quot;时间线对不上&quot;会消耗掉大量本可用于判断的注意力。</p>
+<hr>
+<h2>9. 六步处置顺序</h2>
+<ol><li><strong>冻结号码侧的高风险业务</strong>：关闭呼叫转移、短信转移、副卡与不必要的增值业务。</li><li><strong>固定 SIM 生命周期记录</strong>：截图、导出、记下查询时刻与经办渠道。</li><li><strong>核对详单与业务清单</strong>，标出解释不了的条目。</li><li><strong>统一时间口径</strong>，建立一张运营商侧事实表。</li><li><strong>按需报案</strong>，把&quot;要调取什么&quot;写成具体命题（#179）。</li><li><strong>在报告中标注来源等级</strong>：本人查询 / 客服答复 / 调取回执，三者不可混用。</li></ol>
+<p>第 1 步之所以排在最前，是因为它<strong>可逆、成本低、且直接切断最常见的二次利用路径</strong>（#184 的可逆优先原则）。</p>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>给号码开独立保护</strong>：运营商侧的账户密码、客服密码、业务办理验证，不要与其它账号共用。</li><li><strong>定期查 SIM 变更</strong>：把它当成季度动作，而不是出事才查。</li><li><strong>关闭用不到的转移类业务</strong>：呼叫转移、短信转移、副卡，不用就关。</li><li><strong>给关键账号加硬件因子</strong>：把&quot;号码&quot;从单点依赖降为多因子之一（#189）。</li><li><strong>记下运营商侧的经办时刻</strong>：每次查询都留截图与时间。</li><li><strong>统一时间口径</strong>：所有材料换算到 UTC 并注明。</li><li><strong>区分来源等级</strong>：本人查询、客服答复、官方回执分级标注。</li><li><strong>不把连接记录当归因</strong>：运营商数据只用于事实认定，不用于指认。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;运营商能看到我手机里的一切。&quot;</strong> 它看到的是连接与计费，看不到内容。</li><li><strong>&quot;收不到验证码就是我手机有问题。&quot;</strong> 也可能是号码侧被接管。</li><li><strong>&quot;补卡记录不重要。&quot;</strong> 它往往是整条链上唯一的书面痕迹。</li><li><strong>&quot;客服说没问题就是没问题。&quot;</strong> 客服答复是服务口径，不是证据口径。</li><li><strong>&quot;详单可以证明我没做某件事。&quot;</strong> 它能证明号码侧发生的事，不能证明设备侧。</li><li><strong>&quot;漫游记录能定位人。&quot;</strong> 只能给出基站级范围，且需法律程序。</li><li><strong>&quot;运营商能告诉我攻击者是谁。&quot;</strong> 不能，也不应要求它这么做。</li><li><strong>&quot;这些都是运营商的义务。&quot;</strong> 大多数记录的提供受法律与政策约束，不是义务清单。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#149 / #187</strong> 并列：平台侧与运营商侧是两条互不重叠的证据线。</li><li>与 <strong>#159</strong> 衔接：号码是账号恢复通道，处置时与账号存续项一起清点。</li><li>与 <strong>#170</strong> 衔接：跨境号码的记录调取，时间尺度由司法协助决定。</li><li>与 <strong>#178</strong> 对接：运营商材料进入记录体系时，必须标明来源与口径。</li><li>与 <strong>#189</strong> 对接：短信因子被接管后，所有依赖它的会话都要重新评估。</li><li>与 <strong>#195</strong> 对接：需要把运营商材料作为鉴定依据时，先确认其形式合法性。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>运营商在事件里的角色，可以压缩成三句话：</p>
+<ol><li><strong>它证明存在，不证明动机。</strong></li><li><strong>它最有用的时候，是&quot;号码还是不是你的&quot;这个问题需要回答的时候。</strong></li><li><strong>它的材料必须先进事实表、统一口径、标好来源，才谈得上结论。</strong></li></ol>
+<p>把这三条想清楚，你就不会在等待调取结果的几周里空转，也不会把一条基站记录写成归因结论。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论运营商侧记录的类型、可得性与使用边界，不涉及任何针对通信网络的入侵、监听或规避手段。</li><li>记录调取的法律依据与程序，因法域而异，<strong>以专业意见为准</strong>；本篇不构成法律意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.3gpp.org/" rel="nofollow noopener" target="_blank">3GPP TS 33.501：5G 系统安全架构</a>（SIM 与网络接入的一般性说明）</li><li><a href="https://www.gsma.com/" rel="nofollow noopener" target="_blank">GSMA：SIM 交换欺诈防范指南</a>（号码接管的风险与运营商侧控制）</li><li><a href="https://csrc.nist.gov/" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（电子证据的时间与来源标注）</li><li>本系列 #149、#159、#170、#178、#187、#189、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a191.html">← 第 191 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a193.html">第 193 篇 →</a></nav></article>
+</main></body></html>

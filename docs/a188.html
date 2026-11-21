@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的云备份与云端留存：取证协作 | iOS 安全研究文章库</title>
+<meta name="description" content="备份是**某时点的状态快照，不是过程记录**——它能回答「那时有什么」，不能回答「当时发生了什么」；四类存储（端到端加密备份／普通云备份／云相册／第三方同步盘）可及性各不相同；顺序必须是 **盘点 → 固定 → 隔离 → 解读**，边查边同步会覆盖唯一副本；六项固定清单（范围／时点／凭证／哈希／保管人／只读）">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a188.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的云备份与云端留存：取证协作">
+<meta property="og:description" content="备份是**某时点的状态快照，不是过程记录**——它能回答「那时有什么」，不能回答「当时发生了什么」；四类存储（端到端加密备份／普通云备份／云相册／第三方同步盘）可及性各不相同；顺序必须是 **盘点 → 固定 → 隔离 → 解读**，边查边同步会覆盖唯一副本；六项固定清单（范围／时点／凭证／哈希／保管人／只读）">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a188.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 188 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的云备份与云端留存：它不是备份，是一份会被长期读取的证词</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>多数设备事件里，最完整的&quot;历史&quot;不在手机上，而在云端：备份、同步、照片库、健康数据、通讯录、设备名录。它们在用户看来是&quot;备份&quot;，在调查者看来是<strong>一份会自动更新、且长期保留的证词</strong>。</li><li>核心命题一：<strong>云备份是&quot;末态快照&quot;，不是&quot;过程记录&quot;。</strong> 它记录&quot;备份那一刻的状态&quot;，不记录&quot;它是怎么变成这个状态的&quot;。用它证明&quot;有什么&quot;容易，证明&quot;什么时候进来的&quot;很难。</li><li>核心命题二：<strong>同步与备份是两套机制，回答的问题不同。</strong> 同步回答&quot;现在有什么&quot;，备份回答&quot;上次完整状态是什么&quot;；混用会把时间线搞乱（#146 时间与顺序基准）。</li><li>核心命题三：<strong>云端留存的价值在事件之前就已决定。</strong> 备份频率、保留份数、是否加密、密钥在哪里——这些设置决定了事后你能拿到多少，而它们几乎从不在事件期间被调整。</li><li>核心命题四：<strong>加密在这里是双刃剑。</strong> 端到端加密保护了内容不被平台读取，同时也意味着&quot;向平台要内容&quot;这条路基本走不通；能走的只有&quot;用你自己的密钥恢复&quot;。</li><li>核心命题五：<strong>处置顺序错了会毁掉证据。</strong> 先&quot;清理备份防止再感染&quot;、再&quot;调查&quot;，等于先烧掉卷宗再开始读。</li><li>一句话结论：<strong>把云备份当成一份需要先固定、后解读的证据，而不是一项需要随时保持&quot;干净&quot;的服务。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>本系列此前谈到云端时，多半是作为<strong>攻击面</strong>或<strong>账号侧闭环</strong>出现：</p>
+<table><thead><tr><th>篇目</th><th>视角</th></tr></thead><tbody><tr><td>#128 本地索引与跨 App 数据聚合</td><td>设备侧聚合的攻击面</td></tr><tr><td>#139 离线内容与模型包</td><td>下载内容的完整性问题</td></tr><tr><td>#159 服务端与账号侧处置闭环</td><td>账号侧仍有存续项要收回</td></tr><tr><td>本篇 #188</td><td>云端留存作为<strong>证据对象</strong>：怎么固定、怎么读、读不出什么</td></tr></tbody></table>
+<p>与 #187 的关系：那篇讲&quot;向平台要什么&quot;，本篇讲&quot;你手上其实已经有的是什么&quot;。很多团队在向平台发请求之前，从未系统盘点过自己账号下的云端留存。</p>
+<hr>
+<h2>3. 四类云端留存，各自的证据特征</h2>
+<table><thead><tr><th>类别</th><th>典型形态</th><th>时间分辨率</th><th>主要用途</th><th>主要局限</th></tr></thead><tbody><tr><td>完整备份</td><td>周期性设备快照</td><td>天到周</td><td>证明&quot;某日状态&quot;、找回被删数据</td><td>无过程、只覆盖被备份的数据域</td></tr><tr><td>增量同步</td><td>通讯录、日历、备忘录、健康</td><td>分钟到小时</td><td>证明&quot;何时出现某条目&quot;</td><td>版本历史有限，删除后可能立即消失</td></tr><tr><td>媒体库</td><td>照片、视频</td><td>上传时刻</td><td>时间与地点线索</td><td>云端时间戳≠拍摄时间</td></tr><tr><td>设备与账号名录</td><td>已登录设备、密钥、恢复方式</td><td>变更即时</td><td>判断是否有未授权接入</td><td>只给&quot;当前状态&quot;，不给历史</td></tr></tbody></table>
+<p><strong>第一行与第三行的混淆最常见。</strong> 备份里的照片时间戳是&quot;这张照片进入备份的时刻&quot;或&quot;文件修改时间&quot;，不是&quot;拍摄时刻&quot;；而照片的 EXIF（若未被剥离）才更接近拍摄时刻。两者可以差好几天。</p>
+<hr>
+<h2>4. 为什么必须&quot;先固定、后解读&quot;</h2>
+<p>云端留存有三个持续变化源：</p>
+<ol><li><strong>自动轮转。</strong> 备份按份数轮转，旧的被覆盖；同步数据按条目覆盖，旧版本不保留。</li><li><strong>设备继续写入。</strong> 只要设备在线，同步就会持续发生，异常条目会与正常条目混在一起。</li><li><strong>处置动作本身。</strong> 改密码、退登录、恢复备份、抹除设备——每一个动作都可能触发云端侧的大规模变更。</li></ol>
+<p>因此正确顺序是：</p>
+<pre><code>盘点（有哪些留存） → 固定（导出/截图/记录版本） → 隔离（阻断继续写入） → 解读（比对与时间线）</code></pre>
+<p><strong>&quot;隔离&quot;不等于&quot;删除&quot;。</strong> 隔离是让设备不再向云端写入（例如暂停同步、断开该设备的网络），删除是不可逆的销毁。在完成固定之前，不要做任何不可逆动作。</p>
+<hr>
+<h2>5. 固定动作清单：六件事，按可执行性排序</h2>
+<table><thead><tr><th>顺序</th><th>动作</th><th>产出</th><th>注意</th></tr></thead><tbody><tr><td>1</td><td>导出账号侧设备与密钥名录截图</td><td>当前接入状态</td><td>保留时间戳</td></tr><tr><td>2</td><td>记录备份的&quot;最近备份时间&quot;与&quot;备份大小&quot;</td><td>备份存在性与频率</td><td>不要立即下载全量</td></tr><tr><td>3</td><td>暂停同步、将设备置于隔离网络</td><td>阻断继续写入</td><td>不关机，避免丢失内存证据</td></tr><tr><td>4</td><td>导出可自助导出的数据域</td><td>通讯录/日历/健康等</td><td>记录导出时刻</td></tr><tr><td>5</td><td>对关键条目做条目级截图</td><td>版本与时间</td><td>含界面时间</td></tr><tr><td>6</td><td>若需全量，经专业意见后下载</td><td>镜像副本</td><td>下载过程本身可能改变状态</td></tr></tbody></table>
+<p><strong>第五项经常被跳过。</strong> 条目级截图（某条备忘录的&quot;最后修改&quot;、某个联系人的&quot;添加时间&quot;）比全量导出更能支撑时间线，且成本低到可以在十分钟内完成。</p>
+<hr>
+<h2>6. 端到端加密意味着什么，不意味着什么</h2>
+<table><thead><tr><th>说法</th><th>正确理解</th></tr></thead><tbody><tr><td>&quot;加密了，所以安全&quot;</td><td>只保证<strong>平台</strong>读不到；不保证<strong>持有账号凭据的人</strong>读不到</td></tr><tr><td>&quot;加密了，所以查不了&quot;</td><td>内容层面基本如此；元数据层面（接入记录、设备名录）可能仍可见</td></tr><tr><td>&quot;我有密钥，所以我随时能恢复&quot;</td><td>前提是密钥没被同一次入侵带走；恢复密钥的保管是本篇之外的一门功课</td></tr><tr><td>&quot;开加密会丢功能&quot;</td><td>部分服务功能受限，这是取舍，不是漏洞</td></tr></tbody></table>
+<p><strong>关键推论：</strong> 如果攻击者获得了账号凭据，端到端加密并不能阻止他把数据同步到自己的设备上——因为对系统而言那是&quot;合法设备&quot;。因此云端事件的判断重点，从&quot;内容是否泄露&quot;前移到&quot;<strong>是否出现了新设备、新会话、新密钥</strong>&quot;（#159）。</p>
+<hr>
+<h2>7. 云端留存能证明什么，不能证明什么</h2>
+<table><thead><tr><th>命题</th><th>云端留存能支持吗</th><th>说明</th></tr></thead><tbody><tr><td>某条数据在 T 时刻存在于账号中</td><td>能</td><td>备份或版本记录</td></tr><tr><td>某条数据在 T 时刻<strong>首次</strong>出现</td><td>弱</td><td>只有在增量历史足够细时才成立</td></tr><tr><td>设备在 T 时刻被某人操作</td><td>不能</td><td>操作主体无法从留存中推出</td></tr><tr><td>某应用在 T 时刻安装了某版本</td><td>弱</td><td>取决于是否被备份域覆盖</td></tr><tr><td>存在未授权设备接入</td><td>能（部分）</td><td>设备名录 + 接入时间，但需账号侧配合（#187）</td></tr></tbody></table>
+<p><strong>第三行最容易被误用。</strong> &quot;某账号在此时同步了某文件&quot;不等于&quot;某人在此时操作了设备&quot;。把主体推断写进结论，会在复核时被直接推翻。</p>
+<hr>
+<h2>8. 处置中的四个常见自毁动作</h2>
+<ol><li><strong>先清空备份&quot;防止再感染&quot;。</strong> 备份是末态快照，清空后你失去了唯一的基线。</li><li><strong>直接抹除设备并重装。</strong> 在未做设备侧固定前，这等于销毁主要证据（#158 清除判定与复机验收标准另有一层：抹除≠验收）。</li><li><strong>立刻修改所有密码并退出所有设备。</strong> 必要，但请<strong>先</strong>截图设备名录与接入记录，再执行；否则你失去了&quot;入侵时存在哪些设备&quot;的事实。</li><li><strong>在事件群里转发备份链接。</strong> 一次转发就把一份受控证据变成了不可控副本（#178）。</li></ol>
+<p>四个动作都出于善意，共同点是<strong>在固定之前做了不可逆操作</strong>。</p>
+<hr>
+<h2>9. 与外部协作时的三条纪律</h2>
+<ol><li><strong>交出副本，不交出原件。</strong> 给顾问（#177）或鉴定机构（#195）的材料是副本，原件与哈希清单留在自己手里。</li><li><strong>登记每一次读取。</strong> 谁在什么时候读了哪一份，写进决策日志（#184）。</li><li><strong>区分&quot;用于处置&quot;与&quot;用于举证&quot;。</strong> 前者可以粗，后者必须可复核；不要把两者混成一份文件（#178 的两条轨道）。</li></ol>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>先盘点再动手</strong>：设备名录、备份时间、可导出数据域，三张清单。</li><li><strong>固定优先于清理</strong>：任何不可逆动作之前必须有副本。</li><li><strong>隔离不等于删除</strong>：用断网与暂停同步代替删除。</li><li><strong>条目级截图</strong>：关键条目的修改时间比全量导出更有用。</li><li><strong>记录一切时刻</strong>：导出时刻、截图时刻、发现时刻，标注来源与时区。</li><li><strong>区分内容与元数据</strong>：加密影响内容，不影响（部分）元数据判断。</li><li><strong>副本分级</strong>：处置用、举证用、对外披露用，三档分开。</li><li><strong>定期演练</strong>：备份与恢复流程若从未演练，事件期一定出错（#176 长期能力建设与培训有效性）。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;有备份就等于有证据。&quot;</strong> 备份是末态，不是过程。</li><li><strong>&quot;云端时间戳就是事件时间。&quot;</strong> 它只是&quot;进入云端的时间&quot;。</li><li><strong>&quot;端到端加密让我完全安全。&quot;</strong> 它防平台，不防持有凭据者。</li><li><strong>&quot;出事了先把备份删掉。&quot;</strong> 那是最快毁掉调查的做法。</li><li><strong>&quot;全量下载越早越好。&quot;</strong> 下载过程本身会改变状态，且可能耗时数天。</li><li><strong>&quot;备份里有就是设备上有。&quot;</strong> 备份域是被选择的子集。</li><li><strong>&quot;改密码之后就没问题了。&quot;</strong> 未授权设备与密钥需要单独收回（#159）。</li><li><strong>&quot;云端记录能证明是谁做的。&quot;</strong> 只能证明&quot;发生了什么&quot;，不能证明&quot;谁&quot;。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#159</strong> 直接衔接：云端留存的盘点结果，就是账号侧闭环的输入。</li><li>与 <strong>#187</strong> 互补：先看自己有什么，再决定向平台要什么。</li><li>与 <strong>#146</strong> 对接：所有时间戳都要标注来源，不可混用。</li><li>与 <strong>#158</strong> 对接：抹除与恢复的顺序，必须服从证据保全。</li><li>与 <strong>#177 / #195</strong> 对接：副本交付与鉴定意见的边界。</li><li>与 <strong>#176</strong> 对接：备份与恢复演练，是能力建设的固定科目。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>云备份最容易被当成&quot;保险&quot;，其实它是&quot;卷宗&quot;：<strong>它记录的是某个时刻的状态，而不是事件的过程；它由你日常的设置决定，而不是由事件期的努力决定。</strong></p>
+<p>三条可执行的原则：</p>
+<ol><li><strong>先固定，再隔离，最后解读。</strong></li><li><strong>要条目级时间，不要只做全量镜像。</strong></li><li><strong>内容靠密钥，元数据靠名录；两条线分开判断。</strong></li></ol>
+<p>把云备份从&quot;需要维持干净的服务&quot;改写为&quot;需要先固定再解读的证据&quot;，本篇文章的目的就达到了。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论云端留存的<strong>证据保全与解读方法</strong>，不涉及任何绕过加密、未授权访问他人数据或规避平台政策的手段。</li><li>各类服务的备份机制、加密范围与保留策略随版本与地区变化，<strong>以官方文档为准</strong>；涉及取证与法律程序的判断以专业意见为准，本篇不构成法律意见。</li><li>文中不提供任何针对具体系统的提取工具或操作步骤。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/publications/detail/sp/800-86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（证据固定与完整性方法）</li><li><a href="https://csrc.nist.gov/publications/detail/sp/800-209/final" rel="nofollow noopener" target="_blank">NIST SP 800-209：敏感数据保护</a>（加密与密钥管理的一般原则）</li><li><a href="https://support.apple.com/guide/security/welcome/web" rel="nofollow noopener" target="_blank">Apple：iCloud 安全概览</a>（备份与加密的公开说明）</li><li>本系列 #128、#139、#146、#158、#159、#176、#177、#178、#184、#187、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a187.html">← 第 187 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a189.html">第 189 篇 →</a></nav></article>
+</main></body></html>

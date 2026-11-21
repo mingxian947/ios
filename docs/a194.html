@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下多家受害者的联合处置：共享指标最容易，共享结论最难 | iOS 安全研究文章库</title>
+<meta name="description" content="联合的正确产物不是联合声明，而是**共同事实底稿**；四层共享 L1 原始载体（原则上不横向）／L2 技术指标（需带观察窗口与判定方法）／**L3 事实纪要（主产物）**／L4 判断与归因（最后、且署名到组织）；底稿六字段 时间（UTC）／对象／观察／方法／置信度（**必须允许「无法判断」**）／来源等级；四">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a194.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下多家受害者的联合处置：共享指标最容易，共享结论最难">
+<meta property="og:description" content="联合的正确产物不是联合声明，而是**共同事实底稿**；四层共享 L1 原始载体（原则上不横向）／L2 技术指标（需带观察窗口与判定方法）／**L3 事实纪要（主产物）**／L4 判断与归因（最后、且署名到组织）；底稿六字段 时间（UTC）／对象／观察／方法／置信度（**必须允许「无法判断」**）／来源等级；四">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a194.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 194 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下多家受害者的联合处置：共享指标最容易，共享结论最难</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>定向投放很少只打一家。当第二家、第三家发现同一类痕迹时，联合处置几乎是必然选择——但<strong>联合处置的收益与风险，不在同一个层级上</strong>。</li><li>核心命题一：<strong>共享技术指标最快，也最容易出错。</strong> 一个未经核实的域名或哈希扩散到十家，会同时产生十份误报，并让真正的痕迹淹没在噪声里（#161）。</li><li>核心命题二：<strong>共享结论最慢，也最危险。</strong> 结论一旦离开原始上下文，就会被当成&quot;共同认定&quot;；而每家的数据范围与置信度并不相同（#178）。</li><li>核心命题三：<strong>联合的正确产物不是一份联合声明，而是一份共同事实底稿。</strong> 各家在同一张事实表上补充自己的行，结论各自得出，对外口径按职责分别表述。</li><li>核心命题四：<strong>共享有边界，边界不由热情决定。</strong> 个人信息、合同保密、监管调查中的材料、以及竞争敏感信息，四类内容各有各的限制（#184）。</li><li>核心命题五：<strong>协调结构必须只有一个中枢。</strong> 两个协调方等于没有协调方；轮值可以，并行不行。</li><li>一句话结论：<strong>先共享&quot;我观察到了什么、用什么方法、置信度多少&quot;，再谈&quot;所以我们认为&quot;；顺序反了，联合就会变成共同犯错。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>讨论的是</th><th>视角</th></tr></thead><tbody><tr><td>#157 高价值目标名单治理与分层保护</td><td>单家组织内部分层</td><td>防御</td></tr><tr><td>#161 检测指标生命周期治理</td><td>单家组织内的指标治理</td><td>防御</td></tr><tr><td>#174 跨案对比方法与统计口径</td><td>多起案件的对比方法</td><td>分析</td></tr><tr><td>#184 多法域并行处置的冲突管理</td><td>一家的多法域冲突</td><td>处置</td></tr><tr><td><strong>本篇 #194</strong></td><td><strong>多家组织之间的共享与联合表述</strong></td><td><strong>协作</strong></td></tr></tbody></table>
+<p>#174 解决&quot;多起案件能不能比&quot;，本篇解决&quot;多家组织愿不愿意、能不能、以什么形式共享&quot;。前者是方法问题，后者是<strong>信任与边界问题</strong>。</p>
+<p>同时本篇与 #177（外部服务商的委托与授权边界）互补：#177 讲一家委托外部的边界，本篇讲多家之间横向共享的边界。</p>
+<hr>
+<h2>3. 联合的三个真实收益与三个真实成本</h2>
+<p>先算账，再决定要不要联合。</p>
+<table><thead><tr><th>收益</th><th>说明</th></tr></thead><tbody><tr><td>扩大样本</td><td>单家看到的是一段痕迹，多家拼起来才看得出模式</td></tr><tr><td>对上游形成压力</td><td>供应商更愿意回应&quot;多个客户同时报告&quot;的问题（#180）</td></tr><tr><td>分摊成本</td><td>鉴定、监测、对外沟通的部分工作可以共用（#195）</td></tr></tbody></table>
+<table><thead><tr><th>成本</th><th>说明</th></tr></thead><tbody><tr><td>口径污染</td><td>一家的错误指标被多家引用，纠正成本成倍增加</td></tr><tr><td>信息外溢</td><td>共享材料在多方之间流转，控制力随节点数下降</td></tr><tr><td>协调开销</td><td>会议、对齐、审批，占用的正是处置最紧张的人力</td></tr></tbody></table>
+<p><strong>结论不是&quot;不要联合&quot;，而是&quot;先确定共享层级，再建立协调结构&quot;。</strong> 没有这两样，联合的收益会被成本吃掉。</p>
+<hr>
+<h2>4. 共享的四个层级</h2>
+<p>按&quot;信息密度&quot;从高到低，风险也从高到低：</p>
+<table><thead><tr><th>层级</th><th>内容</th><th>共享建议</th><th>主要风险</th></tr></thead><tbody><tr><td>L1 原始载体</td><td>镜像、日志原始文件、设备备份</td><td>原则上不横向共享，只由受委托方在授权范围内处理（#177）</td><td>不可控扩散，且可能含他人个人信息</td></tr><tr><td>L2 技术指标</td><td>域名、IP 段、文件哈希、行为特征</td><td>谨慎共享，标注置信度与观察时间</td><td>假阳性扩散、指标过期</td></tr><tr><td>L3 事实纪要</td><td>时间、对象、观察、方法、置信度</td><td><strong>推荐共享，这是联合的主产物</strong></td><td>需去标识化，避免夹带判断</td></tr><tr><td>L4 判断与归因</td><td>&quot;是谁做的&quot;&quot;动机是什么&quot;</td><td>最后共享，且必须署名到组织</td><td>容易被转述为&quot;共同认定&quot;</td></tr></tbody></table>
+<p><strong>L3 是分水岭。</strong> 大多数联合处置失败，是因为要么停在 L2（只换指标，拼不出模式），要么直接跳到 L4（各家还没对齐事实就开始下结论）。</p>
+<p>L2 与 L3 之间有一个容易被忽略的纪律：<strong>指标必须带&quot;观察窗口&quot;与&quot;判定方法&quot;</strong>。没有这两项，一条指标在别人那里就是一条无法验证的传闻。</p>
+<hr>
+<h2>5. 共同事实底稿的六个字段</h2>
+<p>一份能被多家同时使用的底稿，每一行至少包含：</p>
+<table><thead><tr><th>字段</th><th>填写要求</th></tr></thead><tbody><tr><td>时间</td><td>UTC，注明原始时区；区分&quot;发生时间&quot;与&quot;发现时间&quot;</td></tr><tr><td>对象</td><td>设备、账号、应用、网络位置；去标识化后仍可对照</td></tr><tr><td>观察</td><td>只写看到的，不写推断的</td></tr><tr><td>方法</td><td>怎么看到的：日志、流量、用户报告、外部通报</td></tr><tr><td>置信度</td><td>确定 / 高度可能 / 可能 / 无法判断（#178 要求&quot;无法判断&quot;必须是一个合法取值）</td></tr><tr><td>来源等级</td><td>自家观察 / 同行共享 / 供应商通报 / 公开信息</td></tr></tbody></table>
+<p><strong>第六个字段是多边协作的关键。</strong> 同一行事实，来源等级不同，对外可引用程度就不同；不标注，就会被默认当成&quot;已证实&quot;。</p>
+<p>底稿的维护规则只有两条：<strong>谁补充谁署名，谁修改谁留痕。</strong> 不允许匿名编辑，也不允许覆盖式修改。</p>
+<hr>
+<h2>6. 协调结构的四种形态</h2>
+<table><thead><tr><th>形态</th><th>适用规模</th><th>优点</th><th>缺点</th></tr></thead><tbody><tr><td>单一协调方</td><td>2–5 家</td><td>决策快</td><td>协调方负担重，且需被信任</td></tr><tr><td>轮值协调</td><td>5–15 家</td><td>分担负担</td><td>交接期容易断档</td></tr><tr><td>行业信息共享组织</td><td>15 家以上</td><td>有既有流程与保密框架</td><td>流程慢，颗粒度粗</td></tr><tr><td>受委托第三方</td><td>任意</td><td>专业、可隔离</td><td>成本高，且需明确授权（#177）</td></tr></tbody></table>
+<p>无论哪种形态，有三条纪律是不变的：</p>
+<ol><li><strong>只有一个中枢。</strong> 对外口径、材料分发、会议节奏，都由中枢统一。</li><li><strong>频道与议题分离。</strong> 技术细节走技术频道，对外表述走协调频道，避免&quot;技术讨论被直接引用&quot;。</li><li><strong>会议纪要当天发。</strong> 隔夜的纪要靠回忆补，是口径分歧的起点。</li></ol>
+<hr>
+<h2>7. 共享的五条边界</h2>
+<table><thead><tr><th>边界</th><th>具体限制</th><th>处理方式</th></tr></thead><tbody><tr><td>个人信息</td><td>受害者名单、员工信息、客户数据</td><td>去标识化；名单不横向共享（#179）</td></tr><tr><td>合同保密</td><td>供应商协议中的保密条款</td><td>共享前确认条款是否允许</td></tr><tr><td>监管调查</td><td>调查中的材料可能受限</td><td>由法律顾问判断可共享范围（#169）</td></tr><tr><td>竞争敏感</td><td>业务数据、客户结构、定价</td><td>与安全事实分开，不进同一份材料</td></tr><tr><td>对外口径</td><td>未经确认的结论</td><td>只共享事实，结论各自表述</td></tr></tbody></table>
+<p>第三行最容易出事：<strong>监管调查期间的材料，往往并不是&quot;不能给别人看&quot;，而是&quot;给谁看需要先问过&quot;</strong>。这个判断不应由技术团队单独做出。</p>
+<hr>
+<h2>8. 指标共享的误伤机制</h2>
+<p>一条指标从 A 家传到 J 家，会经历四次变形：</p>
+<pre><code>原始观察 → A 家归纳 → 群组转发 → B 家二次归纳 → 公开引用</code></pre>
+<p>每一次变形都可能丢掉三样东西：<strong>观察窗口、判定方法、置信度</strong>。丢到最后，一条&quot;某域名在 10 月出现过&quot;会变成&quot;某域名是本次攻击的基础设施&quot;。</p>
+<p>三个对策：</p>
+<ol><li><strong>附原始观察摘要。</strong> 每个指标后面跟一句&quot;在哪台设备、什么时间、以什么方式看到&quot;。</li><li><strong>设定有效期。</strong> 指标有寿命，过期指标要显式标记（#161）。</li><li><strong>允许撤回。</strong> 发出方发现指标有误，必须能在同一频道发出撤回通知，并说明影响范围。</li></ol>
+<hr>
+<h2>9. 联合对外表述的三种规模</h2>
+<table><thead><tr><th>规模</th><th>适用场景</th><th>形式</th></tr></thead><tbody><tr><td>联合技术通报</td><td>事实已对齐，需要提醒同行</td><td>一份事实为主的通报，署名到组织</td></tr><tr><td>各自声明 + 相互引用</td><td>对外口径需分别控制</td><td>各家声明事实一致，详略不同（#181）</td></tr><tr><td>单一主体代表</td><td>法律或监管要求统一口径</td><td>由被授权方代表，其余各方书面确认</td></tr></tbody></table>
+<p><strong>&quot;联合声明&quot;不是默认选项。</strong> 它意味着多家共同为一个判断背书，而在定向投放里，各家的数据范围几乎不可能完全相同。多数情况下，第二种规模已经足够。</p>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>先定层级</strong>：L1 到 L4，先说清楚这次共享到哪一层。</li><li><strong>建事实底稿</strong>：六字段，谁补充谁署名。</li><li><strong>指标带窗口</strong>：观察时间、方法、置信度，缺一不可。</li><li><strong>单一中枢</strong>：对外口径与材料分发统一。</li><li><strong>频道分离</strong>：技术讨论与对外表述分开。</li><li><strong>纪要当天发</strong>：不留隔夜补记。</li><li><strong>共享前过边界清单</strong>：五条边界逐条确认。</li><li><strong>保留撤回权</strong>：指标有误能撤回，底稿有误能更正。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;共享越多越有帮助。&quot;</strong> 超出边界的共享，会制造新的风险。</li><li><strong>&quot;指标共享就是协作。&quot;</strong> 指标只是最低层级，拼不出模式。</li><li><strong>&quot;大家都同意就是事实。&quot;</strong> 共识不等于证据。</li><li><strong>&quot;联合声明更有分量。&quot;</strong> 也更难撤回。</li><li><strong>&quot;匿名共享更安全。&quot;</strong> 匿名让责任与来源都无法追溯，反而降低可用性。</li><li><strong>&quot;小圈子共享不会外溢。&quot;</strong> 节点越多，外溢概率越高。</li><li><strong>&quot;会议纪要可以后补。&quot;</strong> 后补的纪要会被时间戳暴露（#181）。</li><li><strong>&quot;出了事再建群。&quot;</strong> 协调结构应当事前存在。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#157</strong> 衔接：名单与目标分层，属于各家的内部信息，不进入共享。</li><li>与 <strong>#161</strong> 对接：指标的观察窗口与有效期，在本篇是共享的前提。</li><li>与 <strong>#174</strong> 对照：跨案对比的方法，是联合分析的技术基础。</li><li>与 <strong>#177</strong> 衔接：受委托第三方的授权范围，决定它能否接触 L1。</li><li>与 <strong>#178</strong> 对接：底稿的六字段，与记录分层的要求同源。</li><li>与 <strong>#184</strong> 对接：多法域下的共享限制，由法律顾问判断。</li><li>与 <strong>#195</strong> 对接：联合材料进入鉴定时，来源等级必须可追溯。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>多家联合处置，真正的难点不在&quot;愿不愿意共享&quot;，而在&quot;共享什么、共享到哪、由谁代表&quot;：</p>
+<ol><li><strong>共享事实，不共享判断。</strong></li><li><strong>共享带方法，不带结论。</strong></li><li><strong>共享有中枢，没有并行。</strong></li></ol>
+<p>做到这三条，联合才可能既扩大视野，又不制造新的错误。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论多家组织在事件期的协作结构与共享边界，不涉及任何针对具体目标的攻击、渗透或情报收集手段。</li><li>共享与披露的法律边界因法域与合同而异，<strong>以专业意见为准</strong>；本篇不构成法律意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/" rel="nofollow noopener" target="_blank">NIST SP 800-150：网络威胁信息共享指南</a>（共享结构与信任建立）</li><li><a href="https://www.first.org/tlp/" rel="nofollow noopener" target="_blank">FIRST：交通灯协议（TLP）</a>（信息共享的传播范围标注）</li><li><a href="https://www.enisa.europa.eu/" rel="nofollow noopener" target="_blank">ENISA：威胁情报共享良好实践</a>（多边协作的组织形态）</li><li>本系列 #157、#161、#174、#177、#178、#184、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a193.html">← 第 193 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a195.html">第 195 篇 →</a></nav></article>
+</main></body></html>

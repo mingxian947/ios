@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的身份提供商：会话处置 | iOS 安全研究文章库</title>
+<meta name="description" content="**改密码只杀密码，不杀会话**；五种会话载体（浏览器 cookie／移动端刷新令牌／设备注册／联邦断言／长期 API 凭证）各有吊销路径，漏一类等于没做；三种策略对比，**全部强制重认证**最彻底；七步顺序 **冻结 → 失效会话 → 吊销长期凭证 → 清理设备注册 → 收紧策略 → 用旧令牌验证 → 记录">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a189.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的身份提供商：会话处置">
+<meta property="og:description" content="**改密码只杀密码，不杀会话**；五种会话载体（浏览器 cookie／移动端刷新令牌／设备注册／联邦断言／长期 API 凭证）各有吊销路径，漏一类等于没做；三种策略对比，**全部强制重认证**最彻底；七步顺序 **冻结 → 失效会话 → 吊销长期凭证 → 清理设备注册 → 收紧策略 → 用旧令牌验证 → 记录">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a189.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 189 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的身份提供商：改密码只是第一步，会话才是最长的尾巴</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>在组织环境里，&quot;设备被入侵&quot;很快就会变成&quot;身份被借用&quot;：攻击者真正想要的不是那台手机，而是那台手机上<strong>已经登录的会话</strong>。</li><li>核心命题一：<strong>会话的生命周期长于密码。</strong> 改密码只让&quot;下一次登录&quot;失效，已经签发的令牌仍可能在有效期内继续工作；不处理会话，等于只关了一半的门。</li><li>核心命题二：<strong>会话的形态不止一种。</strong> 浏览器 Cookie、应用刷新令牌、设备注册、SSO 联邦断言、API 长期凭据——每一类有不同的吊销路径，漏掉任何一类都会留下存续项（#159）。</li><li>核心命题三：<strong>单点登录放大了收益，也放大了损失。</strong> 一次登录打通几十个应用，意味着一次会话失守就可能横向覆盖几十个应用。</li><li>核心命题四：<strong>&quot;强制重新认证&quot;是最有性价比的动作。</strong> 它比逐个应用排查快、比全量重置影响小，且效果可验证。</li><li>核心命题五：<strong>处置的完成标准是&quot;下一次认证必然经过新的判断&quot;，而不是&quot;用户说已经退出了&quot;。</strong></li><li>一句话结论：<strong>把事件处置的第一优先级，从&quot;改密码&quot;改成&quot;让所有存量会话失效，并让下一次认证带上新的条件&quot;。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>视角</th></tr></thead><tbody><tr><td>#132 认证凭证与会话层攻击面</td><td>攻击者如何利用凭证与会话（攻击面）</td></tr><tr><td>#159 服务端与账号侧处置闭环</td><td>账号侧存续项的地图与收回（资产侧）</td></tr><tr><td>本篇 #189</td><td><strong>身份提供商作为处置的执行点</strong>：在 IdP 上把&quot;会话&quot;当作可管理对象</td></tr></tbody></table>
+<p>与 #188 的区别：那篇看的是&quot;云端留下什么&quot;，本篇看的是&quot;身份系统允许什么继续有效&quot;。前者是证据，后者是权限。</p>
+<hr>
+<h2>3. 五类会话载体与各自的吊销方式</h2>
+<table><thead><tr><th>载体</th><th>典型寿命</th><th>吊销方式</th><th>常见漏点</th></tr></thead><tbody><tr><td>浏览器会话 Cookie</td><td>小时到天</td><td>服务端会话失效</td><td>只清了本地缓存，服务端仍有效</td></tr><tr><td>移动应用刷新令牌</td><td>天到月</td><td>撤销授权 / 刷新令牌轮换</td><td>只在一台设备上退登</td></tr><tr><td>设备注册（受管/受信）</td><td>长</td><td>从设备名录移除</td><td>名录里存在但无人认领</td></tr><tr><td>联邦断言（SSO）</td><td>取决于 IdP 策略</td><td>IdP 侧会话终止 + 应用重新认证</td><td>应用侧仍缓存旧断言</td></tr><tr><td>API 长期凭据</td><td>可能无限</td><td>轮换或吊销</td><td>存在于脚本与自动化里，无人知道</td></tr></tbody></table>
+<p><strong>第五行最危险。</strong> 长期 API 凭据通常不挂在任何&quot;人&quot;身上，不在设备名录里，也不会随密码更改而失效；它往往是事件之后几个月仍在活动的那个&quot;存续项&quot;。</p>
+<hr>
+<h2>4. 为什么&quot;强制重新认证&quot;应当是第一个动作</h2>
+<p>对比三种处置策略：</p>
+<table><thead><tr><th>策略</th><th>生效时间</th><th>副作用</th><th>覆盖度</th><th>可验证性</th></tr></thead><tbody><tr><td>改密码</td><td>下一次登录</td><td>小</td><td>仅密码类</td><td>高</td></tr><tr><td>逐个应用排查</td><td>天到周</td><td>中</td><td>取决于是否查全</td><td>低</td></tr><tr><td>强制重新认证 + 会话失效</td><td>分钟到小时</td><td>中（全员需重登）</td><td>高（覆盖绝大多数载体）</td><td>高</td></tr></tbody></table>
+<p><strong>第三行的关键在&quot;高覆盖 + 可验证&quot;。</strong> 你可以直接验证&quot;旧会话是否还能用&quot;——这是唯一一个能自己给出结论的动作。改密码做不到这一点，因为它不触及已签发令牌。</p>
+<hr>
+<h2>5. 处置顺序：一个可执行的七步</h2>
+<ol><li><strong>冻结。</strong> 暂停该身份的敏感操作权限（不是停用账号，停用会让日志线索断掉一部分）。</li><li><strong>失效会话。</strong> 在 IdP 上终止该主体的全部会话与刷新令牌。</li><li><strong>吊销长期凭据。</strong> 逐一确认并轮换 API 令牌、服务账号密钥、Webhook 密钥。</li><li><strong>清理设备注册。</strong> 移除无法认领的设备；对可认领的标注属主（#157）。</li><li><strong>收紧认证条件。</strong> 对高风险主体临时提高认证强度或限制来源。</li><li><strong>验证。</strong> 用旧令牌尝试访问，确认被拒；这一条是&quot;完成&quot;的唯一硬证据。</li><li><strong>记录。</strong> 每一步的时间、执行人、影响范围写入决策日志（#184）。</li></ol>
+<p><strong>第六步经常被省略。</strong> 没有验证的处置，只是一次&quot;相信已经生效&quot;的动作。</p>
+<hr>
+<h2>6. 条件访问：把&quot;事后处置&quot;前移为&quot;事前约束&quot;</h2>
+<p>事件之后，真正降低复发概率的不是&quot;再查一次&quot;，而是让下一次认证自动带上判断：</p>
+<table><thead><tr><th>条件</th><th>作用</th><th>代价</th></tr></thead><tbody><tr><td>设备合规状态</td><td>非受管/非合规设备不允许访问敏感应用</td><td>需要设备管理能力</td></tr><tr><td>位置与网络来源</td><td>异常地理或网络直接挑战</td><td>误伤差旅与家庭办公</td></tr><tr><td>会话时长上限</td><td>缩短令牌寿命</td><td>增加重认证频率</td></tr><tr><td>高风险操作二次认证</td><td>敏感操作单独挑战</td><td>增加操作摩擦</td></tr><tr><td>令牌绑定（设备/密钥）</td><td>令牌离开原设备即失效</td><td>兼容性要求较高</td></tr></tbody></table>
+<p>这张表在本系列的 #160（组织管控栈可见性与可阻断动作）里已经出现过一次，但那篇讲的是&quot;管控栈能看见什么&quot;；这里讲的是&quot;身份层能拒绝什么&quot;。两者互补，不能互相替代。</p>
+<hr>
+<h2>7. 四个最容易搞砸的地方</h2>
+<ol><li><strong>只在一台设备上退登。</strong> 移动应用的退登往往只影响本机，服务端授权仍然有效。</li><li><strong>停用账号代替失效会话。</strong> 停用会同时切断你自己查看日志的能力，且恢复时旧会话可能被一并恢复。</li><li><strong>忘记非人类身份。</strong> 服务账号、集成账号、共享邮箱，这些往往没有&quot;人&quot;去改密码。</li><li><strong>没有验证就宣布完成。</strong> 未验证的&quot;已处置&quot;，会在两周后的复核中变成新的问题。</li></ol>
+<hr>
+<h2>8. 与业务侧协调的三条底线</h2>
+<ol><li><strong>先通知受影响的应用负责人，再执行。</strong> 一次全量重认证会造成大面积登录失败，提前告知可以把它从&quot;事故&quot;降级为&quot;维护&quot;。</li><li><strong>为关键岗位准备例外流程。</strong> 强制重认证不能把核心业务卡死；例外必须是&quot;有记录、有时限、可复核&quot;的。</li><li><strong>把&quot;为什么现在做&quot;写清楚。</strong> 事件期的时间压力很大，但优先级必须能被解释，否则会引发新的内部冲突（#186）。</li></ol>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>会话清单化</strong>：先列出五类载体的现状，再动手。</li><li><strong>先失效再改密</strong>：顺序反了会留下短暂的混合状态。</li><li><strong>长期凭据单独盘点</strong>：脚本、集成、自动化里的密钥，逐个轮换。</li><li><strong>设备名录清零</strong>：无法认领的一律移除。</li><li><strong>验证而非相信</strong>：用旧令牌实测一次。</li><li><strong>收紧而非关闭</strong>：用条件访问替代&quot;一刀切停用&quot;。</li><li><strong>全程记录</strong>：执行人、时间、影响面。</li><li><strong>事前演练</strong>：强制重认证流程每年至少走一次（#176）。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<ol><li><strong>&quot;改了密码就安全了。&quot;</strong> 已签发令牌不受影响。</li><li><strong>&quot;退出登录就断了。&quot;</strong> 多数应用只断本机。</li><li><strong>&quot;停用账号最彻底。&quot;</strong> 会切断你自己的可见性。</li><li><strong>&quot;会话过期会自然解决。&quot;</strong> 长期令牌的&quot;有效期&quot;可能以月计。</li><li><strong>&quot;服务账号不涉及人，不用管。&quot;</strong> 恰恰最容易被忽略。</li><li><strong>&quot;重认证太扰民，先不做。&quot;</strong> 不做的代价通常远高于一次打扰。</li><li><strong>&quot;应用侧退登就够了。&quot;</strong> IdP 侧会话仍然存在。</li><li><strong>&quot;处置完就不用再看了。&quot;</strong> 复发判定需要随访（#166 结案随访复发判定与长期暴露管理）。</li></ol>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#132</strong> 是&quot;攻&quot;与&quot;守&quot;的两面：一篇讲攻击者怎么用会话，一篇讲你怎么让会话失效。</li><li>与 <strong>#159</strong> 直接衔接：本篇给出执行动作，那篇给出存续项地图。</li><li>与 <strong>#160</strong> 互补：管控栈看得见什么，身份层就拒绝什么。</li><li>与 <strong>#166</strong> 衔接：会话治理需要随访，而不是一次性动作。</li><li>与 <strong>#184</strong> 对接：跨团队执行需要一份统一的决策日志。</li><li>与 <strong>#188</strong> 对接：处置前先固定账号侧留存，否则你无法证明&quot;入侵时有哪些设备&quot;。</li></ul>
+<hr>
+<h2>12. 总结</h2>
+<p>身份系统的本质是<strong>一组关于&quot;谁现在还能做什么&quot;的判断</strong>。事件之后，你要做的不是&quot;重置一切&quot;，而是让这组判断重新成立：</p>
+<ol><li><strong>让旧判断失效</strong>：终止会话、吊销凭据、清理设备。</li><li><strong>让新判断带上约束</strong>：条件访问、设备合规、令牌绑定。</li><li><strong>让判断可验证</strong>：用旧令牌实测，而不是相信&quot;应该生效了&quot;。</li></ol>
+<p>把这三步做完，&quot;改密码&quot;才真正有意义——否则它只是关上了一扇本来就没人走的门。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论身份与会话的<strong>处置方法</strong>，不涉及任何针对具体服务的绕过、伪造或未授权访问手段。</li><li>各身份提供商的能力与命名不同，<strong>以官方文档为准</strong>；涉及合规与法律判断以专业意见为准，本篇不构成法律意见。</li><li>文中不提供针对特定系统的利用方法或工具。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/publications/detail/sp/800-63b/final" rel="nofollow noopener" target="_blank">NIST SP 800-63B：数字身份认证指南</a>（会话与认证器管理）</li><li><a href="https://csrc.nist.gov/publications/detail/sp/800-207/final" rel="nofollow noopener" target="_blank">NIST SP 800-207：零信任架构</a>（持续验证与最小权限）</li><li><a href="https://www.cisa.gov/" rel="nofollow noopener" target="_blank">CISA：身份与访问管理最佳实践</a>（会话治理的公开材料）</li><li>本系列 #132、#157、#159、#160、#166、#176、#184、#188、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a188.html">← 第 188 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a190.html">第 190 篇 →</a></nav></article>
+</main></body></html>

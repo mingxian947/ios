@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的司法鉴定与专家意见：可采边界 | iOS 安全研究文章库</title>
+<meta name="description" content="可采性 = **检材真实 + 方法可靠 + 结论与检材一一对应**；三角色（司法鉴定机构／专家辅助人／内部技术负责人）产出性质不同，**内部情况说明不是鉴定意见**；委托前六件事（命题一句话一个／检材范围／方法／时限／报告形式／变更计价）；保管链七要素，**哈希是锚点**，无记录的「先整理」会切断链条；iOS">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a195.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的司法鉴定与专家意见：可采边界">
+<meta property="og:description" content="可采性 = **检材真实 + 方法可靠 + 结论与检材一一对应**；三角色（司法鉴定机构／专家辅助人／内部技术负责人）产出性质不同，**内部情况说明不是鉴定意见**；委托前六件事（命题一句话一个／检材范围／方法／时限／报告形式／变更计价）；保管链七要素，**哈希是锚点**，无记录的「先整理」会切断链条；iOS">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a195.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 195 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的司法鉴定与专家意见：能不能用，取决于&quot;你是怎么知道的&quot;</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>事件结束后，技术团队最常见的诉求是&quot;找一家机构出个报告&quot;。但<strong>报告的价值不取决于结论有多肯定，而取决于结论能不能被另一个人用同样的方法复核</strong>。</li><li>核心命题一：<strong>鉴定意见的可采性，建立在三件事上：检材的真实性、方法的可靠性、结论与检材的对应关系。</strong> 三者缺一，结论再正确也无法使用。</li><li>核心命题二：<strong>&quot;谁来做&quot;不如&quot;按什么做&quot;。</strong> 司法鉴定机构、专家辅助人、内部技术负责人，三种角色的资质与产出形式不同，但都要回答同一个问题：这个结论是怎么得出来的（#178）。</li><li>核心命题三：<strong>手机取证的现实限制必须先说清楚。</strong> 设备可能处于锁屏、加密、或关键日志已被滚动覆盖的状态；鉴定意见必须写明&quot;在何种取证条件下得出&quot;，而不是假装条件理想。</li><li>核心命题四：<strong>&quot;未发现&quot;是一种结论，而且是最常被误用的一种。</strong> 它只能说明&quot;在该方法、该范围、该时点下没有观察到&quot;，不能说明&quot;不存在&quot;（#181）。</li><li>核心命题五：<strong>鉴定范围要在委托前写死。</strong> 事后扩大范围，意味着重新取证、重新计时、重新付费，而且新结论与旧结论的关系会变得难以解释。</li><li>一句话结论：<strong>把鉴定当成&quot;把已有事实变成可复核的陈述&quot;，而不是&quot;请专家替我下结论&quot;；委托书写得越具体，报告越能用。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>讨论的是</th><th>解决的问题</th></tr></thead><tbody><tr><td>#177 外部事件响应服务商的委托与授权边界</td><td>委托谁能看什么</td><td>权限</td></tr><tr><td>#178 调查记录的分层与被读风险</td><td>记录怎么写、给谁看</td><td>表述</td></tr><tr><td>#179 报案决策与材料提交边界</td><td>向谁提交什么</td><td>提交</td></tr><tr><td>#194 多家受害者的联合处置与信息共享</td><td>横向共享的边界</td><td>协作</td></tr><tr><td><strong>本篇 #195</strong></td><td><strong>技术事实如何变成可被第三方复核的陈述</strong></td><td><strong>证据能力</strong></td></tr></tbody></table>
+<p>#177 到 #194 讨论的都是&quot;事实在组织之间怎么流动&quot;，本篇讨论的是<strong>事实在&quot;事实&quot;与&quot;证据&quot;之间的那道门槛</strong>。这道门槛不是靠材料多、报告厚就能跨过去的。</p>
+<p>同时本篇与 #183（追偿路径与责任主张）直接相关：追偿成败很大程度取决于鉴定意见能否支撑因果链。</p>
+<hr>
+<h2>3. 三个角色，三种产出</h2>
+<table><thead><tr><th>角色</th><th>资质基础</th><th>能做什么</th><th>不能做什么</th><th>产出形式</th></tr></thead><tbody><tr><td>司法鉴定机构</td><td>司法行政机关登记</td><td>在登记范围内出具鉴定意见</td><td>超出登记范围的事项</td><td>鉴定意见书</td></tr><tr><td>专家辅助人</td><td>专业能力，经当事人聘请或法庭许可</td><td>就专门性问题提出意见、质证</td><td>代替鉴定机构出具鉴定意见</td><td>专家意见、出庭说明</td></tr><tr><td>内部技术负责人</td><td>对自有系统的了解</td><td>陈述事实、说明处置过程</td><td>以&quot;专家&quot;身份对第三方作结论</td><td>情况说明、事实陈述</td></tr></tbody></table>
+<p><strong>第一行与第三行之间最容易混淆。</strong> 内部团队写的情况说明，在证据体系里是&quot;当事人陈述&quot;性质，不是鉴定意见；把它当成鉴定意见使用，会在质证环节被直接击穿。</p>
+<p>选择哪一种，取决于你要解决的问题：<strong>要认定&quot;设备上有没有某类痕迹&quot;，通常需要鉴定；要说明&quot;我们做了什么处置&quot;，内部陈述即可；要解释&quot;这个痕迹意味着什么&quot;，往往需要专家辅助人。</strong></p>
+<hr>
+<h2>4. 委托前必须定的六件事</h2>
+<table><thead><tr><th>事项</th><th>要写到什么程度</th><th>不写清的后果</th></tr></thead><tbody><tr><td>鉴定事项</td><td>一句话一个命题，可判定真假</td><td>报告答非所问</td></tr><tr><td>检材范围</td><td>哪些设备、哪些数据、哪个时间窗</td><td>事后发现漏项，需重新委托</td></tr><tr><td>方法</td><td>允许或要求的方法类别</td><td>方法争议导致结论被质疑</td></tr><tr><td>时限</td><td>初稿、正式报告、可能的补充</td><td>与监管或诉讼节点错位（#184）</td></tr><tr><td>报告形式</td><td>是否需附原始数据、是否需出庭</td><td>出庭时无准备</td></tr><tr><td>费用与变更</td><td>何种情况算变更、如何计价</td><td>中途加价或停工</td></tr></tbody></table>
+<p><strong>第二行与第三行是专业机构最希望委托方写清、而委托方最常略过的两项。</strong> 写得越具体，机构越能在委托范围内给出确定结论；写得越模糊，报告就越倾向于写&quot;无法判断&quot;。</p>
+<hr>
+<h2>5. 检材的同一性与保管链</h2>
+<p>检材从离开设备到进入实验室，中间任何一次转手都可能成为质证点。保管链至少要记录七个要素：</p>
+<ol><li><strong>谁</strong>提取（姓名、机构、角色）。</li><li><strong>何时</strong>提取（UTC，注明原始时区）。</li><li><strong>何地</strong>提取（设备位置、网络环境）。</li><li><strong>如何</strong>提取（工具、版本、方式）。</li><li><strong>提取到什么</strong>（镜像、备份、导出文件；哈希值）。</li><li><strong>交给了谁</strong>（交接双方签字、时间）。</li><li><strong>存放在哪</strong>（介质、编号、访问控制）。</li></ol>
+<p><strong>第五项的哈希值是整条链的锚点。</strong> 没有哈希，就无法证明&quot;实验室里分析的这份&quot;与&quot;当时提取的那份&quot;是同一份。</p>
+<p>一个常见的错误是：内部团队先&quot;整理&quot;了一遍数据，再交给鉴定机构。整理过程没有记录，就等于把保管链切断在起点。</p>
+<hr>
+<h2>6. iOS 设备取证的现实条件</h2>
+<p>鉴定的结论强度，很大程度上取决于取证时设备处于什么状态。委托时应当如实说明：</p>
+<table><thead><tr><th>设备状态</th><th>可取到的</th><th>取不到的</th></tr></thead><tbody><tr><td>未锁屏、已解锁</td><td>文件系统、部分应用数据、系统日志</td><td>已滚动的历史日志</td></tr><tr><td>锁屏但已配对</td><td>备份、部分共享数据</td><td>受保护的用户数据</td></tr><tr><td>关机或重启后未解锁</td><td>极有限</td><td>绝大部分用户数据（受加密保护）</td></tr><tr><td>已恢复出厂 / 已抹除</td><td>通常无</td><td>历史内容</td></tr></tbody></table>
+<p><strong>表格第三行是最容易被误解的一行。</strong> &quot;关机保存&quot;在很多人看来是保护证据，实际上可能让后续取证失去大部分可及数据。<strong>事件期的正确做法是先固定、再决定是否重启或抹除</strong>，而不是凭直觉操作（#188 云备份篇的&quot;先固定、后解读&quot;同样适用）。</p>
+<p>以上都是取证<strong>条件</strong>的说明，不涉及任何绕过设备保护的方法。任何要求&quot;绕过&quot;的委托，都应当由法律顾问判断其合法性后再决定。</p>
+<hr>
+<h2>7. 结论的四种强度</h2>
+<table><thead><tr><th>强度</th><th>表述</th><th>适用条件</th></tr></thead><tbody><tr><td>确定</td><td>&quot;可以认定……&quot;</td><td>有直接、可重复验证的证据</td></tr><tr><td>高度可能</td><td>&quot;高度可能……&quot;</td><td>多项独立证据指向一致，但缺直接证据</td></tr><tr><td>可能</td><td>&quot;不能排除……&quot;</td><td>存在证据，但存在合理解释</td></tr><tr><td>无法判断</td><td>&quot;依据现有检材无法判断&quot;</td><td>检材不足或方法不适用</td></tr></tbody></table>
+<p><strong>第四行不是失败。</strong> 一份诚实写&quot;无法判断&quot;的报告，在质证时比一份勉强写&quot;确定&quot;的报告更有价值——后者只要被指出一处方法论缺陷，整份报告的可信度都会被拉低。</p>
+<p>写报告的人要抵抗一种压力：委托方希望结论&quot;有用&quot;。但<strong>有用的结论是能被复核的结论，不是听起来确定的结论。</strong></p>
+<hr>
+<h2>8. 报告里最常被挑战的五个点</h2>
+<ol><li><strong>方法有没有被验证过。</strong> 工具版本、参数、已知样本的测试结果。</li><li><strong>结论与检材是否一一对应。</strong> 报告里的每个判断，能不能指回具体的文件或记录。</li><li><strong>有没有考虑替代解释。</strong> 只列支持结论的证据，会被问&quot;那另一种解释呢&quot;（#178 的反面假设）。</li><li><strong>时间戳是否统一。</strong> 不同来源的时间没有换算到同一口径，是常见硬伤（#192）。</li><li><strong>&quot;未发现&quot;的范围是否写明。</strong> 是&quot;没找&quot;还是&quot;找了但没有&quot;，差别巨大。</li></ol>
+<p>这五点的共同内核是：<strong>可复核性。</strong> 一份报告的每一句话，都应当能让另一个有资质的人按同样步骤走一遍。</p>
+<hr>
+<h2>9. 什么时候不需要鉴定</h2>
+<p>鉴定成本高、周期长，并非所有事件都需要。以下情况可以先不做：</p>
+<ul><li>事实本身没有争议，争议在于处置是否及时（这是流程问题，不是技术问题）。</li><li>结论只需要支撑内部决策，不涉及对外主张或法律程序。</li><li>检材已经无法满足鉴定条件（设备已重置、日志已覆盖），此时鉴定的产出很可能是&quot;无法判断&quot;。</li></ul>
+<p><strong>判断标准只有一条：这份鉴定意见将被谁、在什么场合、用来支持什么命题。</strong> 回答不了这三个问题，就先不委托。</p>
+<p>一个折中做法是：先做一次<strong>范围明确的初步技术评估</strong>（由内部或受委托方完成），根据结果再决定是否需要正式鉴定。初步评估的产出是&quot;是否需要鉴定&quot;，不是&quot;结论&quot;。</p>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>先写命题</strong>：一句话一个可判定的问题。</li><li><strong>固定检材</strong>：提取即哈希，转手即签字。</li><li><strong>保留原始件</strong>：分析在副本上做，原件只存不动。</li><li><strong>记录条件</strong>：设备状态、工具版本、时间口径，全部写入。</li><li><strong>要求替代解释</strong>：每条结论都要有反面假设的讨论。</li><li><strong>允许&quot;无法判断&quot;</strong>：不逼迫机构给确定结论。</li><li><strong>事前约定出庭</strong>：报告可能被质证，提前安排。</li><li><strong>报告与底稿分离</strong>：报告对外，底稿自留，两者不混。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;机构越大结论越硬。&quot;</strong> 可采性取决于方法与对应关系，不取决于机构规模。</li><li><strong>&quot;报告越厚越有用。&quot;</strong> 厚度不等于可复核性。</li><li><strong>&quot;鉴定能证明是谁干的。&quot;</strong> 技术鉴定通常只能证明&quot;发生了什么&quot;。</li><li><strong>&quot;内部报告可以当鉴定用。&quot;</strong> 性质不同，质证时会被区分。</li><li><strong>&quot;设备关机保存最安全。&quot;</strong> 可能让后续取证失去大部分可及数据。</li><li><strong>&quot;先整理再送检更方便。&quot;</strong> 无记录的整理会切断保管链。</li><li><strong>&quot;未发现就是没有。&quot;</strong> 只代表在该方法、范围、时点下没有观察到。</li><li><strong>&quot;鉴定做完就结束了。&quot;</strong> 报告还要面对复核、补充与出庭。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#177</strong> 衔接：受委托方接触检材的权限，由授权文件界定。</li><li>与 <strong>#178</strong> 对接：报告属于&quot;意见轨&quot;，事实轨另建。</li><li>与 <strong>#179</strong> 对接：向办案单位提交的材料分级，鉴定意见属 M1/M2 层级。</li><li>与 <strong>#183</strong> 对接：追偿中的因果链，需要鉴定意见支撑&quot;若无其过失&quot;的论证。</li><li>与 <strong>#188</strong> 对接：云备份作为检材时，其固定顺序与解读边界同源。</li><li>与 <strong>#192</strong> 对接：运营商材料作为鉴定依据时，时间口径必须统一。</li><li>与 <strong>#194</strong> 对接：联合材料进入鉴定，来源等级要可追溯。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>司法鉴定与专家意见的价值，可以用一句话概括：<strong>它把&quot;我知道&quot;变成了&quot;你可以自己验证&quot;。</strong></p>
+<ol><li><strong>命题先于检材</strong>：先想清楚要证明什么。</li><li><strong>方法先于结论</strong>：没有可复核的方法，结论无法使用。</li><li><strong>诚实先于确定</strong>：写&quot;无法判断&quot;，比写错&quot;确定&quot;更有价值。</li></ol>
+<p>做到这三条，报告才可能在复核、质证与追偿的场合真正发挥作用。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论鉴定意见的证据能力与委托边界，不涉及任何设备解锁、加密绕过或数据提取的具体技术手段。</li><li>鉴定资质、程序与可采性标准因法域而异，<strong>以专业意见为准</strong>；本篇不构成法律意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://csrc.nist.gov/" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（取证流程与保管链）</li><li><a href="https://www.iso.org/" rel="nofollow noopener" target="_blank">ISO/IEC 27037：数字证据识别、收集、获取与保存</a>（数字证据处理的国际指南）</li><li><a href="https://www.swgde.org/" rel="nofollow noopener" target="_blank">SWGDE：数字取证最佳实践</a>（工具验证与方法记录）</li><li>本系列 #177、#178、#179、#183、#188、#192、#194（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a194.html">← 第 194 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a196.html">第 196 篇 →</a></nav></article>
+</main></body></html>

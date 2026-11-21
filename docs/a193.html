@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下的应用分发渠道：下架不是召回 | iOS 安全研究文章库</title>
+<meta name="description" content="**四个渠道四种撤回语义**——App Store 下架只挡新装、TestFlight 到期失效、企业分发可吊销描述文件但**只能移除受管应用**、第三方商店差异极大；**已安装用户不因下架而消失**，真正的召回只有强制更新与服务端降级；五类动作按生效速度排序 远程配置→接口降级→灰度→强更→下架吊销，前两项">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a193.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下的应用分发渠道：下架不是召回">
+<meta property="og:description" content="**四个渠道四种撤回语义**——App Store 下架只挡新装、TestFlight 到期失效、企业分发可吊销描述文件但**只能移除受管应用**、第三方商店差异极大；**已安装用户不因下架而消失**，真正的召回只有强制更新与服务端降级；五类动作按生效速度排序 远程配置→接口降级→灰度→强更→下架吊销，前两项">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a193.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 193 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下的应用分发渠道：下架不是召回，撤回一个版本比发布它难得多</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>应用分发渠道是事件处置里唯一一个&quot;你能一键影响全部用户&quot;的位置，也是唯一一个&quot;你以为能一键影响、实际只能影响一部分&quot;的位置。</li><li>核心命题一：<strong>四个渠道，四种撤回语义。</strong> App Store、TestFlight、企业分发、第三方商店，&quot;下架&quot;这个词在四者身上分别意味着停止新安装、停止测试分发、吊销描述文件、或什么都不保证。</li><li>核心命题二：<strong>下架不等于召回。</strong> 已经装上的应用不会因为商店里没了而消失；真正能回收已安装版本的只有两件事——<strong>强制更新</strong>与<strong>服务端降级</strong>。</li><li>核心命题三：<strong>事件期最快的动作，往往不需要审核。</strong> 远程配置开关、服务端接口降级、功能灰度关闭，这些由你自己控制，分钟级生效；把希望寄托在&quot;加急审核&quot;上，是把处置节奏交给别人。</li><li>核心命题四：<strong>开发者账号本身是渠道级资产。</strong> 账号被侵入意味着攻击者可以以你的名义发版——这比应用里某个功能出问题严重一个数量级。</li><li>核心命题五：<strong>对用户的告知，要区分&quot;已更新&quot;&quot;未更新&quot;&quot;无法更新&quot;三类人。</strong> 一句话覆盖全部用户，等于对最需要帮助的那部分人什么都没说（#181）。</li><li>一句话结论：<strong>把分发渠道当成&quot;发布管道&quot;而不是&quot;发布按钮&quot;，事件期的撤回才有层次；先配置、再服务端、再发版、最后才是下架。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<table><thead><tr><th>篇目</th><th>讨论的是</th><th>控制点</th></tr></thead><tbody><tr><td>#153 网页第三方脚本依赖被篡改的投递放大</td><td>Web 侧投递面</td><td>网页</td></tr><tr><td>#190 第三方 SDK 与组件供应链的上下游处置</td><td>包内的组件</td><td>代码</td></tr><tr><td>#185 事件后的平台与供应商更换决策</td><td>是否更换渠道或平台</td><td>长期</td></tr><tr><td><strong>本篇 #193</strong></td><td><strong>版本如何离开你的手、又如何被收回来</strong></td><td><strong>分发</strong></td></tr></tbody></table>
+<p>#190 讲&quot;包里有什么&quot;，本篇讲&quot;包怎么到用户手里、怎么让它不再生效&quot;。两者之间是发布流程，而发布流程恰恰是事件期最容易被压缩、也最容易出错的环节。</p>
+<p>同时本篇与 #167（供应商与外包合同中的安全条款）有一个交集：如果你的应用由外包团队发布，那么<strong>发布权限在谁手里</strong>，就是事件当天第一个要回答的问题。</p>
+<hr>
+<h2>3. 四种渠道的撤回语义</h2>
+<table><thead><tr><th>渠道</th><th>&quot;下架&quot;意味着</th><th>已安装用户</th><th>能否强制更新</th><th>典型延迟</th></tr></thead><tbody><tr><td>App Store</td><td>新用户无法安装，已购用户可能仍可重下</td><td>完全不受影响</td><td>不能，只能提示</td><td>审核数小时到数天</td></tr><tr><td>TestFlight</td><td>测试分发停止，构建过期</td><td>测试用户到期后失效</td><td>不能</td><td>分钟到小时</td></tr><tr><td>企业分发 / MDM</td><td>可吊销描述文件、可远程移除受管应用</td><td>受管设备可移除，自装设备不可</td><td>受管设备可</td><td>分钟到小时</td></tr><tr><td>第三方商店 / 侧载</td><td>依商店政策，差异极大</td><td>通常不受影响</td><td>通常不能</td><td>不确定</td></tr></tbody></table>
+<p><strong>第二列与第三列之间的落差，是所有分发渠道事件里最普遍的误解。</strong> 用户看到&quot;已下架&quot;会以为问题解决了；而攻击者看到的是&quot;存量用户还在&quot;。</p>
+<p>因此事件期的动作顺序必须是：<strong>先切断能力，再撤回版本</strong>。切断能力的含义是——让已安装的旧版本在服务端拿不到它需要的东西。</p>
+<hr>
+<h2>4. 五类可控动作，按生效速度排序</h2>
+<table><thead><tr><th>动作</th><th>生效时间</th><th>可逆性</th><th>主要限制</th></tr></thead><tbody><tr><td>远程配置开关</td><td>分钟级</td><td>高</td><td>依赖配置系统本身未被污染</td></tr><tr><td>服务端接口降级 / 关停</td><td>分钟级</td><td>高</td><td>可能影响正常功能</td></tr><tr><td>灰度发版</td><td>小时级（自有渠道）</td><td>中</td><td>审核与放量策略</td></tr><tr><td>强制更新提示</td><td>随发版</td><td>中</td><td>用户可忽略</td></tr><tr><td>下架 / 吊销证书</td><td>小时到天</td><td>低</td><td>已安装用户不受影响</td></tr></tbody></table>
+<p><strong>前两行是事件期的第一选择</strong>，原因不是它们&quot;更好&quot;，而是它们<strong>可逆且在你自己手里</strong>（#184 的可逆优先）。在它们生效之后，你才有时间去做需要审核与协调的后面三行。</p>
+<p>一个常见的失败模式是：团队在事发当天全力准备发版，等审核等了三天，而这三天里服务端接口一直正常响应——旧版本的功能一直在工作。</p>
+<hr>
+<h2>5. 开发者账号被侵入的信号</h2>
+<p>渠道级事件与内容级事件的处理完全不同。以下信号出现任意两条，就应当按&quot;账号可能已被接管&quot;处理：</p>
+<ol><li>应用详情页出现非你发起的描述或截图变更。</li><li>出现你不认识的构建版本、测试组或外部测试员。</li><li>证书、描述文件、密钥列表出现新增项（#191）。</li><li>团队成员或角色权限被修改。</li><li>收到&quot;应用被拒&quot;通知，但你方无人提交过版本。</li><li>财务与结算信息被改动。</li></ol>
+<p>处置顺序：<strong>冻结发布权限 → 复核证书与密钥 → 撤销可疑构建 → 恢复访问（走官方找回流程）→ 全面审计近期变更 → 再恢复发布</strong>。顺序不能颠倒：在访问未恢复时先发版，等于把控制权交还给对方。</p>
+<hr>
+<h2>6. 企业分发与 MDM 的两个独特问题</h2>
+<p>企业分发与托管分发看起来&quot;可控性最强&quot;，实际有两个尖锐的限制：</p>
+<ul><li><strong>受管与自装的边界。</strong> MDM 可以移除它管理的应用，但<strong>不能移除用户自己安装的应用</strong>。如果你的用户群里同时存在这两类设备，那么&quot;远程移除&quot;只覆盖一部分人。</li><li><strong>描述文件是权限，不是安装包。</strong> 吊销描述文件会让新安装失败，也可能让已安装应用的某些能力失效；但它不等于卸载。要写清楚&quot;吊销后会发生什么&quot;，而不是笼统地说&quot;已处置&quot;。</li></ul>
+<p>还有一个经常被忽略的细节：<strong>MDM 的设备清单本身是资产。</strong> 它告诉你哪些设备还活着、哪些已经很久没上报；事件期这份清单的价值不亚于任何日志。</p>
+<hr>
+<h2>7. 对用户告知的三段式</h2>
+<table><thead><tr><th>用户状态</th><th>你应当说</th><th>不应当说</th></tr></thead><tbody><tr><td>已更新到修复版本</td><td>&quot;已修复，版本号为…&quot;</td><td>&quot;所有用户都已安全&quot;</td></tr><tr><td>尚未更新</td><td>&quot;请更新到…；在更新前请注意…&quot;</td><td>&quot;不下架就没风险&quot;</td></tr><tr><td>无法更新（旧系统、企业设备、地区限制）</td><td>&quot;你的设备可能无法获得修复，建议…&quot;</td><td>沉默</td></tr></tbody></table>
+<p><strong>第三行是实际工作中最常被省略的一段。</strong> 而恰恰是这部分用户，最需要具体的替代建议（关闭某功能、改用其他方式、限制使用场景）。省略它，等于把最脆弱的人群排除在告知之外。</p>
+<hr>
+<h2>8. 六步处置顺序</h2>
+<ol><li><strong>确认发布权限在谁手里</strong>：账号、证书、密钥、审批人。</li><li><strong>切断能力</strong>：远程配置与服务端降级，分钟级生效。</li><li><strong>固定证据</strong>：商店页面、版本列表、证书列表、审核记录，全部截图留存（#178）。</li><li><strong>按渠道执行撤回</strong>：企业分发先吊销，商店渠道同步申请下架或加急审核。</li><li><strong>发版并分批放量</strong>：先小比例，观察关键路径（#190）。</li><li><strong>分段告知用户</strong>，并为&quot;无法更新&quot;的用户给出替代建议。</li></ol>
+<hr>
+<h2>9. 加固清单（八条）</h2>
+<ol><li><strong>发布账号双人复核</strong>：任何上架、下架、证书操作都需第二人确认。</li><li><strong>证书与密钥集中登记</strong>：谁持有、用在哪、何时轮换（#191）。</li><li><strong>配置系统独立于发版</strong>：确保在无法发版时仍能关功能。</li><li><strong>准备&quot;服务端降级&quot;预案</strong>：写清楚关哪个接口、影响哪些功能。</li><li><strong>维护受管设备清单</strong>：知道哪些设备可以被远程影响。</li><li><strong>建立审核加急通道</strong>：事前了解平台的事件申诉流程，而不是当天现查。</li><li><strong>对用户分层告知</strong>：已更新 / 未更新 / 无法更新。</li><li><strong>每次发布留产物清单</strong>：包含的组件与版本随包归档（#190）。</li></ol>
+<hr>
+<h2>10. 八条常见误解</h2>
+<ol><li><strong>&quot;下架了问题就解决了。&quot;</strong> 存量安装不受影响。</li><li><strong>&quot;用户会自动更新。&quot;</strong> 自动更新有延迟，且可能被关闭。</li><li><strong>&quot;MDM 能卸载一切。&quot;</strong> 只能卸载它管理的应用。</li><li><strong>&quot;证书吊销等于卸载。&quot;</strong> 不等于，且副作用需要说明。</li><li><strong>&quot;审核加急一定能加急。&quot;</strong> 平台没有义务按你的时间表处理。</li><li><strong>&quot;发版是最快的止血手段。&quot;</strong> 配置与服务端降级通常更快。</li><li><strong>&quot;账号被盗是小事。&quot;</strong> 它意味着别人能以你的名义发版。</li><li><strong>&quot;告知一次就够了。&quot;</strong> 版本在变，用户状态也在变，告知要跟着变。</li></ol>
+<hr>
+<h2>11. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#153</strong> 对照：网页投递面与商店投递面，撤回语义完全不同。</li><li>与 <strong>#167</strong> 衔接：外包发布时，发布权限的归属由合同决定。</li><li>与 <strong>#181</strong> 对接：对用户的陈述必须带范围与方法。</li><li>与 <strong>#184</strong> 对接：撤回动作的可逆性排序，决定处置顺序。</li><li>与 <strong>#190</strong> 对接：发版前的组件清单，是&quot;这个版本能不能发&quot;的前置条件。</li><li>与 <strong>#191</strong> 对接：证书与描述文件的吊销，是渠道级处置的一部分。</li></ul>
+<hr>
+<h2>12. 总结</h2>
+<p>分发渠道的事件处置，考验的不是技术，而是<strong>顺序感</strong>：</p>
+<ol><li><strong>先关能力，再收版本。</strong></li><li><strong>先管账号，再谈内容。</strong></li><li><strong>先分层告知，再统一口径。</strong></li></ol>
+<p>把这三条写进发布流程，下一次事件里你就不必在&quot;等审核&quot;的三天里眼看旧版本继续工作。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论应用分发渠道在事件期的撤回语义与处置顺序，不涉及任何绕过商店审核、伪造签名或分发未授权应用的方法。</li><li>各渠道的具体政策以平台官方条款为准；对用户的披露口径受法律与合同约束，<strong>以专业意见为准</strong>，本篇不构成法律意见。</li><li>文中不提供任何漏洞利用代码或检测规避方法。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://developer.apple.com/app-store/review/guidelines/" rel="nofollow noopener" target="_blank">Apple：App Store 审核指南</a>（下架与撤回的一般规则）</li><li><a href="https://developer.apple.com/programs/enterprise/" rel="nofollow noopener" target="_blank">Apple：企业级应用分发</a>（受管分发与描述文件）</li><li><a href="https://csrc.nist.gov/" rel="nofollow noopener" target="_blank">NIST SP 800-128：安全配置管理指南</a>（配置变更与回退的通用实践）</li><li>本系列 #153、#167、#181、#184、#190、#191（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a192.html">← 第 192 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a194.html">第 194 篇 →</a></nav></article>
+</main></body></html>

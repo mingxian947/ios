@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coruna 与 DarkSword 场景下向平台方请求记录：可行边界 | iOS 安全研究文章库</title>
+<meta name="description" content="平台方不是你的取证机构（隐私政策／所在法域／不针对个体出结论三重约束）；四类记录按可得性分层 **账户访问事实=中、购买订阅=高、设备使用=低到中、设备内容=极低**，多数失败是想要第四类；三种失败原因 政策／法律／工程；请求五要素 **时间窗／标识符／三个封闭命题／用途／依据**（「请告诉我发生了什么」必被">
+<link rel="canonical" href="https://mingxian947.github.io/ios/a187.html">
+<meta property="og:title" content="Coruna 与 DarkSword 场景下向平台方请求记录：可行边界">
+<meta property="og:description" content="平台方不是你的取证机构（隐私政策／所在法域／不针对个体出结论三重约束）；四类记录按可得性分层 **账户访问事实=中、购买订阅=高、设备使用=低到中、设备内容=极低**，多数失败是想要第四类；三种失败原因 政策／法律／工程；请求五要素 **时间窗／标识符／三个封闭命题／用途／依据**（「请告诉我发生了什么」必被">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mingxian947.github.io/ios/a187.html">
+<style>:root{--fg:#1b1f24;--mut:#57606a;--line:#d8dee4;--bg:#fff;--code:#f6f8fa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+h1{font-size:1.8rem;line-height:1.35;margin:.2em 0 .6em}h2{font-size:1.35rem;margin-top:2em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+h3{font-size:1.1rem;margin-top:1.6em}a{color:#0b62ce;text-decoration:none}a:hover{text-decoration:underline}
+p{margin:.9em 0}hr{border:0;border-top:1px solid var(--line);margin:2rem 0}
+blockquote{margin:1.2em 0;padding:.6em 1em;border-left:4px solid #0b62ce;background:#f0f5fb;color:#24292f}
+code{background:var(--code);padding:.15em .4em;border-radius:4px;font-family:ui-monospace,Consolas,monospace;font-size:.9em}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.85rem;line-height:1.55}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.93rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.5em .7em;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}tr:nth-child(2n) td{background:#fbfcfd}
+.meta{color:var(--mut);font-size:.9rem;margin:0 0 1.5rem}.nav{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);font-size:.92rem}
+ul,ol{padding-left:1.6em}.contact{margin-top:2rem;padding:1rem;border:1px solid var(--line);border-radius:8px;background:var(--code)}</style></head>
+<body><main>
+<p class="meta"><a href="index.html">iOS 安全研究文章库</a> · 第 187 篇 · 防御性安全研究，不含可利用代码</p>
+<article><h1>Coruna 与 DarkSword 场景下向平台方请求记录：你能要到的比你以为的少，但比你现在的做法多</h1>
+<h2>1. 执行摘要</h2>
+<ul><li>设备出问题之后，很多人的第一反应是&quot;让苹果查一下&quot;。这个反应方向没错，但<strong>&quot;请求&quot;和&quot;得到&quot;之间隔着一整套法律、隐私与工程约束</strong>，不了解这些约束的请求，通常连回执都拿不到。</li><li>核心命题一：<strong>平台方不是你的取证机构。</strong> 它受自己的隐私政策、所在法域法律、以及&quot;不针对个体提供账户内容&quot;的公开立场三重约束；它能为全体用户做的事，远多于它能为你一个人做的事。</li><li>核心命题二：<strong>请求的形态决定结果。</strong> 同一件事，描述成&quot;我怀疑我被黑了，帮我看看&quot;，和描述成&quot;某账号在以下时间窗内出现了非我发起的登录与会话，请确认账户侧是否存在异常访问记录&quot;，得到的响应完全不同。</li><li>核心命题三：<strong>你要的往往不是&quot;记录&quot;，而是&quot;一个可以写进报告的结论&quot;。</strong> 而结论可以由三类材料共同支撑：你自己的设备侧证据、平台给出的账户侧事实、以及第三方鉴定意见（#195）。</li><li>核心命题四：<strong>在等待期间你不能空手。</strong> 平台回执周期以周计，而设备侧可保全的内容以小时计衰减——先把本地能留的留下来，再谈向谁请求。</li><li>核心命题五：<strong>&quot;要不到&quot;不等于&quot;没有问题&quot;。</strong> 请求被拒、超期、或答复&quot;未发现异常&quot;，只能证明&quot;在该口径下没有可披露的异常&quot;，不能证明设备干净。</li><li>一句话结论：<strong>把对平台方的期待，从&quot;替我查明真相&quot;下调到&quot;为我确认某几个具体事实&quot;，请求才可能被受理。</strong></li></ul>
+<hr>
+<h2>2. 这一篇补哪一格</h2>
+<p>本系列已经讨论过平台方的两个位置，但都不是这个方向：</p>
+<table><thead><tr><th>篇目</th><th>讨论的是</th><th>方向</th></tr></thead><tbody><tr><td>#149 平台方主动通知与被告知窗口</td><td>平台先知道、再决定是否告知你</td><td>平台 → 你</td></tr><tr><td>#157 高价值目标名单治理与分层保护</td><td>组织内部如何给目标分层</td><td>组织内部</td></tr><tr><td>本篇 #187</td><td>你先怀疑、再去向平台要某几个具体事实</td><td>你 → 平台</td></tr></tbody></table>
+<p>三者的差别不是措辞，而是<strong>举证责任的位置</strong>。#149 里你等的是别人给的信息；本篇里你必须先把&quot;要什么、为什么、凭什么&quot;写清楚，对方才有理由动。</p>
+<p>同时本篇与 #177（外部事件响应服务商的委托与授权边界）互补：#177 讲你委托的人能看什么，本篇讲<strong>你不委托也绕不开的那个主体</strong>能给你什么。</p>
+<hr>
+<h2>3. 你实际能向平台方要到的四类东西</h2>
+<p>先做一次现实的分类。下面的&quot;可得性&quot;不是承诺，而是按公开披露政策与实践归纳出的量级判断；具体以服务条款、隐私政策与所在法域法律为准。</p>
+<table><thead><tr><th>类别</th><th>典型内容</th><th>可得性</th><th>通常以什么形式回来</th></tr></thead><tbody><tr><td>账户侧访问事实</td><td>登录记录、会话建立、设备列表、账户变更</td><td>中</td><td>你自己的账户页面可自查；异常时可能收到通知</td></tr><tr><td>购买与订阅事实</td><td>订单、退款、订阅变更</td><td>高</td><td>自助可查</td></tr><tr><td>设备侧使用数据</td><td>诊断日志、崩溃报告、部分系统日志</td><td>低到中</td><td>需你主动上传诊断；平台不按请求逐一提供</td></tr><tr><td>设备内容</td><td>照片、消息、备份内容</td><td>极低</td><td>一般只在法律程序下，且受加密设计限制</td></tr></tbody></table>
+<p><strong>第一列是事实，第四列是内容。</strong> 绝大多数&quot;帮我查查&quot;的请求失败，是因为请求者要的是第四列，而平台在架构上就不持有（端到端加密、仅设备密钥可解），或在政策上不针对个人开放。</p>
+<p>把请求限定在第一、二列，成功率会显著上升；而这两列，恰恰是判断&quot;是否存在账户侧入侵&quot;的主要依据——因为定向投放的<strong>持久化往往不在设备上，而在账户上</strong>（#159 服务端与账号侧处置闭环）。</p>
+<hr>
+<h2>4. 为什么大多数请求得不到像样的回应</h2>
+<p>三类原因，按出现频率排序：</p>
+<ol><li><strong>政策原因：不针对个体提供&quot;是否被攻击&quot;的判断。</strong> 平台方普遍不做&quot;你这台设备是否被定向攻击&quot;的个体结论。原因不是不愿意帮忙，而是这类结论一旦做出，就要承担错误判断的责任，而平台掌握的输入并不足以支撑它。</li><li><strong>法律原因：跨法域的数据提供受严格限制。</strong> 账户数据通常存放在特定区域，向个人披露他国存储的数据，往往需要正式的法律程序（#170 跨境取证与司法协助的时间尺度）。</li><li><strong>工程原因：很多数据根本不长这样。</strong> &quot;谁在什么时候动了我的手机&quot;这类问题，在系统上并没有一张可查询的表。系统日志以设备为边界滚动覆盖，服务端只保留为运营所需的最小集合。</li></ol>
+<p>理解这三条，请求就不会写成&quot;请告诉我发生了什么&quot;，而会写成&quot;请确认这三件事中的哪一件成立&quot;。</p>
+<hr>
+<h2>5. 请求的正确形态：五个必须写清的要素</h2>
+<table><thead><tr><th>要素</th><th>写错的样子</th><th>写对的样子</th></tr></thead><tbody><tr><td>时间窗</td><td>&quot;最近一段时间&quot;</td><td>具体到小时，且给出你的时区与来源（#146 时间与顺序基准）</td></tr><tr><td>对象</td><td>&quot;我的账号&quot;</td><td>账号标识、关联设备标识、关联邮箱/电话的完整清单</td></tr><tr><td>事实</td><td>&quot;我是不是被黑了&quot;</td><td>三个可判定命题：是否新增设备、是否新增会话、是否发生凭据或恢复方式变更</td></tr><tr><td>目的</td><td>未说明</td><td>明确用途（内部处置、监管报送 #169、诉讼准备 #183），并说明披露范围</td></tr><tr><td>依据</td><td>无</td><td>引用的服务条款条款、适用法律、或已有案号</td></tr></tbody></table>
+<p><strong>&quot;三个可判定命题&quot;这一条最容易被忽略，也最有效。</strong> 把开放问题拆成可判定的封闭问题，对方才能给出&quot;是/否/无法确认&quot;，而&quot;无法确认&quot;本身就是一个可以写进报告的事实。</p>
+<hr>
+<h2>6. 等待期间：你必须在设备侧自己留下的东西</h2>
+<p>平台回执以周计，设备侧证据以小时计衰减。等待期间至少完成以下五项：</p>
+<ol><li><strong>停止写入。</strong> 若怀疑设备被控，先降低活动（不是关机——关机可能触发某些保护性清空或丢失内存证据）。具体操作以专业意见为准（#177）。</li><li><strong>导出可导出的。</strong> 系统设置里的隐私报告、屏幕使用时间、已安装描述文件与 VPN 配置、已登录设备列表——这些都能自助导出。</li><li><strong>截图并记录时间。</strong> 任何异常界面、异常通知、异常耗电曲线，截图时保留状态栏时间（#178 调查记录的分层与被读风险）。</li><li><strong>保留网络侧线索。</strong> 路由器的连接日志、运营商账单中的异常流量时段，往往比设备侧更完整（#192 电信运营商侧的可用信号与协作）。</li><li><strong>建立一份事实表。</strong> 只写&quot;何时、何地、发生了什么、由谁观察&quot;，不写推论——推论进另一栏（#178 的&quot;事实轨 / 意见轨&quot;）。</li></ol>
+<p>这五项不需要等任何人批准，且它们构成后续所有请求的附件。</p>
+<hr>
+<h2>7. 平台回执的三种形态，以及它们各自能证明什么</h2>
+<table><thead><tr><th>回执形态</th><th>字面含义</th><th>能证明</th><th>不能证明</th></tr></thead><tbody><tr><td>&quot;未发现异常访问&quot;</td><td>在该口径的时间窗与字段内没有命中</td><td>账户侧无已知异常</td><td>设备未被本地化攻击</td></tr><tr><td>&quot;记录已按保留期清理&quot;</td><td>数据不存在了</td><td>无</td><td>任何方向性结论</td></tr><tr><td>&quot;请通过法律程序获取&quot;</td><td>政策/法律限制</td><td>你已履行请求义务</td><td>事实本身</td></tr></tbody></table>
+<p><strong>第二与第三种回执最容易被误读。</strong> 它们是&quot;程序性答复&quot;，不是&quot;事实性答复&quot;；把它们写成&quot;平台确认没有问题&quot;，会在后续任何一次复核中变成硬伤（#181 审计与认证中的历史事件陈述）。</p>
+<p>正确写法示例：<strong>&quot;截至 X 日，平台方就 A、B 两项命题答复为'未发现异常'；C 项未获答复。该答复范围为账户侧记录，不覆盖设备本地状态。&quot;</strong></p>
+<hr>
+<h2>8. 要不到的时候：四条替代路径</h2>
+<ol><li><strong>自助复核。</strong> 重新检查设备列表、恢复联系方式、受信任号码、家庭共享成员——账户侧的入侵往往留下可自查的痕迹（#159）。</li><li><strong>法律程序。</strong> 涉及重大损失或诉讼时，由律师评估是否启动正式程序（#170、#183）。这条路径慢，但它是唯一能突破政策限制的路径。</li><li><strong>监管与通报渠道。</strong> 在受监管行业，报送本身会产生一条独立的时间线（#169），这条时间线不依赖平台配合。</li><li><strong>独立鉴定。</strong> 由具备资质的机构就设备侧状态出具意见（#195），把&quot;平台不答复&quot;转化为&quot;已通过独立途径评估&quot;。</li></ol>
+<p>四条路径不是互斥的，通常需要并行推进；但它们对应的时间尺度差别很大，排期时必须分开（#184 多法域并行处置的冲突管理）。</p>
+<hr>
+<h2>9. 五类常见错误请求</h2>
+<table><thead><tr><th>错误形态</th><th>为什么无效</th><th>改法</th></tr></thead><tbody><tr><td>群发式求助（同时发给多个渠道）</td><td>触发反滥用流程，进入模板回复</td><td>单一渠道、单一诉求</td></tr><tr><td>情绪化陈述（&quot;我全家都被监控了&quot;）</td><td>无法转成可判定命题</td><td>拆成三条封闭问题</td></tr><tr><td>附带大量未整理的截图与录屏</td><td>超出处理能力，被视为噪音</td><td>一份事实表 + 五个关键截图</td></tr><tr><td>要求&quot;完整日志&quot;</td><td>不存在这样的数据集合</td><td>要求&quot;特定字段在特定时间窗的取值&quot;</td></tr><tr><td>要求平台&quot;确认是否被国家级攻击&quot;</td><td>平台不做此类归因（#174 跨案对比方法与统计口径的另一面）</td><td>改为请求确认账户侧异常事实</td></tr></tbody></table>
+<hr>
+<h2>10. 加固清单（八条）</h2>
+<ol><li><strong>先自查再请求。</strong> 设备列表、恢复方式、受信任号码三项，自己两分钟就能看。</li><li><strong>把请求写成三条封闭命题</strong>，每条给出时间窗、标识符与判据。</li><li><strong>附一份事实表</strong>，事实与推论分栏，标注观察者与时间来源。</li><li><strong>明确说明用途与披露范围</strong>，这是对方评估可否响应的前提。</li><li><strong>设定自己的回执期限</strong>（例如两周），到期未回复即转入替代路径。</li><li><strong>保留全部往来回执原文</strong>，包括自动回复——它们构成&quot;已履行请求&quot;的证据。</li><li><strong>不要替平台下结论。</strong> 回执写什么，报告里就写什么。</li><li><strong>把&quot;要不到&quot;写进报告的局限段</strong>，而不是隐去。</li></ol>
+<hr>
+<h2>11. 八条常见误解</h2>
+<ol><li><strong>&quot;平台能远程看我的手机。&quot;</strong> 在正常架构下，平台不持有设备内容；这正是端到端加密的意义，也意味着它无法替你&quot;看手机&quot;。</li><li><strong>&quot;报了就能查。&quot;</strong> 请求受理与事实查明是两件事；多数请求止步于程序性答复。</li><li><strong>&quot;回执说没问题就是没问题。&quot;</strong> 回执只覆盖其口径内的字段与时间窗。</li><li><strong>&quot;记录会一直保留。&quot;</strong> 保留期普遍很短，这是趋势而非例外。</li><li><strong>&quot;多个渠道同时问会更快。&quot;</strong> 通常更慢，且更容易进入模板流程。</li><li><strong>&quot;带越多材料越好。&quot;</strong> 未整理的附件降低可信度；结构化的一页纸更有效。</li><li><strong>&quot;请律师是翻脸。&quot;</strong> 法律程序是把&quot;政策问题&quot;转成&quot;义务问题&quot;的唯一稳定路径。</li><li><strong>&quot;要不到就没法写报告。&quot;</strong> 报告的结论可以是&quot;在该口径下无法确认&quot;，这本身有信息量。</li></ol>
+<hr>
+<h2>12. 与既有各篇的接口</h2>
+<ul><li>与 <strong>#149</strong> 互为反向：那篇讲平台何时会主动找你，本篇讲你如何主动找平台。</li><li>与 <strong>#159</strong> 互补：账户侧的自查清单，是请求内容的来源。</li><li>与 <strong>#170 / #183</strong> 对接：要不到时的正式路径与追偿路径。</li><li>与 <strong>#178</strong> 对接：请求与回执都要按&quot;事实轨/意见轨&quot;归档。</li><li>与 <strong>#195</strong> 对接：独立鉴定是把程序性答复转成技术意见的手段。</li><li>与 <strong>#186</strong> 对接：请求过程中不要让内部出现&quot;抓内鬼&quot;叙事。</li></ul>
+<hr>
+<h2>13. 总结</h2>
+<p>向平台方请求记录，是一件<strong>形式上很软、实质上很硬</strong>的事：软的是一句话就能发出，硬的是必须同时满足法律、政策、工程三重约束才能得到有效回应。</p>
+<p>真正可操作的原则只有三条：</p>
+<ol><li><strong>要事实，不要结论。</strong> 结论由你自己基于设备侧、账户侧与鉴定意见拼出来。</li><li><strong>要特定的，不要全部的。</strong> &quot;全部日志&quot;不存在；&quot;某字段在某时间窗的取值&quot;存在。</li><li><strong>要不到也要留痕。</strong> 请求与回执本身，是&quot;已尽力核实&quot;的证据。</li></ol>
+<p>把这三条做扎实，即便平台一个字也不回，你的报告依然立得住。</p>
+<hr>
+<h2>说明</h2>
+<ul><li>本篇讨论的是<strong>受害者方向平台方发起信息请求</strong>的一般形态与方法，不涉及任何规避平台政策、伪造请求或滥用渠道的做法。</li><li>各类记录的保留期、披露范围与响应流程，随服务条款、隐私政策与所在法域法律变化，<strong>以官方公开文件与专业法律意见为准</strong>；本篇不构成法律意见。</li><li>文中不提供任何针对具体系统的探测、提取或绕过手段。</li></ul>
+<hr>
+<h2>参考来源</h2>
+<ul><li><a href="https://www.apple.com/privacy/" rel="nofollow noopener" target="_blank">Apple：隐私政策与透明度报告</a>（数据披露与执法请求的公开说明）</li><li><a href="https://www.apple.com/legal/transparency/" rel="nofollow noopener" target="_blank">Apple：法律程序指南</a>（向政府与个人提供数据的边界）</li><li><a href="https://csrc.nist.gov/publications/detail/sp/800-86/final" rel="nofollow noopener" target="_blank">NIST SP 800-86：取证技术集成指南</a>（证据保全与时间线方法）</li><li>本系列 #146、#149、#159、#169、#170、#174、#177、#178、#181、#183、#184、#186、#195（见 README 索引）</li></ul>
+<div class="contact">咨询 iOS 系统请咨询 Telegram：@DZHT333333</div><nav class="nav"><a href="a186.html">← 第 186 篇</a> ｜ <a href="index.html">目录</a> ｜ <a href="a188.html">第 188 篇 →</a></nav></article>
+</main></body></html>
